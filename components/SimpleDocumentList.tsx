@@ -77,7 +77,7 @@ export default function SimpleDocumentList({ refreshTrigger }: SimpleDocumentLis
   };
 
   // Download extracted data as CSV
-  const downloadAsCSV = (document: Document, rows: ExtractedRow[]) => {
+  const downloadAsCSV = (doc: Document, rows: ExtractedRow[]) => {
     if (rows.length === 0) return;
 
     // Get all unique keys from the data
@@ -104,7 +104,7 @@ export default function SimpleDocumentList({ refreshTrigger }: SimpleDocumentLis
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${document.file_name.replace(/\.[^/.]+$/, '')}_extracted.csv`;
+    a.download = `${doc.file_name.replace(/\.[^/.]+$/, '')}_extracted.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -112,13 +112,13 @@ export default function SimpleDocumentList({ refreshTrigger }: SimpleDocumentLis
   };
 
   // Download extracted data as JSON
-  const downloadAsJSON = (document: Document, rows: ExtractedRow[]) => {
+  const downloadAsJSON = (doc: Document, rows: ExtractedRow[]) => {
     const jsonContent = JSON.stringify(rows, null, 2);
     const blob = new Blob([jsonContent], { type: 'application/json' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${document.file_name.replace(/\.[^/.]+$/, '')}_extracted.json`;
+    a.download = `${doc.file_name.replace(/\.[^/.]+$/, '')}_extracted.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -126,9 +126,9 @@ export default function SimpleDocumentList({ refreshTrigger }: SimpleDocumentLis
   };
 
   // Handle document selection
-  const handleDocumentSelect = (document: Document) => {
-    setSelectedDocument(document);
-    fetchExtractedRows(document.id);
+  const handleDocumentSelect = (doc: Document) => {
+    setSelectedDocument(doc);
+    fetchExtractedRows(doc.id);
   };
 
   // Refresh documents when trigger changes
