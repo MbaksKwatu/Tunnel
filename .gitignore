@@ -19,6 +19,13 @@ backend/*.cover
 backend/.hypothesis/
 backend/.pytest_cache/
 
+# Python virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
 # Production builds
 .next/
 out/
