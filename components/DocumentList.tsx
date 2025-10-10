@@ -20,7 +20,9 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
     try {
       setLoading(true);
       setError(null);
+      console.log('Loading documents for user:', userId);
       const docs = await getDocuments(userId);
+      console.log('Documents loaded:', docs);
       setDocuments(docs);
     } catch (err: any) {
       console.error('Error loading documents:', err);
@@ -32,6 +34,17 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
 
   useEffect(() => {
     loadDocuments();
+    
+    // Add timeout to prevent infinite loading
+    const timeout = setTimeout(() => {
+      if (loading) {
+        console.warn('Document loading timeout - setting error');
+        setError('Loading timeout - please check your connection');
+        setLoading(false);
+      }
+    }, 10000); // 10 second timeout
+    
+    return () => clearTimeout(timeout);
   }, [userId, refreshTrigger]);
 
   const handleDelete = async (documentId: string, fileName: string) => {
