@@ -25,3 +25,4 @@ DROP POLICY IF EXISTS "Demo users can delete extracted rows" ON extracted_rows;
 SELECT schemaname, tablename, rowsecurity 
 FROM pg_tables 
 WHERE tablename IN ('documents', 'extracted_rows');
+

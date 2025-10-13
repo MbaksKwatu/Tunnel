@@ -21,3 +21,4 @@ test_*.json
 # Exclude cache and build artifacts
 .next/cache/
 node_modules/.cache/
+

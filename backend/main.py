@@ -39,14 +39,21 @@ app.add_middleware(
 )
 
 # Initialize Supabase client
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://caajasgudqsqlztjqedc.supabase.co")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv(
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNhYWphc2d1ZHFzcWx6dGpxZWRjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MDAxOTIyNywiZXhwIjoyMDc1NTk1MjI3fQ.86MoLq3YsR9bPUSoJTZkAxrFHI2XWfGRMV8y68xpVX8"
+)
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
     logger.error("Missing Supabase credentials in environment variables")
     raise ValueError("Missing Supabase credentials")
 
+# Create Supabase client with service_role key (bypasses RLS)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+logger.info("✅ [DEBUG] Supabase client initialized with SERVICE_ROLE key")
+logger.info(f"✅ [DEBUG] Supabase URL: {SUPABASE_URL}")
+logger.info(f"✅ [DEBUG] Service Role Key (first 20 chars): {SUPABASE_SERVICE_ROLE_KEY[:20]}...")
 
 
 # Pydantic models
@@ -66,6 +73,9 @@ class ParseResponse(BaseModel):
 async def store_extracted_rows(document_id: str, rows: List[dict]) -> int:
     """Store extracted rows in Supabase"""
     try:
+        logger.info(f"📥 [DEBUG] Storing {len(rows)} rows for document {document_id}")
+        logger.info(f"📥 [DEBUG] Using Supabase service_role key for insert (bypasses RLS)")
+        
         # Prepare data for insertion
         rows_to_insert = []
         for idx, row_data in enumerate(rows):
@@ -81,15 +91,20 @@ async def store_extracted_rows(document_id: str, rows: List[dict]) -> int:
         
         for i in range(0, len(rows_to_insert), batch_size):
             batch = rows_to_insert[i:i + batch_size]
+            logger.info(f"📤 [DEBUG] Inserting batch {i//batch_size + 1} into extracted_rows table...")
             result = supabase.table('extracted_rows').insert(batch).execute()
+            logger.info(f"✅ [DEBUG] Batch insert response: {result}")
             total_inserted += len(batch)
-            logger.info(f"Inserted batch {i//batch_size + 1}: {len(batch)} rows")
+            logger.info(f"✅ Inserted batch {i//batch_size + 1}: {len(batch)} rows")
         
-        logger.info(f"Total rows inserted: {total_inserted}")
+        logger.info(f"✅ [DEBUG] Total rows inserted successfully: {total_inserted}")
         return total_inserted
         
     except Exception as e:
-        logger.error(f"Error storing extracted rows: {e}")
+        logger.error(f"❌ [DEBUG] Error storing extracted rows: {e}")
+        logger.error(f"❌ [DEBUG] Error type: {type(e).__name__}")
+        import traceback
+        logger.error(f"❌ [DEBUG] Traceback: {traceback.format_exc()}")
         raise
 
 
@@ -107,17 +122,27 @@ async def update_document_status(
         if error_message is not None:
             update_data['error_message'] = error_message
         
-        supabase.table('documents').update(update_data).eq('id', document_id).execute()
-        logger.info(f"Updated document {document_id} status to {status}")
+        logger.info(f"📝 [DEBUG] Updating document {document_id} with data: {update_data}")
+        logger.info(f"📝 [DEBUG] Using service_role key for update (bypasses RLS)")
+        result = supabase.table('documents').update(update_data).eq('id', document_id).execute()
+        logger.info(f"✅ [DEBUG] Update response: {result}")
+        logger.info(f"✅ Updated document {document_id} status to {status}")
         
     except Exception as e:
-        logger.error(f"Error updating document status: {e}")
+        logger.error(f"❌ [DEBUG] Error updating document status: {e}")
+        logger.error(f"❌ [DEBUG] Error type: {type(e).__name__}")
+        import traceback
+        logger.error(f"❌ [DEBUG] Traceback: {traceback.format_exc()}")
         raise
 
 
 async def process_document(document_id: str, file_url: str, file_type: str):
     """Process a document: parse and store extracted data"""
     try:
+        logger.info(f"🚀 [DEBUG] ===== PROCESSING DOCUMENT =====")
+        logger.info(f"🚀 [DEBUG] Document ID: {document_id}")
+        logger.info(f"🚀 [DEBUG] File URL: {file_url}")
+        logger.info(f"🚀 [DEBUG] File Type: {file_type}")
         logger.info(f"Processing document {document_id} ({file_type})")
         
         # Update status to processing
@@ -199,6 +224,10 @@ async def parse_document(request: ParseRequest, background_tasks: BackgroundTask
     The parsing is done asynchronously to handle large files.
     """
     try:
+        logger.info(f"📨 [DEBUG] ===== PARSE REQUEST RECEIVED =====")
+        logger.info(f"📨 [DEBUG] Document ID: {request.document_id}")
+        logger.info(f"📨 [DEBUG] File URL: {request.file_url}")
+        logger.info(f"📨 [DEBUG] File Type: {request.file_type}")
         logger.info(f"Received parse request for document {request.document_id}")
         
         # Validate file type
