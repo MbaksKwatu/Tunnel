@@ -1,5 +1,5 @@
 """
-Notes Management System for FundIQ MVP
+Notes Management System for Parity MVP
 Stores notes in JSON files (document-level and per-anomaly)
 """
 import json

@@ -5,8 +5,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "FundIQ - Financial Intelligence Platform",
-  description: "Document upload and data extraction for investment teams",
+  title: "Parity - AI Investment Intelligence",
+  description: "AI-native financial analysis and due diligence platform",
 };
 
 export default function RootLayout({
@@ -16,7 +16,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.className} bg-[#0D0F12] text-white antialiased`}>
+      <body className={`${inter.className} bg-base-950 text-gray-200 antialiased`}>
         {children}
       </body>
     </html>

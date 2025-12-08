@@ -1,4 +1,4 @@
--- FundIQ MVP Database Schema
+-- Parity MVP Database Schema
 -- Run this in your Supabase SQL Editor
 
 -- Enable UUID extension

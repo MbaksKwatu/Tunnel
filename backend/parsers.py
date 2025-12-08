@@ -2,6 +2,7 @@
 File parsers for PDF, CSV, and XLSX files
 """
 import pdfplumber
+from pdfminer.pdfdocument import PDFPasswordIncorrect
 import pandas as pd
 from typing import List, Dict, Any, Optional
 import logging
@@ -9,6 +10,11 @@ import io
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+class PasswordRequiredError(Exception):
+    """Raised when a file requires a password to open"""
+    pass
 
 
 class FileParser:
@@ -21,68 +27,86 @@ class FileParser:
             response = await client.get(url)
             response.raise_for_status()
             return response.content
+            
+    @staticmethod
+    async def parse(file_url: str, password: Optional[str] = None, file_content: Optional[bytes] = None) -> List[Dict[str, Any]]:
+        """Parse file and return rows"""
+        raise NotImplementedError
 
 
 class PDFParser(FileParser):
     """Parser for PDF files using pdfplumber"""
     
     @staticmethod
-    async def parse(file_url: str) -> List[Dict[str, Any]]:
+    async def parse(file_url: str, password: Optional[str] = None, file_content: Optional[bytes] = None) -> List[Dict[str, Any]]:
         """
         Extract tables and text from PDF
         Returns a list of dictionaries representing rows
         """
-        logger.info(f"Parsing PDF from {file_url}")
+        logger.info(f"Parsing PDF from {file_url if file_url else 'bytes'}")
         
-        # Download the file
-        file_content = await FileParser.download_file(file_url)
+        # Download if content not provided
+        if not file_content and file_url:
+            file_content = await FileParser.download_file(file_url)
+        elif not file_content:
+            raise ValueError("Either file_url or file_content must be provided")
         
         all_rows = []
         
-        # Open PDF with pdfplumber
-        with pdfplumber.open(io.BytesIO(file_content)) as pdf:
-            logger.info(f"PDF has {len(pdf.pages)} pages")
-            
-            for page_num, page in enumerate(pdf.pages, start=1):
-                # Try to extract tables first
-                tables = page.extract_tables()
+        try:
+            # Open PDF with pdfplumber
+            with pdfplumber.open(io.BytesIO(file_content), password=password or "") as pdf:
+                logger.info(f"PDF has {len(pdf.pages)} pages")
                 
-                if tables:
-                    logger.info(f"Found {len(tables)} tables on page {page_num}")
-                    for table_num, table in enumerate(tables, start=1):
-                        # Convert table to list of dicts
-                        if len(table) > 1:
-                            headers = table[0]
-                            # Clean headers
-                            headers = [
-                                str(h).strip() if h is not None else f"Column_{i}"
-                                for i, h in enumerate(headers)
-                            ]
-                            
-                            # Process data rows
-                            for row_data in table[1:]:
-                                if row_data and any(cell for cell in row_data):
-                                    row_dict = {
+                for page_num, page in enumerate(pdf.pages, start=1):
+                    # Try to extract tables first
+                    tables = page.extract_tables()
+                    
+                    if tables:
+                        logger.info(f"Found {len(tables)} tables on page {page_num}")
+                        for table_num, table in enumerate(tables, start=1):
+                            # Convert table to list of dicts
+                            if len(table) > 1:
+                                headers = table[0]
+                                # Clean headers
+                                headers = [
+                                    str(h).strip() if h is not None else f"Column_{i}"
+                                    for i, h in enumerate(headers)
+                                ]
+                                
+                                # Process data rows
+                                for row_data in table[1:]:
+                                    if row_data and any(cell for cell in row_data):
+                                        row_dict = {
+                                            'page': page_num,
+                                            'table': table_num,
+                                        }
+                                        for i, cell in enumerate(row_data):
+                                            if i < len(headers):
+                                                row_dict[headers[i]] = str(cell).strip() if cell else ''
+                                        all_rows.append(row_dict)
+                    else:
+                        # If no tables found, extract text
+                        text = page.extract_text()
+                        if text:
+                            logger.info(f"No tables on page {page_num}, extracting text")
+                            lines = text.split('\n')
+                            for line_num, line in enumerate(lines, start=1):
+                                if line.strip():
+                                    all_rows.append({
                                         'page': page_num,
-                                        'table': table_num,
-                                    }
-                                    for i, cell in enumerate(row_data):
-                                        if i < len(headers):
-                                            row_dict[headers[i]] = str(cell).strip() if cell else ''
-                                    all_rows.append(row_dict)
-                else:
-                    # If no tables found, extract text
-                    text = page.extract_text()
-                    if text:
-                        logger.info(f"No tables on page {page_num}, extracting text")
-                        lines = text.split('\n')
-                        for line_num, line in enumerate(lines, start=1):
-                            if line.strip():
-                                all_rows.append({
-                                    'page': page_num,
-                                    'line': line_num,
-                                    'text': line.strip()
-                                })
+                                        'line': line_num,
+                                        'text': line.strip()
+                                    })
+                                    
+        except Exception as e:
+            # Check for password error by type name or message
+            if type(e).__name__ == 'PDFPasswordIncorrect' or "password" in str(e).lower():
+                logger.warning(f"PDF is encrypted and requires a password: {file_url}")
+                raise PasswordRequiredError("This PDF is password protected. Please provide the password.")
+            
+            logger.error(f"Error parsing PDF: {e}")
+            raise e
         
         logger.info(f"Extracted {len(all_rows)} rows from PDF")
         return all_rows
@@ -92,15 +116,18 @@ class CSVParser(FileParser):
     """Parser for CSV files using pandas"""
     
     @staticmethod
-    async def parse(file_url: str) -> List[Dict[str, Any]]:
+    async def parse(file_url: str, password: Optional[str] = None, file_content: Optional[bytes] = None) -> List[Dict[str, Any]]:
         """
         Parse CSV file
         Returns a list of dictionaries representing rows
         """
-        logger.info(f"Parsing CSV from {file_url}")
+        logger.info(f"Parsing CSV from {file_url if file_url else 'bytes'}")
         
-        # Download the file
-        file_content = await FileParser.download_file(file_url)
+        # Download if content not provided
+        if not file_content and file_url:
+            file_content = await FileParser.download_file(file_url)
+        elif not file_content:
+            raise ValueError("Either file_url or file_content must be provided")
         
         # Try different encodings
         encodings = ['utf-8', 'latin-1', 'iso-8859-1', 'cp1252']
@@ -111,7 +138,8 @@ class CSVParser(FileParser):
                 df = pd.read_csv(
                     io.BytesIO(file_content),
                     encoding=encoding,
-                    skip_blank_lines=True
+                    skip_blank_lines=True,
+                    on_bad_lines='skip'
                 )
                 logger.info(f"Successfully parsed CSV with encoding: {encoding}")
                 break
@@ -124,20 +152,30 @@ class CSVParser(FileParser):
         if df is None:
             raise ValueError("Failed to parse CSV with any supported encoding")
         
-        # Clean column names
+        # Clean column names (strip whitespace, lower case maybe? Keeping case sensitive but clean)
         df.columns = df.columns.str.strip()
         
+        # Auto-detect date columns
+        for col in df.columns:
+            if 'date' in str(col).lower() or 'time' in str(col).lower():
+                try:
+                    df[col] = pd.to_datetime(df[col], errors='ignore')
+                except:
+                    pass
+
         # Convert to list of dicts
         # Replace NaN with None
         rows = df.where(pd.notnull(df), None).to_dict('records')
         
-        # Convert all values to strings for consistency
+        # Convert all values to strings for consistency, handling dates
         cleaned_rows = []
         for row in rows:
             cleaned_row = {}
             for key, value in row.items():
                 if value is None:
                     cleaned_row[key] = ''
+                elif isinstance(value, (pd.Timestamp, pd.DatetimeIndex)):
+                    cleaned_row[key] = value.strftime('%Y-%m-%d %H:%M:%S') if hasattr(value, 'strftime') else str(value)
                 else:
                     cleaned_row[key] = str(value).strip()
             cleaned_rows.append(cleaned_row)
@@ -150,25 +188,27 @@ class ExcelParser(FileParser):
     """Parser for Excel files using pandas"""
     
     @staticmethod
-    async def parse(file_url: str, sheet_name: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def parse(file_url: str, password: Optional[str] = None, file_content: Optional[bytes] = None) -> List[Dict[str, Any]]:
         """
         Parse Excel file
         Returns a list of dictionaries representing rows
         If sheet_name is None, uses the first sheet
         """
-        logger.info(f"Parsing Excel from {file_url}")
+        logger.info(f"Parsing Excel from {file_url if file_url else 'bytes'}")
         
-        # Download the file
-        file_content = await FileParser.download_file(file_url)
+        # Download if content not provided
+        if not file_content and file_url:
+            file_content = await FileParser.download_file(file_url)
+        elif not file_content:
+            raise ValueError("Either file_url or file_content must be provided")
         
         # Read Excel file
         try:
             # If sheet_name not specified, read first sheet
             excel_file = pd.ExcelFile(io.BytesIO(file_content))
             
-            if sheet_name is None:
-                sheet_name = excel_file.sheet_names[0]
-                logger.info(f"Using first sheet: {sheet_name}")
+            sheet_name = excel_file.sheet_names[0]
+            logger.info(f"Using first sheet: {sheet_name}")
             
             df = pd.read_excel(
                 io.BytesIO(file_content),

@@ -19,27 +19,31 @@ interface NavItem {
 
 const navigation: NavItem[] = [
   { name: 'Connect Data', href: '/connect-data', icon: FolderOpen },
-  { name: 'Companion', href: '/companion', icon: Bot },
   { name: 'Reports', href: '/reports', icon: BarChart3 },
-  { name: 'Rules & Settings', href: '/rules', icon: Settings },
+  { name: 'Actions', href: '/actions', icon: Bot },
+  { name: 'Settings', href: '/rules', icon: Settings },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <div className="fixed left-0 top-0 h-full w-64 bg-[#0D0F12] border-r border-gray-800 flex flex-col z-50">
+    <div className="fixed left-0 top-0 h-full w-64 bg-base-900 border-r border-gray-800 flex flex-col z-50">
       {/* Logo Section */}
       <div className="p-6 border-b border-gray-800">
         <div className="flex items-center gap-3 mb-2">
-          <div className="bg-gradient-to-br from-cyan-400 to-green-400 p-2 rounded-lg">
-            <Brain className="h-6 w-6 text-[#0D0F12]" />
+          <div className="bg-gradient-to-br from-accent-cyan to-accent-indigo p-2 rounded-lg">
+            <Brain className="h-6 w-6 text-base-950" />
           </div>
-          <h1 className="text-xl font-bold text-white">FundIQ</h1>
+          <h1 className="text-xl font-bold text-white">Parity</h1>
         </div>
         <p className="text-xs text-gray-400">
-          Make better investments
+          AI-Native Investment Intelligence
         </p>
+        <div className="mt-2 inline-flex items-center px-2 py-1 rounded border border-accent-indigo/30 bg-accent-indigo/10">
+            <div className="w-1.5 h-1.5 rounded-full bg-accent-indigo animate-pulse mr-2"></div>
+            <span className="text-[10px] font-bold text-accent-indigo uppercase tracking-wider">Demo Mode</span>
+        </div>
       </div>
 
       {/* Navigation */}
@@ -59,25 +63,19 @@ export default function Sidebar() {
                 className={`
                   flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200
                   ${isActive 
-                    ? 'bg-gradient-to-r from-cyan-400/20 to-green-400/20 border-l-2 border-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.3)]' 
-                    : 'hover:bg-[#23272E]'
+                    ? 'bg-base-900 border-l-2 border-accent-cyan text-accent-cyan shadow-glow-cyan' 
+                    : 'text-gray-400 hover:bg-base-900 hover:shadow-glow-indigo/50 hover:text-gray-200'
                   }
                 `}
               >
                 <Icon 
                   className={`h-5 w-5 transition-colors duration-200 ${
                     isActive 
-                      ? 'text-cyan-400' 
-                      : 'text-gray-400'
+                      ? 'text-accent-cyan' 
+                      : 'text-gray-400 group-hover:text-gray-200'
                   }`} 
                 />
-                <span 
-                  className={`font-medium transition-colors duration-200 ${
-                    isActive 
-                      ? 'text-white bg-gradient-to-r from-cyan-400 to-green-400 bg-clip-text text-transparent' 
-                      : 'text-gray-300'
-                  }`}
-                >
+                <span className="font-medium transition-colors duration-200">
                   {item.name}
                 </span>
               </motion.div>

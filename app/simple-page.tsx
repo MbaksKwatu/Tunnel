@@ -25,7 +25,7 @@ export default function SimplePage() {
               <FileText className="h-8 w-8 text-white" />
             </div>
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">FundIQ</h1>
+              <h1 className="text-3xl font-bold text-gray-900">Parity</h1>
               <p className="text-sm text-gray-600">Financial Intelligence Platform (Local Demo)</p>
             </div>
           </div>

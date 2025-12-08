@@ -9,6 +9,14 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        base: {
+          900: '#0f172a', // Dark Slate
+          950: '#020617', // Deep Midnight
+        },
+        accent: {
+          cyan: '#22d3ee', // Cyber Cyan
+          indigo: '#818cf8', // Cosmic Indigo
+        },
         primary: {
           50: '#f0f9ff',
           100: '#e0f2fe',
@@ -26,6 +34,11 @@ const config: Config = {
           card: '#1B1E23',
           cardHover: '#23272E',
         },
+      },
+      boxShadow: {
+        'inner-dark': 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.6)',
+        'glow-indigo': '0 0 20px rgba(129, 140, 248, 0.5)',
+        'glow-cyan': '0 0 20px rgba(34, 211, 238, 0.5)',
       },
       backgroundImage: {
         'gradient-cyan-green': 'linear-gradient(to right, #22d3ee, #4ade80)',

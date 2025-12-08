@@ -77,9 +77,33 @@ export default function EvaluateView({ document, rows, onGenerateReport }: Evalu
       const anomalyList = data.anomalies || [];
       setAnomalies(anomalyList);
       
-      // Compute insights
-      const computedInsights = computeInsights(rows, anomalyList);
-      setInsights(computedInsights);
+      // Fetch metrics from backend
+      const evalResponse = await fetch(`${API_BASE}/document/${document.id}/evaluate`);
+      if (evalResponse.ok) {
+          const evalData = await evalResponse.json();
+          const metrics = evalData.metrics || [];
+          
+          // Map backend metrics to insights structure
+          const revenueGrowth = metrics.find((m: any) => m.name === 'Revenue Growth %')?.value || 0;
+          const cashFlowStability = metrics.find((m: any) => m.name === 'Cash Flow Stability')?.value || 0;
+          const expenseEfficiency = metrics.find((m: any) => m.name === 'Expense Efficiency')?.value || 0;
+          
+          // Compute other stats client-side for now (or update backend later)
+          // We still use computeInsights for the charts/other stats but overwrite the core metrics
+          const computedInsights = computeInsights(rows, anomalyList);
+          
+          setInsights({
+              ...computedInsights,
+              revenueGrowth,
+              cashFlowStability,
+              expenseRatio: expenseEfficiency
+          });
+      } else {
+          // Fallback to client-side
+          const computedInsights = computeInsights(rows, anomalyList);
+          setInsights(computedInsights);
+      }
+
     } catch (err: any) {
       console.error('Error loading evaluate data:', err);
     } finally {
@@ -87,10 +111,38 @@ export default function EvaluateView({ document, rows, onGenerateReport }: Evalu
     }
   };
 
+  const handleGenerateReport = async () => {
+      try {
+          const API_BASE = process.env.NEXT_PUBLIC_PARSER_API_URL || 'http://localhost:8000';
+          // Open in new tab to download
+          window.open(`${API_BASE}/document/${document.id}/report`, '_blank');
+      } catch (e) {
+          console.error("Download failed", e);
+          alert("Failed to generate report");
+      }
+  };
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Loading insights...</div>
+      <div className="p-6 space-y-6 animate-pulse">
+        <div className="text-center space-y-2">
+          <div className="h-8 bg-gray-700 rounded w-1/4 mx-auto"></div>
+          <div className="h-4 bg-gray-700 rounded w-1/3 mx-auto"></div>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map(i => (
+            <div key={i} className="bg-[#1B1E23] border border-gray-700 rounded-xl p-6 h-32">
+              <div className="h-4 bg-gray-700 rounded w-1/2 mb-4"></div>
+              <div className="h-8 bg-gray-700 rounded w-3/4"></div>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-[#1B1E23] border border-gray-700 rounded-xl p-6 h-[300px]"></div>
+          <div className="bg-[#1B1E23] border border-gray-700 rounded-xl p-6 h-[300px]"></div>
+        </div>
       </div>
     );
   }
@@ -261,7 +313,7 @@ export default function EvaluateView({ document, rows, onGenerateReport }: Evalu
       {/* Export Button */}
       <div className="flex justify-center pt-4">
         <button
-          onClick={onGenerateReport}
+          onClick={handleGenerateReport}
           className="px-6 py-3 bg-gradient-to-r from-cyan-400 to-green-400 text-[#0D0F12] font-semibold rounded-lg hover:opacity-90 transition-opacity flex items-center space-x-2 shadow-md hover:shadow-lg"
         >
           <FileDown className="h-5 w-5" />

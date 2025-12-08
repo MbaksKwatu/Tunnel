@@ -67,7 +67,7 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
     try {
       setRerunLoading(true);
       const API_BASE = process.env.NEXT_PUBLIC_PARSER_API_URL || 'http://localhost:8000';
-      const response = await fetch(`${API_BASE}/api/report?doc_id=${document.id}`);
+      const response = await fetch(`${API_BASE}/document/${document.id}/report`);
       
       if (!response.ok) throw new Error('Failed to generate report');
       

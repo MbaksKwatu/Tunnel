@@ -16,20 +16,25 @@
       "static/chunks/main-app.js",
       "static/chunks/app/connect-data/page.js"
     ],
-    "/rules/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/rules/page.js"
-    ],
     "/reports/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/reports/page.js"
     ],
-    "/companion/page": [
+    "/actions/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/companion/page.js"
+      "static/chunks/app/actions/page.js"
+    ],
+    "/rules/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/rules/page.js"
+    ],
+    "/actions/evaluate/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/actions/evaluate/page.js"
     ]
   }
 }

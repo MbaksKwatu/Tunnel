@@ -2,7 +2,7 @@
 FundIQ Backend Parser API
 FastAPI server for parsing PDF, CSV, and XLSX files with anomaly detection
 """
-from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -14,15 +14,22 @@ import uuid
 import json
 import datetime
 from dotenv import load_dotenv
-from parsers import get_parser
+from parsers import get_parser, PasswordRequiredError
 
 # Import new modules
 from local_storage import get_storage, StorageInterface, SQLiteStorage
 from anomaly_engine import AnomalyDetector
+from unsupervised_engine import UnsupervisedAnomalyDetector
 from notes_manager import NotesManager
 from insight_generator import InsightGenerator
 from debug_logger import debug_logger
 from report_generator import ReportGenerator
+
+from evaluate_engine import Evaluator
+
+# Import Parity AI Routes
+import custom_report
+from routes import dashboard_mutation, llm_actions
 
 # Load environment variables
 load_dotenv()
@@ -36,19 +43,25 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastAPI
 app = FastAPI(
-    title="FundIQ Parser API",
+    title="Parity Parser API",
     description="Parse financial documents and extract structured data with anomaly detection",
     version="2.0.0"
 )
 
-# CORS middleware
+# CORS middleware - configure allowed origins from environment
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify your frontend URL
+    allow_origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS != ["*"] else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register Parity AI Routers
+app.include_router(custom_report.router)
+app.include_router(dashboard_mutation.router)
+app.include_router(llm_actions.router)
 
 # Initialize storage (Supabase or SQLite fallback)
 storage: StorageInterface = get_storage()
@@ -56,6 +69,7 @@ logger.info(f"✅ Storage initialized: {type(storage).__name__}")
 
 # Initialize anomaly detector
 anomaly_detector = AnomalyDetector()
+unsupervised_detector = UnsupervisedAnomalyDetector()
 
 # Initialize notes manager
 notes_manager = NotesManager()
@@ -66,11 +80,15 @@ insight_generator = InsightGenerator()
 # Initialize report generator
 report_generator = ReportGenerator()
 
+# Initialize evaluator
+evaluator = Evaluator()
+
 # Pydantic models
 class ParseRequest(BaseModel):
     document_id: str = Field(..., description="Document ID from database")
     file_url: str = Field(..., description="URL of the file to parse")
     file_type: str = Field(..., description="File type: pdf, csv, or xlsx")
+    password: Optional[str] = Field(None, description="Password for encrypted files")
 
 
 class ParseResponse(BaseModel):
@@ -91,7 +109,7 @@ class AnalyzeRequest(BaseModel):
 
 
 # Helper functions
-async def process_document(document_id: str, file_url: str, file_type: str):
+async def process_document(document_id: str, file_url: str, file_type: str, password: Optional[str] = None):
     """Process a document: parse, store data, detect anomalies, generate insights"""
     parse_start_time = time.time()
     
@@ -106,7 +124,7 @@ async def process_document(document_id: str, file_url: str, file_type: str):
         parser = get_parser(file_type)
         
         # Parse the file
-        rows = await parser.parse(file_url)
+        rows = await parser.parse(file_url, password=password)
         
         if not rows:
             logger.warning(f"No data extracted from document {document_id}")
@@ -206,7 +224,8 @@ async def health_check():
 @app.post("/parse")
 async def parse_document(
     request: Optional[ParseRequest] = None,
-    file: Optional[UploadFile] = File(None)
+    file: Optional[UploadFile] = File(None),
+    password: Optional[str] = Form(None)
 ):
     """
     Parse a document and extract structured data with anomaly detection
@@ -245,145 +264,14 @@ async def parse_document(
             storage.store_document(document_data)
             
             # Save file temporarily (or process directly)
-            # For now, process directly from memory
             parser = get_parser(file_type)
-            
-            # Create a temporary URL for the parser (parsers expect URL)
-            # For local mode, we'll pass file content directly
-            import io
-            import httpx
-            
-            # Parse directly from bytes
-            if file_type == 'csv':
-                import pandas as pd
-                
-                # Try automatic encoding detection first (optional, falls back if chardet not available)
-                encodings = []
-                try:
-                    import chardet
-                    detected = chardet.detect(file_content[:10000])  # Check first 10KB
-                    detected_encoding = detected.get('encoding', 'utf-8')
-                    confidence = detected.get('confidence', 0)
-                    
-                    logger.info(f"Detected encoding: {detected_encoding} (confidence: {confidence:.2f})")
-                    
-                    # If confidence is high, try detected encoding first
-                    if confidence > 0.7 and detected_encoding:
-                        encodings.append(detected_encoding)
-                except ImportError:
-                    logger.info("chardet not available, using fallback encodings")
-                except Exception as e:
-                    logger.warning(f"Encoding detection failed: {e}")
-                
-                # Add common encodings as fallbacks
-                encodings.extend([
-                    'utf-8', 'utf-8-sig',  # UTF-8 with/without BOM
-                    'latin-1', 'iso-8859-1', 'cp1252',  # Western European
-                    'utf-16', 'utf-16le', 'utf-16be',  # UTF-16 variants
-                    'cp850', 'cp437',  # DOS encodings
-                    'mbcs',  # Windows default multibyte encoding
-                ])
-                
-                # Remove duplicates while preserving order
-                seen = set()
-                encodings = [e for e in encodings if e and (e not in seen or seen.add(e))]
-                
-                df = None
-                encoding_used = None
-                last_error = None
-                
-                for encoding in encodings:
-                    try:
-                        # Reset BytesIO for each attempt
-                        file_io = io.BytesIO(file_content)
-                        df = pd.read_csv(
-                            file_io,
-                            encoding=encoding,
-                            skip_blank_lines=True,
-                            on_bad_lines='skip',  # Skip problematic lines instead of failing
-                            engine='python'  # More lenient parsing
-                        )
-                        encoding_used = encoding
-                        logger.info(f"✅ Successfully parsed CSV with encoding: {encoding}")
-                        break
-                    except UnicodeDecodeError as e:
-                        last_error = str(e)
-                        logger.debug(f"Encoding {encoding} failed: {e}")
-                        continue
-                    except Exception as e:
-                        last_error = str(e)
-                        logger.warning(f"Error parsing CSV with encoding {encoding}: {e}")
-                        continue
-                
-                if df is None:
-                    error_msg = f"Failed to parse CSV with any supported encoding. Last error: {last_error}"
-                    logger.error(error_msg)
-                    raise ValueError(error_msg)
-                
-                # Convert to dict and clean values
-                rows = []
-                for record in df.to_dict('records'):
-                    cleaned_row = {}
-                    for key, value in record.items():
-                        if pd.isna(value):
-                            cleaned_row[str(key)] = ''
-                        elif isinstance(value, (pd.Timestamp, type(pd.NaT))):
-                            cleaned_row[str(key)] = str(value)
-                        else:
-                            cleaned_row[str(key)] = str(value).strip() if value else ''
-                    rows.append(cleaned_row)
-                    
-            elif file_type == 'xlsx':
-                import pandas as pd
-                df = pd.read_excel(io.BytesIO(file_content), engine='openpyxl')
-                
-                # Convert to dict and handle datetime objects
-                rows = []
-                for record in df.to_dict('records'):
-                    cleaned_row = {}
-                    for key, value in record.items():
-                        if pd.isna(value):
-                            cleaned_row[str(key)] = ''
-                        elif isinstance(value, (pd.Timestamp, type(pd.NaT))):
-                            # Convert datetime to ISO format string
-                            cleaned_row[str(key)] = value.isoformat() if hasattr(value, 'isoformat') else str(value)
-                        elif isinstance(value, (datetime.datetime, datetime.date)):
-                            # Handle Python datetime objects
-                            cleaned_row[str(key)] = value.isoformat() if hasattr(value, 'isoformat') else str(value)
-                        else:
-                            cleaned_row[str(key)] = str(value).strip() if value else ''
-                    rows.append(cleaned_row)
-            elif file_type == 'pdf':
-                # For PDF, save to temp file and parse
-                import tempfile
-                import os
-                with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_type}') as tmp_file:
-                    tmp_file.write(file_content)
-                    tmp_path = tmp_file.name
-                
-                try:
-                    # Parse PDF from temp file
-                    import pdfplumber
-                    all_rows = []
-                    with pdfplumber.open(tmp_path) as pdf:
-                        for page_num, page in enumerate(pdf.pages, start=1):
-                            tables = page.extract_tables()
-                            if tables:
-                                for table_num, table in enumerate(tables, start=1):
-                                    if len(table) > 1:
-                                        headers = [str(h).strip() if h else f"Column_{i}" for i, h in enumerate(table[0])]
-                                        for row_data in table[1:]:
-                                            if row_data and any(cell for cell in row_data):
-                                                row_dict = {'page': page_num, 'table': table_num}
-                                                for i, cell in enumerate(row_data):
-                                                    if i < len(headers):
-                                                        row_dict[headers[i]] = str(cell).strip() if cell else ''
-                                                all_rows.append(row_dict)
-                    rows = all_rows
-                finally:
-                    os.unlink(tmp_path)
-            else:
-                rows = []
+            try:
+                rows = await parser.parse(file_url=None, file_content=file_content, password=password)
+            except PasswordRequiredError:
+                raise # Re-raise to be caught by outer block
+            except Exception as e:
+                logger.error(f"Parser error: {e}")
+                raise ValueError(f"Failed to parse file: {str(e)}")
             
             if not rows:
                 storage.update_document_status(document_id, 'completed', rows_count=0, error_message='No data found')
@@ -435,7 +323,8 @@ async def parse_document(
         rows_extracted, anomalies, insights = await process_document(
             request.document_id,
             request.file_url,
-            request.file_type
+            request.file_type,
+            request.password
         )
         
         return ParseResponse(
@@ -443,6 +332,15 @@ async def parse_document(
             rows_extracted=rows_extracted,
             anomalies_count=len(anomalies) if anomalies else 0,
             insights_summary=insights
+        )
+        
+    except PasswordRequiredError:
+        logger.warning(f"Password required for document {request.document_id if request else document_id}")
+        return ParseResponse(
+            success=False,
+            rows_extracted=0,
+            anomalies_count=0,
+            error="PASSWORD_REQUIRED"
         )
         
     except Exception as e:
@@ -648,6 +546,111 @@ async def get_anomalies_by_query(doc_id: str):
 async def rerun_anomaly_detection(request: AnalyzeRequest):
     """Alias endpoint: Re-run anomaly detection"""
     return await analyze_document(request)
+
+
+@app.post("/api/documents/{doc_id}/detect")
+async def detect_anomalies_endpoint(doc_id: str):
+    """
+    Run unsupervised anomaly detection (Isolation Forest / LOF) on a document.
+    """
+    try:
+        logger.info(f"Running unsupervised detection for document {doc_id}")
+        
+        # 1. Load parsed rows
+        rows_data = storage.get_rows(doc_id, limit=100000) # Get all rows
+        if not rows_data:
+            raise HTTPException(status_code=404, detail="Document not found or has no rows")
+            
+        rows = [row['raw_json'] for row in rows_data]
+        
+        # 2. Run detection
+        result = unsupervised_detector.detect(rows)
+        anomalies = result.get('anomalies', [])
+        
+        # 3. Store anomalies
+        # For MVP, we store in DB as usual, but also write to JSON file as requested
+        if anomalies:
+            storage.store_anomalies(doc_id, anomalies)
+            
+            # Write to JSON file
+            os.makedirs("anomalies", exist_ok=True)
+            file_path = f"anomalies/{doc_id}.json"
+            with open(file_path, 'w') as f:
+                json.dump(anomalies, f, indent=2)
+            logger.info(f"Saved anomalies to {file_path}")
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error in detection endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/document/{document_id}/evaluate")
+async def evaluate_document(document_id: str):
+    """Calculate financial metrics for a document"""
+    try:
+        # Get rows
+        rows_data = storage.get_rows(document_id, limit=100000)
+        if not rows_data:
+             return {"metrics": []}
+             
+        rows = [row['raw_json'] for row in rows_data]
+        return evaluator.evaluate(rows)
+    except Exception as e:
+        logger.error(f"Error evaluating document: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/document/{document_id}/report")
+async def generate_ic_report(document_id: str):
+    """Generate and download IC Report PDF"""
+    try:
+        # Fetch all data
+        doc = storage.get_document(document_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+            
+        rows_data = storage.get_rows(document_id, limit=100000)
+        rows = [row['raw_json'] for row in rows_data]
+        
+        anomalies = storage.get_anomalies(document_id)
+        notes = notes_manager.get_all_notes(document_id)
+        
+        # Get insights (or generate if missing)
+        insights = doc.get('insights_summary')
+        if not insights:
+            insights = insight_generator.generate_insights(anomalies)
+            
+        # Calculate metrics
+        metrics_result = evaluator.evaluate(rows)
+        metrics = metrics_result.get('metrics', [])
+        
+        # Generate Report
+        # Use original filename or fallback
+        doc_name = doc.get('file_name', f"doc_{document_id}")
+        filename = f"{doc_name}_IC_Report.pdf"
+        
+        filepath = report_generator.generate_report(
+            document_id,
+            doc_name,
+            insights,
+            anomalies,
+            notes,
+            metrics=metrics,
+            rows_sample=rows_data
+        )
+        
+        return FileResponse(
+            path=filepath,
+            filename=filename,
+            media_type='application/pdf'
+        )
+        
+    except Exception as e:
+        logger.error(f"Error generating report: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.get("/document/{document_id}/insights")

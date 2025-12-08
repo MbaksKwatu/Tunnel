@@ -18,7 +18,7 @@ import io
 
 # Initialize FastAPI
 app = FastAPI(
-    title="FundIQ Parser API",
+    title="Parity Parser API",
     description="Parse financial documents and extract structured data",
     version="1.0.0"
 )

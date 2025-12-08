@@ -1,5 +1,5 @@
 """
-Storage abstraction layer for FundIQ MVP
+Storage abstraction layer for Parity MVP
 Supports both Supabase and SQLite with automatic fallback
 """
 import sqlite3
@@ -112,6 +112,9 @@ class SQLiteStorage(StorageInterface):
                 anomaly_type TEXT NOT NULL,
                 severity TEXT NOT NULL,
                 description TEXT NOT NULL,
+                score REAL,
+                suggested_action TEXT,
+                metadata TEXT,
                 raw_json TEXT,
                 evidence TEXT,
                 detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -129,7 +132,38 @@ class SQLiteStorage(StorageInterface):
         
         conn.commit()
         conn.close()
+        
+        # Run migrations
+        self._migrate_anomalies_table()
+        
         return True
+
+    def _migrate_anomalies_table(self):
+        """Add new columns to anomalies table if they don't exist"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            # Check existing columns
+            cursor.execute("PRAGMA table_info(anomalies)")
+            columns = [info[1] for info in cursor.fetchall()]
+            
+            new_columns = {
+                'score': 'REAL',
+                'suggested_action': 'TEXT',
+                'metadata': 'TEXT'
+            }
+            
+            for col, dtype in new_columns.items():
+                if col not in columns:
+                    logger.info(f"Migrating anomalies table: adding {col}")
+                    cursor.execute(f"ALTER TABLE anomalies ADD COLUMN {col} {dtype}")
+            
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Migration failed: {e}")
+        finally:
+            conn.close()
     
     def store_document(self, document_data: Dict[str, Any]) -> str:
         """Store document and return document_id"""
@@ -293,6 +327,9 @@ class SQLiteStorage(StorageInterface):
                 anomaly.get('anomaly_type'),
                 anomaly.get('severity'),
                 anomaly.get('description'),
+                anomaly.get('score'),
+                anomaly.get('suggested_action'),
+                json.dumps(anomaly.get('metadata')) if anomaly.get('metadata') else None,
                 json.dumps(anomaly.get('raw_json')) if anomaly.get('raw_json') else None,
                 json.dumps(anomaly.get('evidence')) if anomaly.get('evidence') else None
             ))
@@ -300,9 +337,9 @@ class SQLiteStorage(StorageInterface):
         cursor.executemany("""
             INSERT INTO anomalies (
                 id, document_id, row_index, anomaly_type, severity,
-                description, raw_json, evidence
+                description, score, suggested_action, metadata, raw_json, evidence
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, anomalies_to_insert)
         
         conn.commit()
@@ -320,7 +357,7 @@ class SQLiteStorage(StorageInterface):
         
         cursor.execute("""
             SELECT id, document_id, row_index, anomaly_type, severity,
-                   description, raw_json, evidence, detected_at
+                   description, score, suggested_action, metadata, raw_json, evidence, detected_at
             FROM anomalies
             WHERE document_id = ?
             ORDER BY severity DESC, detected_at DESC
@@ -335,9 +372,12 @@ class SQLiteStorage(StorageInterface):
                 'anomaly_type': row[3],
                 'severity': row[4],
                 'description': row[5],
-                'raw_json': json.loads(row[6]) if row[6] else None,
-                'evidence': json.loads(row[7]) if row[7] else None,
-                'detected_at': row[8]
+                'score': row[6],
+                'suggested_action': row[7],
+                'metadata': json.loads(row[8]) if row[8] else None,
+                'raw_json': json.loads(row[9]) if row[9] else None,
+                'evidence': json.loads(row[10]) if row[10] else None,
+                'detected_at': row[11]
             }
             anomalies.append(anomaly)
         
@@ -434,18 +474,60 @@ class SupabaseStorage(StorageInterface):
     
     def store_anomalies(self, document_id: str, anomalies: List[Dict[str, Any]]) -> int:
         """Store anomalies for document"""
-        # Note: Supabase anomalies table would need to be created in schema
-        # For now, we'll store in SQLite even when using Supabase
-        # This can be enhanced later
-        logger.warning("Anomaly storage not yet implemented for Supabase, using SQLite fallback")
-        sqlite_storage = SQLiteStorage()
-        return sqlite_storage.store_anomalies(document_id, anomalies)
+        try:
+            # Prepare data for Supabase
+            anomalies_to_insert = []
+            for anomaly in anomalies:
+                anomalies_to_insert.append({
+                    'document_id': document_id,
+                    'row_index': anomaly.get('row_index'),
+                    'anomaly_type': anomaly.get('anomaly_type'),
+                    'severity': anomaly.get('severity'),
+                    'description': anomaly.get('description'),
+                    'score': anomaly.get('score'),
+                    'suggested_action': anomaly.get('suggested_action'),
+                    'metadata': anomaly.get('metadata'),  # Supabase handles JSON automatically if column is JSONB
+                    'raw_json': anomaly.get('raw_json'),
+                    'evidence': anomaly.get('evidence')
+                })
+            
+            # Batch insert
+            batch_size = 1000
+            total_inserted = 0
+            
+            for i in range(0, len(anomalies_to_insert), batch_size):
+                batch = anomalies_to_insert[i:i + batch_size]
+                self.supabase.table('anomalies').insert(batch).execute()
+                total_inserted += len(batch)
+            
+            # Update document anomalies_count
+            self.update_document_status(document_id, None, anomalies_count=len(anomalies))
+            
+            return total_inserted
+            
+        except Exception as e:
+            logger.error(f"Error storing anomalies in Supabase: {e}")
+            # Fallback to SQLite? Or raise? 
+            # If Supabase fails, we might want to know. But for hybrid, maybe fallback.
+            # Given the request asks to 'Add Supabase optional support', if it fails here, 
+            # it implies Supabase IS configured but failing.
+            # I'll log and re-raise to ensure we don't silently lose data if the intent was Supabase.
+            raise e
     
     def get_anomalies(self, document_id: str) -> List[Dict[str, Any]]:
         """Get all anomalies for document"""
-        # Note: Similar to store_anomalies, fallback to SQLite for now
-        sqlite_storage = SQLiteStorage()
-        return sqlite_storage.get_anomalies(document_id)
+        try:
+            result = (
+                self.supabase.table('anomalies')
+                .select('*')
+                .eq('document_id', document_id)
+                .order('severity', ascending=False)
+                .execute()
+            )
+            return result.data
+        except Exception as e:
+            logger.error(f"Error getting anomalies from Supabase: {e}")
+            raise e
     
     def delete_document(self, document_id: str):
         """Delete a document and all associated data"""

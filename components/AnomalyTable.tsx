@@ -10,6 +10,7 @@ interface Anomaly {
   anomaly_type: string;
   severity: 'high' | 'medium' | 'low';
   description: string;
+  suggested_action?: string;
   detected_at?: string;
 }
 
@@ -79,12 +80,18 @@ export default function AnomalyTable({ documentId, onRowClick }: AnomalyTablePro
       expense_integrity: 'Expense Integrity',
       cashflow_consistency: 'Cash Flow Consistency',
       payroll_pattern: 'Payroll Pattern',
-      declared_mismatch: 'Declared Mismatch'
+      declared_mismatch: 'Declared Mismatch',
+      unsupervised_outlier: 'Statistical Outlier'
     };
     return names[type] || type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
   };
 
-  const getSuggestedAction = (type: string, severity: string) => {
+  const getSuggestedAction = (anomaly: Anomaly) => {
+    if (anomaly.suggested_action) return anomaly.suggested_action;
+    
+    const type = anomaly.anomaly_type;
+    const severity = anomaly.severity;
+    
     const actions: Record<string, string> = {
       revenue_anomaly: severity === 'high' 
         ? 'Verify data entry and check for refunds or reversals'
@@ -150,7 +157,18 @@ export default function AnomalyTable({ documentId, onRowClick }: AnomalyTablePro
   if (loading) {
     return (
       <div className="p-4 bg-white rounded-lg shadow">
-        <div className="animate-pulse">Loading anomalies...</div>
+        <div className="animate-pulse space-y-4">
+          <div className="h-6 bg-gray-200 rounded w-1/4"></div>
+          <div className="flex gap-4">
+            <div className="h-8 bg-gray-200 rounded w-32"></div>
+            <div className="h-8 bg-gray-200 rounded w-32"></div>
+          </div>
+          <div className="space-y-2">
+            {[1, 2, 3, 4, 5].map(i => (
+              <div key={i} className="h-12 bg-gray-100 rounded w-full"></div>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
@@ -268,7 +286,7 @@ export default function AnomalyTable({ documentId, onRowClick }: AnomalyTablePro
                 </td>
                 <td className="p-2">{getAnomalyTypeName(anomaly.anomaly_type)}</td>
                 <td className="p-2">{anomaly.description}</td>
-                <td className="p-2 text-gray-600 text-xs">{getSuggestedAction(anomaly.anomaly_type, anomaly.severity)}</td>
+                <td className="p-2 text-gray-600 text-xs">{getSuggestedAction(anomaly)}</td>
                 <td className="p-2">{anomaly.row_index >= 0 ? `Row ${anomaly.row_index + 1}` : 'N/A'}</td>
                 <td className="p-2">
                   {anomaly.row_index >= 0 && onRowClick && (

@@ -56,7 +56,8 @@ class AnomalyDetector:
         all_anomalies.extend(mismatch_anomalies)
         
         # Rule 6: Unsupervised ML Detection
-        ml_anomalies = self.unsupervised_detector.detect_anomalies(rows)
+        ml_result = self.unsupervised_detector.detect(rows)
+        ml_anomalies = ml_result.get('anomalies', [])
         all_anomalies.extend(ml_anomalies)
         
         return all_anomalies
