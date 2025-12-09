@@ -58,9 +58,9 @@ class StorageInterface:
 
 
 class SQLiteStorage(StorageInterface):
-    """SQLite-based storage implementation"""
+    """SQLite-based storage implementation for Parity"""
     
-    def __init__(self, db_path: str = "fundiq_local.db"):
+    def __init__(self, db_path: str = "parity_local.db"):
         self.db_path = db_path
         self.init_db()
         logger.info(f"✅ SQLite storage initialized at {db_path}")
@@ -79,6 +79,7 @@ class SQLiteStorage(StorageInterface):
                 file_type TEXT NOT NULL,
                 file_url TEXT,
                 format_detected TEXT,
+                investee_name TEXT,
                 upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 status TEXT DEFAULT 'uploaded',
                 rows_count INTEGER DEFAULT 0,
@@ -122,19 +123,61 @@ class SQLiteStorage(StorageInterface):
             )
         """)
         
+        # Create dashboards table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS dashboards (
+                id TEXT PRIMARY KEY,
+                investee_name TEXT NOT NULL,
+                dashboard_name TEXT NOT NULL,
+                spec TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Create reports table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS reports (
+                id TEXT PRIMARY KEY,
+                investee_name TEXT NOT NULL,
+                report_name TEXT NOT NULL,
+                report_type TEXT DEFAULT 'ic_report',
+                dashboard_spec TEXT,
+                storage_path TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Create analysis_results table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS analysis_results (
+                id TEXT PRIMARY KEY,
+                document_id TEXT NOT NULL,
+                analysis_type TEXT NOT NULL,
+                results TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE
+            )
+        """)
+        
         # Create indexes
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_user_id ON documents(user_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_investee ON documents(investee_name)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_extracted_rows_document_id ON extracted_rows(document_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_anomalies_document_id ON anomalies(document_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_anomalies_type ON anomalies(anomaly_type)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_anomalies_severity ON anomalies(severity)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_dashboards_investee ON dashboards(investee_name)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_reports_investee ON reports(investee_name)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_analysis_document ON analysis_results(document_id)")
         
         conn.commit()
         conn.close()
         
         # Run migrations
         self._migrate_anomalies_table()
+        self._migrate_documents_table()
         
         return True
 
@@ -165,6 +208,25 @@ class SQLiteStorage(StorageInterface):
         finally:
             conn.close()
     
+    def _migrate_documents_table(self):
+        """Add investee_name column to documents table if it doesn't exist"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("PRAGMA table_info(documents)")
+            columns = [info[1] for info in cursor.fetchall()]
+            
+            if 'investee_name' not in columns:
+                logger.info("Migrating documents table: adding investee_name")
+                cursor.execute("ALTER TABLE documents ADD COLUMN investee_name TEXT")
+            
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Documents migration failed: {e}")
+        finally:
+            conn.close()
+    
     def store_document(self, document_data: Dict[str, Any]) -> str:
         """Store document and return document_id"""
         conn = sqlite3.connect(self.db_path)
@@ -176,10 +238,10 @@ class SQLiteStorage(StorageInterface):
         cursor.execute("""
             INSERT INTO documents (
                 id, user_id, file_name, file_type, file_url, 
-                format_detected, status, rows_count, anomalies_count, 
+                format_detected, investee_name, status, rows_count, anomalies_count, 
                 insights_summary, error_message
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             document_id,
             document_data.get('user_id'),
@@ -187,6 +249,7 @@ class SQLiteStorage(StorageInterface):
             document_data.get('file_type'),
             document_data.get('file_url'),
             document_data.get('format_detected'),
+            document_data.get('investee_name'),
             document_data.get('status', 'uploaded'),
             document_data.get('rows_count', 0),
             document_data.get('anomalies_count', 0),
@@ -396,6 +459,240 @@ class SQLiteStorage(StorageInterface):
         conn.close()
         
         logger.info(f"✅ Deleted document {document_id} and associated data")
+    
+    # ==================== INVESTEE METHODS ====================
+    
+    def set_investee_name(self, document_id: str, investee_name: str):
+        """Set investee name for a document"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE documents SET investee_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (investee_name, document_id)
+        )
+        conn.commit()
+        conn.close()
+    
+    def get_unique_investees(self) -> List[Dict[str, Any]]:
+        """Get list of unique investees with last upload date"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT investee_name, MAX(created_at) as last_uploaded
+            FROM documents
+            WHERE investee_name IS NOT NULL AND investee_name != ''
+            GROUP BY investee_name
+            ORDER BY last_uploaded DESC
+        """)
+        
+        investees = []
+        for row in cursor.fetchall():
+            investees.append({
+                'investee_name': row[0],
+                'last_uploaded': row[1]
+            })
+        
+        conn.close()
+        return investees
+    
+    def get_investee_full_context(self, investee_name: str) -> Dict[str, Any]:
+        """Get full context for an investee (all docs, rows, anomalies, analysis)"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Get all documents for this investee
+        cursor.execute(
+            "SELECT * FROM documents WHERE investee_name = ?",
+            (investee_name,)
+        )
+        columns = [desc[0] for desc in cursor.description]
+        docs = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        
+        doc_ids = [d['id'] for d in docs]
+        
+        if not doc_ids:
+            conn.close()
+            return {'documents': [], 'rows': [], 'anomalies': [], 'analysis': []}
+        
+        placeholders = ','.join(['?' for _ in doc_ids])
+        
+        # Get all rows
+        cursor.execute(f"""
+            SELECT document_id, row_index, raw_json
+            FROM extracted_rows
+            WHERE document_id IN ({placeholders})
+        """, doc_ids)
+        rows = []
+        for row in cursor.fetchall():
+            rows.append({
+                'document_id': row[0],
+                'row_index': row[1],
+                'raw_json': json.loads(row[2]) if row[2] else {}
+            })
+        
+        # Get all anomalies
+        cursor.execute(f"""
+            SELECT * FROM anomalies WHERE document_id IN ({placeholders})
+        """, doc_ids)
+        anomaly_cols = [desc[0] for desc in cursor.description]
+        anomalies = [dict(zip(anomaly_cols, row)) for row in cursor.fetchall()]
+        
+        # Get all analysis results
+        cursor.execute(f"""
+            SELECT * FROM analysis_results WHERE document_id IN ({placeholders})
+        """, doc_ids)
+        analysis_cols = [desc[0] for desc in cursor.description]
+        analysis = [dict(zip(analysis_cols, row)) for row in cursor.fetchall()]
+        
+        conn.close()
+        
+        return {
+            'documents': docs,
+            'rows': rows,
+            'anomalies': anomalies,
+            'analysis': analysis
+        }
+    
+    # ==================== DASHBOARD METHODS ====================
+    
+    def save_dashboard(self, investee_name: str, dashboard_name: str, spec: Dict[str, Any]) -> str:
+        """Save a dashboard configuration"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        dashboard_id = str(uuid.uuid4())
+        cursor.execute("""
+            INSERT INTO dashboards (id, investee_name, dashboard_name, spec)
+            VALUES (?, ?, ?, ?)
+        """, (dashboard_id, investee_name, dashboard_name, json.dumps(spec)))
+        
+        conn.commit()
+        conn.close()
+        return dashboard_id
+    
+    def get_dashboards(self, investee_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get all dashboards, optionally filtered by investee"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        if investee_name:
+            cursor.execute(
+                "SELECT * FROM dashboards WHERE investee_name = ? ORDER BY created_at DESC",
+                (investee_name,)
+            )
+        else:
+            cursor.execute("SELECT * FROM dashboards ORDER BY created_at DESC")
+        
+        columns = [desc[0] for desc in cursor.description]
+        dashboards = []
+        for row in cursor.fetchall():
+            d = dict(zip(columns, row))
+            if d.get('spec'):
+                d['spec'] = json.loads(d['spec'])
+            dashboards.append(d)
+        
+        conn.close()
+        return dashboards
+    
+    def get_dashboard(self, dashboard_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single dashboard by ID"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM dashboards WHERE id = ?", (dashboard_id,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            return None
+        
+        columns = [desc[0] for desc in cursor.description]
+        d = dict(zip(columns, row))
+        if d.get('spec'):
+            d['spec'] = json.loads(d['spec'])
+        return d
+    
+    # ==================== REPORT METHODS ====================
+    
+    def save_report(self, investee_name: str, report_name: str, report_type: str = 'ic_report',
+                    dashboard_spec: Optional[Dict] = None, storage_path: Optional[str] = None) -> str:
+        """Save a report record"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        report_id = str(uuid.uuid4())
+        cursor.execute("""
+            INSERT INTO reports (id, investee_name, report_name, report_type, dashboard_spec, storage_path)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            report_id, investee_name, report_name, report_type,
+            json.dumps(dashboard_spec) if dashboard_spec else None,
+            storage_path
+        ))
+        
+        conn.commit()
+        conn.close()
+        return report_id
+    
+    def get_reports(self, investee_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get all reports, optionally filtered by investee"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        if investee_name:
+            cursor.execute(
+                "SELECT * FROM reports WHERE investee_name = ? ORDER BY created_at DESC",
+                (investee_name,)
+            )
+        else:
+            cursor.execute("SELECT * FROM reports ORDER BY created_at DESC")
+        
+        columns = [desc[0] for desc in cursor.description]
+        reports = []
+        for row in cursor.fetchall():
+            r = dict(zip(columns, row))
+            if r.get('dashboard_spec'):
+                r['dashboard_spec'] = json.loads(r['dashboard_spec'])
+            reports.append(r)
+        
+        conn.close()
+        return reports
+    
+    # ==================== ANALYSIS METHODS ====================
+    
+    def save_analysis(self, document_id: str, analysis_type: str, results: Dict[str, Any]) -> str:
+        """Save analysis results for a document"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        analysis_id = str(uuid.uuid4())
+        cursor.execute("""
+            INSERT INTO analysis_results (id, document_id, analysis_type, results)
+            VALUES (?, ?, ?, ?)
+        """, (analysis_id, document_id, analysis_type, json.dumps(results)))
+        
+        conn.commit()
+        conn.close()
+        return analysis_id
+    
+    def get_analysis(self, document_id: str) -> List[Dict[str, Any]]:
+        """Get all analysis results for a document"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM analysis_results WHERE document_id = ? ORDER BY created_at DESC",
+            (document_id,)
+        )
+        
+        columns = [desc[0] for desc in cursor.description]
+        results = []
+        for row in cursor.fetchall():
+            r = dict(zip(columns, row))
+            if r.get('results'):
+                r['results'] = json.loads(r['results'])
+            results.append(r)
+        
+        conn.close()
+        return results
 
 
 class SupabaseStorage(StorageInterface):
@@ -550,6 +847,104 @@ class SupabaseStorage(StorageInterface):
         except Exception as e:
             logger.error(f"Error deleting document from Supabase: {e}")
             raise
+    
+    # ==================== INVESTEE METHODS ====================
+    
+    def set_investee_name(self, document_id: str, investee_name: str):
+        """Set investee name for a document"""
+        self.supabase.table('documents').update({'investee_name': investee_name}).eq('id', document_id).execute()
+    
+    def get_unique_investees(self) -> List[Dict[str, Any]]:
+        """Get list of unique investees with last upload date"""
+        result = self.supabase.table('documents').select('investee_name, created_at').execute()
+        
+        unique = {}
+        for row in result.data:
+            name = row.get('investee_name')
+            if name and name not in unique:
+                unique[name] = row['created_at']
+            elif name and row['created_at'] > unique[name]:
+                unique[name] = row['created_at']
+        
+        return [{'investee_name': k, 'last_uploaded': v} for k, v in unique.items()]
+    
+    def get_investee_full_context(self, investee_name: str) -> Dict[str, Any]:
+        """Get full context for an investee"""
+        docs = self.supabase.table('documents').select('*').eq('investee_name', investee_name).execute().data
+        doc_ids = [d['id'] for d in docs]
+        
+        if not doc_ids:
+            return {'documents': [], 'rows': [], 'anomalies': [], 'analysis': []}
+        
+        rows = self.supabase.table('extracted_rows').select('*').in_('document_id', doc_ids).execute().data
+        anomalies = self.supabase.table('anomalies').select('*').in_('document_id', doc_ids).execute().data
+        analysis = self.supabase.table('analysis_results').select('*').in_('document_id', doc_ids).execute().data
+        
+        return {
+            'documents': docs,
+            'rows': rows,
+            'anomalies': anomalies,
+            'analysis': analysis
+        }
+    
+    # ==================== DASHBOARD METHODS ====================
+    
+    def save_dashboard(self, investee_name: str, dashboard_name: str, spec: Dict[str, Any]) -> str:
+        """Save a dashboard configuration"""
+        result = self.supabase.table('dashboards').insert({
+            'investee_name': investee_name,
+            'dashboard_name': dashboard_name,
+            'spec': spec
+        }).execute()
+        return result.data[0]['id']
+    
+    def get_dashboards(self, investee_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get all dashboards, optionally filtered by investee"""
+        query = self.supabase.table('dashboards').select('*').order('created_at', desc=True)
+        if investee_name:
+            query = query.eq('investee_name', investee_name)
+        return query.execute().data
+    
+    def get_dashboard(self, dashboard_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single dashboard by ID"""
+        result = self.supabase.table('dashboards').select('*').eq('id', dashboard_id).execute()
+        return result.data[0] if result.data else None
+    
+    # ==================== REPORT METHODS ====================
+    
+    def save_report(self, investee_name: str, report_name: str, report_type: str = 'ic_report',
+                    dashboard_spec: Optional[Dict] = None, storage_path: Optional[str] = None) -> str:
+        """Save a report record"""
+        result = self.supabase.table('reports').insert({
+            'investee_name': investee_name,
+            'report_name': report_name,
+            'report_type': report_type,
+            'dashboard_spec': dashboard_spec,
+            'storage_path': storage_path
+        }).execute()
+        return result.data[0]['id']
+    
+    def get_reports(self, investee_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get all reports, optionally filtered by investee"""
+        query = self.supabase.table('reports').select('*').order('created_at', desc=True)
+        if investee_name:
+            query = query.eq('investee_name', investee_name)
+        return query.execute().data
+    
+    # ==================== ANALYSIS METHODS ====================
+    
+    def save_analysis(self, document_id: str, analysis_type: str, results: Dict[str, Any]) -> str:
+        """Save analysis results for a document"""
+        result = self.supabase.table('analysis_results').insert({
+            'document_id': document_id,
+            'analysis_type': analysis_type,
+            'results': results
+        }).execute()
+        return result.data[0]['id']
+    
+    def get_analysis(self, document_id: str) -> List[Dict[str, Any]]:
+        """Get all analysis results for a document"""
+        return self.supabase.table('analysis_results').select('*').eq('document_id', document_id).order('created_at', desc=True).execute().data
 
 
 def get_storage() -> StorageInterface:

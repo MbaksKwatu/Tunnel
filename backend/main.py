@@ -1,6 +1,7 @@
 """
-FundIQ Backend Parser API
+Parity Backend Parser API
 FastAPI server for parsing PDF, CSV, and XLSX files with anomaly detection
+AI-native financial intelligence for SME investments
 """
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -83,6 +84,53 @@ report_generator = ReportGenerator()
 # Initialize evaluator
 evaluator = Evaluator()
 
+
+# ==================== HELPER FUNCTIONS ====================
+
+def detect_investee_name(rows: List[Dict[str, Any]], filename: str) -> str:
+    """
+    Detect investee/company name from parsed data or filename.
+    Priority:
+    1. Company name field in data
+    2. Business name in header
+    3. Filename without extension
+    """
+    if not rows:
+        # Fallback to filename
+        return filename.rsplit('.', 1)[0] if '.' in filename else filename
+    
+    # Check first few rows for company-related fields
+    company_keywords = ['company', 'business', 'name', 'organization', 'entity', 'client', 'investee']
+    
+    for row in rows[:5]:  # Check first 5 rows
+        for key, value in row.items():
+            key_lower = key.lower()
+            if any(kw in key_lower for kw in company_keywords):
+                if value and isinstance(value, str) and len(value.strip()) > 2:
+                    return value.strip()
+    
+    # Check for common header patterns
+    first_row = rows[0] if rows else {}
+    for key, value in first_row.items():
+        # Look for values that look like company names (capitalized, not too long)
+        if isinstance(value, str) and len(value) > 3 and len(value) < 100:
+            # Check if it looks like a company name (starts with capital, contains letters)
+            if value[0].isupper() and any(c.isalpha() for c in value):
+                # Avoid dates, numbers, common headers
+                if not any(x in value.lower() for x in ['date', 'amount', 'total', 'balance', '/', '-']):
+                    return value.strip()
+    
+    # Fallback to filename
+    name = filename.rsplit('.', 1)[0] if '.' in filename else filename
+    # Clean up common patterns
+    name = name.replace('_', ' ').replace('-', ' ')
+    # Remove common suffixes
+    for suffix in ['statement', 'report', 'data', 'export', 'transactions']:
+        name = name.lower().replace(suffix, '').strip()
+    
+    return name.title() if name else "Unknown Company"
+
+
 # Pydantic models
 class ParseRequest(BaseModel):
     document_id: str = Field(..., description="Document ID from database")
@@ -97,6 +145,18 @@ class ParseResponse(BaseModel):
     anomalies_count: int = 0
     insights_summary: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    document_id: Optional[str] = None
+    investee_name_suggested: Optional[str] = None
+
+
+class SetInvesteeRequest(BaseModel):
+    investee_name: str = Field(..., description="Investee/company name")
+
+
+class SaveDashboardRequest(BaseModel):
+    investee_name: str = Field(..., description="Investee name")
+    dashboard_name: str = Field(..., description="Dashboard name")
+    spec: Dict[str, Any] = Field(..., description="Dashboard specification JSON")
 
 
 class NoteCreate(BaseModel):
@@ -275,7 +335,18 @@ async def parse_document(
             
             if not rows:
                 storage.update_document_status(document_id, 'completed', rows_count=0, error_message='No data found')
-                return ParseResponse(success=True, rows_extracted=0, anomalies_count=0)
+                investee_suggested = detect_investee_name([], file.filename)
+                return ParseResponse(
+                    success=True, 
+                    rows_extracted=0, 
+                    anomalies_count=0,
+                    document_id=document_id,
+                    investee_name_suggested=investee_suggested
+                )
+            
+            # Detect investee name from parsed data
+            investee_suggested = detect_investee_name(rows, file.filename)
+            logger.info(f"📋 Detected investee name: {investee_suggested}")
             
             # Store rows
             rows_inserted = storage.store_rows(document_id, rows)
@@ -289,7 +360,7 @@ async def parse_document(
             # Generate insights
             insights = insight_generator.generate_insights(anomalies)
             
-            # Update document
+            # Update document with suggested investee name
             storage.update_document_status(
                 document_id,
                 'completed',
@@ -298,12 +369,17 @@ async def parse_document(
                 insights_summary=insights
             )
             
+            # Also set the suggested investee name on the document
+            storage.set_investee_name(document_id, investee_suggested)
+            
             return ParseResponse(
                 success=True,
                 rows_extracted=rows_inserted,
                 anomalies_count=anomalies_count,
                 insights_summary=insights,
-                error=None
+                error=None,
+                document_id=document_id,
+                investee_name_suggested=investee_suggested
             )
         
         # Supabase mode: existing flow
@@ -908,6 +984,109 @@ async def generate_ic_report_endpoint(doc_id: str):
         logger.error(f"Error generating IC report: {e}")
         import traceback
         logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== INVESTEE ENDPOINTS ====================
+
+@app.post("/documents/{document_id}/set-investee")
+async def set_investee(document_id: str, body: SetInvesteeRequest):
+    """Set or update the investee name for a document"""
+    try:
+        doc = storage.get_document(document_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        storage.set_investee_name(document_id, body.investee_name)
+        logger.info(f"✅ Set investee name for {document_id}: {body.investee_name}")
+        
+        return {"status": "ok", "investee_name": body.investee_name}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting investee name: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/investees")
+async def list_investees():
+    """Get list of unique investees with last upload date"""
+    try:
+        investees = storage.get_unique_investees()
+        return investees
+    except Exception as e:
+        logger.error(f"Error fetching investees: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/investees/{investee_name}/full")
+async def get_investee_full_context(investee_name: str):
+    """Get full context for an investee (all documents, rows, anomalies, analysis)"""
+    try:
+        context = storage.get_investee_full_context(investee_name)
+        return context
+    except Exception as e:
+        logger.error(f"Error fetching investee context: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== DASHBOARD ENDPOINTS ====================
+
+@app.post("/dashboards/save")
+async def save_dashboard(data: SaveDashboardRequest):
+    """Save a dashboard configuration"""
+    try:
+        dashboard_id = storage.save_dashboard(
+            investee_name=data.investee_name,
+            dashboard_name=data.dashboard_name,
+            spec=data.spec
+        )
+        logger.info(f"✅ Saved dashboard {dashboard_id} for {data.investee_name}")
+        
+        return {"status": "ok", "dashboard_id": dashboard_id}
+        
+    except Exception as e:
+        logger.error(f"Error saving dashboard: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/dashboards")
+async def list_dashboards(investee_name: Optional[str] = None):
+    """Get all dashboards, optionally filtered by investee"""
+    try:
+        dashboards = storage.get_dashboards(investee_name)
+        return dashboards
+    except Exception as e:
+        logger.error(f"Error fetching dashboards: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/dashboards/{dashboard_id}")
+async def get_dashboard(dashboard_id: str):
+    """Get a single dashboard by ID"""
+    try:
+        dashboard = storage.get_dashboard(dashboard_id)
+        if not dashboard:
+            raise HTTPException(status_code=404, detail="Dashboard not found")
+        return dashboard
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching dashboard: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== REPORT LISTING ENDPOINT ====================
+
+@app.get("/reports")
+async def list_reports(investee_name: Optional[str] = None):
+    """Get all reports, optionally filtered by investee"""
+    try:
+        reports = storage.get_reports(investee_name)
+        return reports
+    except Exception as e:
+        logger.error(f"Error fetching reports: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

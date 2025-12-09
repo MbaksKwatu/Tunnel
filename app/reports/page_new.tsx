@@ -21,6 +21,12 @@ export default function ReportsPage() {
   }, []);
 
   const fetchDocuments = async () => {
+    if (!supabase) {
+      console.error('Supabase client is not initialized');
+      setLoading(false);
+      return;
+    }
+    
     try {
       const { data, error } = await supabase
         .from('documents')

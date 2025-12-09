@@ -7,7 +7,9 @@ import {
   Bot, 
   BarChart3, 
   Settings,
-  Brain
+  Brain,
+  LayoutDashboard,
+  Upload
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -18,7 +20,8 @@ interface NavItem {
 }
 
 const navigation: NavItem[] = [
-  { name: 'Connect Data', href: '/connect-data', icon: FolderOpen },
+  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { name: 'Upload', href: '/simple-page', icon: Upload },
   { name: 'Reports', href: '/reports', icon: BarChart3 },
   { name: 'Actions', href: '/actions', icon: Bot },
   { name: 'Settings', href: '/rules', icon: Settings },
@@ -32,10 +35,12 @@ export default function Sidebar() {
       {/* Logo Section */}
       <div className="p-6 border-b border-gray-800">
         <div className="flex items-center gap-3 mb-2">
-          <div className="bg-gradient-to-br from-accent-cyan to-accent-indigo p-2 rounded-lg">
-            <Brain className="h-6 w-6 text-base-950" />
+          <div className="bg-gradient-to-br from-blue-500 to-cyan-400 p-2 rounded-lg">
+            <Brain className="h-6 w-6 text-white" />
           </div>
-          <h1 className="text-xl font-bold text-white">Parity</h1>
+          <h1 className="font-display text-2xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-300">
+            Parity
+          </h1>
         </div>
         <p className="text-xs text-gray-400">
           AI-Native Investment Intelligence

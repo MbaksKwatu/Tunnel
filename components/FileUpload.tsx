@@ -1,25 +1,43 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
-import { Upload, File, CheckCircle, XCircle, Loader2, Lock, Unlock, RotateCcw, X } from 'lucide-react';
+import { Upload, File, CheckCircle, XCircle, Loader2, Lock, Unlock, RotateCcw, X, Eye, Bot } from 'lucide-react';
 import { uploadFile, createDocument, updateDocumentStatus, isLocalMode } from '@/lib/supabase';
 import { FileType, UploadProgress } from '@/lib/types';
 import axios from 'axios';
+import InvesteeConfirmModal from './InvesteeConfirmModal';
 
 interface FileUploadProps {
   userId: string;
   onUploadComplete?: () => void;
 }
 
+// Extended upload progress to include document info
+interface ExtendedUploadProgress extends UploadProgress {
+  documentId?: string;
+  investeeNameSuggested?: string;
+  investeeConfirmed?: boolean;
+}
+
 export default function FileUpload({ userId, onUploadComplete }: FileUploadProps) {
-  const [uploads, setUploads] = useState<UploadProgress[]>([]);
+  const router = useRouter();
+  const [uploads, setUploads] = useState<ExtendedUploadProgress[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   
   // Password handling state
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [fileToRetry, setFileToRetry] = useState<File | null>(null);
+  
+  // Investee confirmation state
+  const [showInvesteeModal, setShowInvesteeModal] = useState(false);
+  const [pendingInvesteeConfirm, setPendingInvesteeConfirm] = useState<{
+    documentId: string;
+    suggestedName: string;
+    fileName: string;
+  } | null>(null);
 
   const getFileType = (file: File): FileType | null => {
     const extension = file.name.split('.').pop()?.toLowerCase();
@@ -65,10 +83,29 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
         });
 
         if (response.data.success) {
-          // Update progress: completed
+          const docId = response.data.document_id;
+          const investeeSuggested = response.data.investee_name_suggested;
+          
+          // Update progress: completed with document info
           setUploads(prev => prev.map(u => 
-            u.fileName === file.name ? { ...u, status: 'completed', progress: 100 } : u
+            u.fileName === file.name ? { 
+              ...u, 
+              status: 'completed', 
+              progress: 100,
+              documentId: docId,
+              investeeNameSuggested: investeeSuggested
+            } : u
           ));
+          
+          // Show investee confirmation modal
+          if (docId && investeeSuggested) {
+            setPendingInvesteeConfirm({
+              documentId: docId,
+              suggestedName: investeeSuggested,
+              fileName: file.name
+            });
+            setShowInvesteeModal(true);
+          }
         } else {
           // Check for password requirement
           if (response.data.error === 'PASSWORD_REQUIRED') {
@@ -359,7 +396,33 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
                   <p className="text-xs text-accent-indigo">Extracting data...</p>
                 )}
                 {upload.status === 'completed' && (
-                  <p className="text-xs text-green-400">Completed successfully!</p>
+                  <div className="space-y-2">
+                    <p className="text-xs text-green-400">
+                      {upload.investeeConfirmed 
+                        ? `Ready to review: ${upload.investeeNameSuggested}` 
+                        : 'Completed successfully!'}
+                    </p>
+                    {upload.investeeConfirmed && upload.documentId && (
+                      <div className="flex gap-2 mt-2">
+                        <button
+                          onClick={() => router.push(`/simple-page?doc=${upload.documentId}`)}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 
+                                     text-white text-xs rounded-lg transition-colors"
+                        >
+                          <Eye className="w-3 h-3" />
+                          Review Data
+                        </button>
+                        <button
+                          onClick={() => router.push(`/actions/evaluate?doc=${upload.documentId}&investee=${encodeURIComponent(upload.investeeNameSuggested || '')}`)}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-blue-500 hover:bg-blue-600 
+                                     text-white text-xs rounded-lg transition-colors"
+                        >
+                          <Bot className="w-3 h-3" />
+                          AI Analyst
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )}
                 {upload.status === 'error' && (
                    upload.error === 'PASSWORD_REQUIRED' ? (
@@ -428,6 +491,39 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
             </div>
           </div>
         </div>
+      )}
+
+      {/* Investee Confirmation Modal */}
+      {showInvesteeModal && pendingInvesteeConfirm && (
+        <InvesteeConfirmModal
+          suggestedName={pendingInvesteeConfirm.suggestedName}
+          documentId={pendingInvesteeConfirm.documentId}
+          onConfirm={(confirmedName) => {
+            // Update the upload state to mark as confirmed
+            setUploads(prev => prev.map(u => 
+              u.fileName === pendingInvesteeConfirm.fileName 
+                ? { ...u, investeeConfirmed: true, investeeNameSuggested: confirmedName }
+                : u
+            ));
+            setShowInvesteeModal(false);
+            setPendingInvesteeConfirm(null);
+            
+            // Trigger refresh callback
+            if (onUploadComplete) {
+              onUploadComplete();
+            }
+          }}
+          onCancel={() => {
+            // Still mark as confirmed with original name
+            setUploads(prev => prev.map(u => 
+              u.fileName === pendingInvesteeConfirm.fileName 
+                ? { ...u, investeeConfirmed: true }
+                : u
+            ));
+            setShowInvesteeModal(false);
+            setPendingInvesteeConfirm(null);
+          }}
+        />
       )}
     </div>
   );

@@ -32,9 +32,12 @@ out/
 build/
 dist/
 
-# Environment variables
+# Environment files
 .env
 .env.local
+.env.development
+.env.production
+.env.production.example
 backend/.env
 .env.development.local
 .env.test.local
