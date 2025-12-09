@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "node .next/standalone/Tunnel/server.js",
+    "start": "node start-standalone.js",
     "lint": "next lint"
   },
   "dependencies": {
