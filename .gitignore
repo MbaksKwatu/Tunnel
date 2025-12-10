@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
 backend/venv/
+backend/.venv/
 backend/__pycache__/
 backend/*.pyc
 backend/*.pyo
@@ -18,6 +19,9 @@ backend/coverage.xml
 backend/*.cover
 backend/.hypothesis/
 backend/.pytest_cache/
+*.pyc
+*.pyo
+*.pyd
 
 # Python virtual environments
 venv/
@@ -31,6 +35,8 @@ venv.bak/
 out/
 build/
 dist/
+.vercel
+*.tsbuildinfo
 
 # Environment files
 .env
@@ -42,6 +48,7 @@ backend/.env
 .env.development.local
 .env.test.local
 .env.production.local
+.env.*.local
 
 # Database files
 backend/fundiq_demo.db
@@ -50,6 +57,7 @@ backend/*.db
 *.sqlite3
 
 # Logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -110,6 +118,7 @@ dist
 # Temporary folders
 tmp/
 temp/
+backend/input/
 
 # Editor directories and files
 .vscode/
@@ -127,7 +136,7 @@ temp/
 ehthumbs.db
 Thumbs.db
 
-# Uploaded files (for demo)
+# Uploaded files
 uploads/
 temp_files/
 
@@ -140,3 +149,8 @@ test_*.json
 # Backup files
 *.bak
 *.backup
+.git_backup/
+
+# Arbitrary artifacts from cleanup
+*.pdf
+fix_*.sql
