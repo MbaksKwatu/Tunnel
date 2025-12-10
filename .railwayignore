@@ -1,0 +1,24 @@
+# Exclude backend directory from Railway deployment
+backend/
+backend/*
+
+# Exclude development files
+.env.local
+.env.development
+.env.test
+
+# Exclude documentation
+*.md
+docs/
+*.sql
+
+# Exclude test files
+test_*.py
+*_test.py
+test_*.csv
+test_*.json
+
+# Exclude cache and build artifacts
+.next/cache/
+node_modules/.cache/
+
