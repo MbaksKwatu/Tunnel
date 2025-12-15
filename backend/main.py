@@ -50,10 +50,15 @@ app = FastAPI(
 )
 
 # CORS middleware - configure allowed origins from environment
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+# CORS middleware - configure allowed origins from environment
+# ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",") # Deprecated
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS != ["*"] else ["*"],
+    allow_origins=[
+        "https://paritytunnel-w7d2.onrender.com",
+        "https://*.vercel.app",
+        "*"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -8,7 +8,7 @@ import { FileText } from 'lucide-react';
 export default function SimplePage() {
   // For demo purposes, using a hardcoded user ID
   const userId = 'demo-user-123';
-  
+
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const handleUploadComplete = () => {
@@ -26,8 +26,8 @@ export default function SimplePage() {
               <FileText className="h-8 w-8 text-white" />
             </div>
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">FundIQ</h1>
-              <p className="text-sm text-gray-600">Financial Intelligence Platform (Local Demo)</p>
+              <h1 className="text-3xl font-bold text-gray-900">Parity</h1>
+              <p className="text-sm text-gray-600">AI-Native Investment Intelligence</p>
             </div>
           </div>
         </div>
@@ -44,7 +44,7 @@ export default function SimplePage() {
                 Upload your financial documents to automatically extract and analyze data.
                 <br />
                 <span className="text-sm text-blue-600 font-medium">
-                  ✅ Using local SQLite database - no Supabase needed!
+                  ✅ Powered by Parity AI
                 </span>
               </p>
               <SimpleFileUpload userId={userId} onUploadComplete={handleUploadComplete} />
@@ -86,7 +86,7 @@ export default function SimplePage() {
                 Drag and drop your PDF, CSV, or Excel files
               </p>
             </div>
-            
+
             <div className="text-center">
               <div className="bg-primary-100 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-3">
                 <span className="text-primary-600 font-bold text-lg">2</span>
@@ -96,7 +96,7 @@ export default function SimplePage() {
                 AI automatically extracts structured data
               </p>
             </div>
-            
+
             <div className="text-center">
               <div className="bg-primary-100 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-3">
                 <span className="text-primary-600 font-bold text-lg">3</span>
@@ -106,7 +106,7 @@ export default function SimplePage() {
                 View and validate the extracted information
               </p>
             </div>
-            
+
             <div className="text-center">
               <div className="bg-primary-100 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-3">
                 <span className="text-primary-600 font-bold text-lg">4</span>

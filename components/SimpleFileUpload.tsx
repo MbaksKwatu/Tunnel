@@ -25,18 +25,18 @@ export default function SimpleFileUpload({ userId, onUploadComplete }: SimpleFil
 
   const processFile = async (file: File) => {
     const fileType = getFileType(file);
-    
+
     if (!fileType) {
       throw new Error('Unsupported file type. Please upload PDF, CSV, or XLSX files.');
     }
 
     // Update progress: uploading
-    setUploads(prev => prev.map(u => 
+    setUploads(prev => prev.map(u =>
       u.fileName === file.name ? { ...u, status: 'uploading', progress: 30 } : u
     ));
 
     // Update progress: processing
-    setUploads(prev => prev.map(u => 
+    setUploads(prev => prev.map(u =>
       u.fileName === file.name ? { ...u, status: 'processing', progress: 70 } : u
     ));
 
@@ -46,7 +46,7 @@ export default function SimpleFileUpload({ userId, onUploadComplete }: SimpleFil
       formData.append('file', file);
 
       // Parse the file using local backend
-      const API_BASE = process.env.NEXT_PUBLIC_PARSER_API_URL || 'http://localhost:8000';
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
       const response = await fetch(`${API_BASE}/parse`, {
         method: 'POST',
         body: formData,
@@ -56,7 +56,7 @@ export default function SimpleFileUpload({ userId, onUploadComplete }: SimpleFil
 
       if (result.success) {
         // Update progress: completed
-        setUploads(prev => prev.map(u => 
+        setUploads(prev => prev.map(u =>
           u.fileName === file.name ? { ...u, status: 'completed', progress: 100 } : u
         ));
       } else {
@@ -84,16 +84,16 @@ export default function SimpleFileUpload({ userId, onUploadComplete }: SimpleFil
         await processFile(file);
       } catch (error: any) {
         console.error(`Error processing ${file.name}:`, error);
-        setUploads(prev => prev.map(u => 
-          u.fileName === file.name 
-            ? { ...u, status: 'error', error: error.message, progress: 0 } 
+        setUploads(prev => prev.map(u =>
+          u.fileName === file.name
+            ? { ...u, status: 'error', error: error.message, progress: 0 }
             : u
         ));
       }
     }
 
     setIsUploading(false);
-    
+
     // Call callback to refresh document list
     if (onUploadComplete) {
       onUploadComplete();
@@ -123,8 +123,8 @@ export default function SimpleFileUpload({ userId, onUploadComplete }: SimpleFil
         className={`
           border-2 border-dashed rounded-lg p-12 text-center cursor-pointer
           transition-colors duration-200
-          ${isDragActive 
-            ? 'border-primary-500 bg-primary-50' 
+          ${isDragActive
+            ? 'border-primary-500 bg-primary-50'
             : 'border-gray-300 hover:border-primary-400 bg-white'
           }
           ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}
@@ -174,7 +174,7 @@ export default function SimpleFileUpload({ userId, onUploadComplete }: SimpleFil
                   )}
                 </div>
               </div>
-              
+
               {/* Progress Bar */}
               {(upload.status === 'uploading' || upload.status === 'processing') && (
                 <div className="w-full bg-gray-200 rounded-full h-2">

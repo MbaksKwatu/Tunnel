@@ -21,6 +21,7 @@ interface NotesPanelProps {
 }
 
 export default function NotesPanel({ documentId, anomalyId, onClose }: NotesPanelProps) {
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -40,10 +41,10 @@ export default function NotesPanel({ documentId, anomalyId, onClose }: NotesPane
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch(`http://localhost:8000/documents/${documentId}/notes`);
+      const response = await fetch(`${API_BASE}/documents/${documentId}/notes`);
       if (!response.ok) throw new Error('Failed to load notes');
       const data = await response.json();
-      
+
       // Filter notes based on active tab
       let filteredNotes = data.notes || [];
       if (activeTab === 'anomaly' && anomalyId) {
@@ -51,7 +52,7 @@ export default function NotesPanel({ documentId, anomalyId, onClose }: NotesPane
       } else if (activeTab === 'document') {
         filteredNotes = filteredNotes.filter((n: Note) => !n.anomaly_id);
       }
-      
+
       setNotes(filteredNotes);
     } catch (err: any) {
       setError(err.message || 'Failed to load notes');
@@ -62,24 +63,24 @@ export default function NotesPanel({ documentId, anomalyId, onClose }: NotesPane
 
   const createNote = async () => {
     if (!newNoteContent.trim()) return;
-    
+
     try {
       const url = anomalyId
-        ? `http://localhost:8000/anomalies/${anomalyId}/notes`
-        : `http://localhost:8000/documents/${documentId}/notes`;
-      
+        ? `${API_BASE}/anomalies/${anomalyId}/notes`
+        : `${API_BASE}/documents/${documentId}/notes`;
+
       const body = anomalyId
         ? { content: newNoteContent, author: newNoteAuthor, document_id: documentId }
         : { content: newNoteContent, author: newNoteAuthor };
-      
+
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
-      
+
       if (!response.ok) throw new Error('Failed to create note');
-      
+
       setNewNoteContent('');
       loadNotes();
     } catch (err: any) {
@@ -89,9 +90,9 @@ export default function NotesPanel({ documentId, anomalyId, onClose }: NotesPane
 
   const createReply = async (parentId: string) => {
     if (!replyContent.trim()) return;
-    
+
     try {
-      const response = await fetch(`http://localhost:8000/documents/${documentId}/notes`, {
+      const response = await fetch(`${API_BASE}/documents/${documentId}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -100,9 +101,9 @@ export default function NotesPanel({ documentId, anomalyId, onClose }: NotesPane
           parent_id: parentId
         })
       });
-      
+
       if (!response.ok) throw new Error('Failed to create reply');
-      
+
       setReplyContent('');
       setReplyingTo(null);
       loadNotes();
@@ -113,7 +114,7 @@ export default function NotesPanel({ documentId, anomalyId, onClose }: NotesPane
 
   const deleteNote = async (noteId: string) => {
     if (!confirm('Delete this note and all replies?')) return;
-    
+
     try {
       // Note: Delete endpoint would need to be added to backend
       // For now, just show error
@@ -139,7 +140,7 @@ export default function NotesPanel({ documentId, anomalyId, onClose }: NotesPane
   const renderNote = (note: Note, depth: number = 0) => {
     const replies = getReplies(note.id);
     const isReplying = replyingTo === note.id;
-    
+
     return (
       <div key={note.id} className={`mb-4 ${depth > 0 ? 'ml-6 border-l-2 border-gray-200 pl-4' : ''}`}>
         <div className="bg-gray-50 rounded p-3">
@@ -168,7 +169,7 @@ export default function NotesPanel({ documentId, anomalyId, onClose }: NotesPane
             </button>
           )}
         </div>
-        
+
         {/* Reply form */}
         {isReplying && (
           <div className="ml-4 mt-2 mb-4">
@@ -199,7 +200,7 @@ export default function NotesPanel({ documentId, anomalyId, onClose }: NotesPane
             </div>
           </div>
         )}
-        
+
         {/* Render replies recursively */}
         {replies.map(reply => renderNote(reply, depth + 1))}
       </div>
@@ -224,7 +225,7 @@ export default function NotesPanel({ documentId, anomalyId, onClose }: NotesPane
           </button>
         </div>
       )}
-      
+
       {!onClose && <h3 className="text-lg font-semibold mb-4">Notes</h3>}
 
       {/* Tabs */}
