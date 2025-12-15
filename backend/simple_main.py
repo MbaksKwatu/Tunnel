@@ -4,7 +4,7 @@ Simple FundIQ Backend with SQLite (no Supabase needed)
 This version uses local SQLite database - much simpler!
 """
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sqlite3
@@ -177,7 +177,7 @@ async def test_upload(file: UploadFile = File(...)):
         }
 
 @app.post("/parse", response_model=ParseResponse)
-async def parse_document(file: UploadFile = File(...)):
+async def parse_document(file: UploadFile = File(...), user_id: Optional[str] = Form(None)):
     """Parse a document and extract structured data"""
     document_id = None
     try:
@@ -194,7 +194,7 @@ async def parse_document(file: UploadFile = File(...)):
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        resolved_user_id = ensure_uuid("demo-user")
+        resolved_user_id = ensure_uuid(user_id)
         cursor.execute("""
             INSERT INTO documents (user_id, file_name, file_type, status)
             VALUES (?, ?, ?, ?)

@@ -463,7 +463,6 @@ async def parse_document(
         
     except Exception as e:
         logger.error(f"Error in parse endpoint: {e}", exc_info=True)
-        logger.error("Upload failed", exc_info=True)
         debug_logger.log_error("PARSE", e, {"filename": file.filename if file else None})
         
         # Update document status to 'failed' if document was created
