@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { X, Search, Building2, Loader2, ChevronRight, Calendar } from 'lucide-react';
 import axios from 'axios';
+import { API_URL } from '@/lib/api';
 
 interface Investee {
   investee_name: string;
@@ -26,7 +27,7 @@ export default function SelectInvesteeModal({
   const [selectedInvestee, setSelectedInvestee] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+  const apiUrl = API_URL;
 
   useEffect(() => {
     fetchInvestees();

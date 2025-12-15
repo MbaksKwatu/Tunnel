@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
+import asyncio
 import logging
 import os
 import time
@@ -276,7 +277,7 @@ async def process_document(document_id: str, file_url: str, file_type: str, pass
 async def root():
     """Health check endpoint"""
     return {
-        "service": "FundIQ Parser API",
+        "service": "Parity Parser API",
         "status": "running",
         "version": "2.0.0",
         "storage": type(storage).__name__
@@ -485,6 +486,99 @@ async def parse_document(
         )
 
 
+async def _process_uploaded_file_bytes(
+    *,
+    document_id: str,
+    user_id: str,
+    filename: str,
+    file_type: str,
+    file_content: bytes,
+    password: Optional[str] = None
+):
+    try:
+        parser = get_parser(file_type)
+        rows = await parser.parse(file_url=None, file_content=file_content, password=password)
+
+        if not rows:
+            storage.update_document_status(document_id, 'completed', rows_count=0, error_message='No data found')
+            investee_suggested = detect_investee_name([], filename)
+            storage.set_investee_name(document_id, investee_suggested)
+            return
+
+        investee_suggested = detect_investee_name(rows, filename)
+        rows_inserted = storage.store_rows(document_id, rows)
+
+        anomalies = anomaly_detector.detect_all(rows)
+        anomalies_count = 0
+        if anomalies:
+            anomalies_count = storage.store_anomalies(document_id, anomalies)
+
+        insights = insight_generator.generate_insights(anomalies)
+
+        storage.update_document_status(
+            document_id,
+            'completed',
+            rows_count=rows_inserted,
+            anomalies_count=anomalies_count,
+            insights_summary=insights
+        )
+        storage.set_investee_name(document_id, investee_suggested)
+    except PasswordRequiredError:
+        storage.update_document_status(document_id, 'failed', error_message='PASSWORD_REQUIRED')
+    except Exception as e:
+        logger.error(f"Background processing failed for {document_id}: {e}", exc_info=True)
+        storage.update_document_status(document_id, 'failed', error_message=str(e))
+
+
+def _run_background_process_uploaded_file_bytes(**kwargs):
+    asyncio.run(_process_uploaded_file_bytes(**kwargs))
+
+
+@app.post("/documents/upload")
+async def upload_document(background_tasks: BackgroundTasks, file: UploadFile = File(...), password: Optional[str] = Form(None), session_id: Optional[str] = Form(None)):
+    file_type = file.filename.split('.')[-1].lower()
+    if file_type not in ['pdf', 'csv', 'xlsx']:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_type}")
+
+    document_id = str(uuid.uuid4())
+    resolved_user_id = ensure_uuid(session_id)
+
+    storage.store_document({
+        'id': document_id,
+        'user_id': resolved_user_id,
+        'file_name': file.filename,
+        'file_type': file_type,
+        'file_url': None,
+        'status': 'processing'
+    })
+
+    file_content = await file.read()
+    background_tasks.add_task(
+        _run_background_process_uploaded_file_bytes,
+        document_id=document_id,
+        user_id=resolved_user_id,
+        filename=file.filename,
+        file_type=file_type,
+        file_content=file_content,
+        password=password
+    )
+
+    return {"document_id": document_id}
+
+
+@app.get("/documents/{document_id}/status")
+async def get_document_status(document_id: str):
+    doc = storage.get_document(document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    return {
+        "document_id": document_id,
+        "status": doc.get('status'),
+        "error": doc.get('error_message')
+    }
+
+
 @app.post("/analyze")
 async def analyze_document(request: AnalyzeRequest):
     """Re-run anomaly detection on an existing document"""
@@ -532,7 +626,7 @@ async def analyze_document(request: AnalyzeRequest):
 
 
 @app.get("/documents")
-async def get_all_documents():
+async def get_all_documents(session_id: Optional[str] = None):
     """Get all documents (for local mode)"""
     try:
         # Use storage interface to get documents
@@ -543,13 +637,23 @@ async def get_all_documents():
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
             
-            cursor.execute("""
-                SELECT id, user_id, file_name, file_type, file_url, format_detected,
-                       upload_date, status, rows_count, anomalies_count, error_message,
-                       insights_summary, created_at, updated_at
-                FROM documents
-                ORDER BY upload_date DESC
-            """)
+            if session_id:
+                cursor.execute("""
+                    SELECT id, user_id, file_name, file_type, file_url, format_detected,
+                           upload_date, status, rows_count, anomalies_count, error_message,
+                           insights_summary, created_at, updated_at
+                    FROM documents
+                    WHERE user_id = ?
+                    ORDER BY upload_date DESC
+                """, (ensure_uuid(session_id),))
+            else:
+                cursor.execute("""
+                    SELECT id, user_id, file_name, file_type, file_url, format_detected,
+                           upload_date, status, rows_count, anomalies_count, error_message,
+                           insights_summary, created_at, updated_at
+                    FROM documents
+                    ORDER BY upload_date DESC
+                """)
             
             documents = []
             for row in cursor.fetchall():
@@ -724,6 +828,8 @@ async def evaluate_document(document_id: str):
 async def generate_ic_report(document_id: str):
     """Generate and download IC Report PDF"""
     try:
+        if os.getenv("DISABLE_PDF") == "true":
+            return {"status": "analysis_complete"}
         # Fetch all data
         doc = storage.get_document(document_id)
         if not doc:
@@ -979,6 +1085,8 @@ async def cleanup_stuck_files(max_age_minutes: int = 30):
 async def generate_ic_report_endpoint(doc_id: str):
     """Generate Investment Committee PDF report"""
     try:
+        if os.getenv("DISABLE_PDF") == "true":
+            return {"status": "analysis_complete"}
         logger.info(f"Generating IC report for document {doc_id}")
         
         # Fetch document data

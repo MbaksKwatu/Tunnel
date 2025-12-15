@@ -1,6 +1,8 @@
 // Simple local database client (no Supabase needed)
 // This replaces the Supabase client for demo purposes
 
+import { API_URL } from '@/lib/api';
+
 export interface Document {
   id: number;
   user_id: string;
@@ -22,7 +24,7 @@ export interface ExtractedRow {
   created_at: string;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL;
+const API_BASE = API_URL;
 
 // Helper function to upload file to local backend
 export async function uploadFile(file: File, userId: string) {

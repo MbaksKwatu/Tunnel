@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import {
-  TrendingUp, Activity, Wallet, Target, FileDown
+  TrendingUp, Activity, Wallet, Target
 } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis,
@@ -11,11 +11,11 @@ import {
 import { Document, ExtractedRow } from '@/lib/supabase';
 import { computeInsights, Anomaly, Insights } from '@/lib/evaluate';
 import { prepareRevenueChartData, prepareExpenseBreakdown } from '@/lib/chart-utils';
+import { API_URL } from '@/lib/api';
 
 interface EvaluateViewProps {
   document: Document;
   rows: ExtractedRow[];
-  onGenerateReport: () => void;
 }
 
 interface InsightCardProps {
@@ -56,7 +56,7 @@ function InsightCard({ title, value, icon, unit = '', trend = 'neutral' }: Insig
   );
 }
 
-export default function EvaluateView({ document, rows, onGenerateReport }: EvaluateViewProps) {
+export default function EvaluateView({ document, rows }: EvaluateViewProps) {
   const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
   const [insights, setInsights] = useState<Insights | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,8 +68,7 @@ export default function EvaluateView({ document, rows, onGenerateReport }: Evalu
   const loadAnomaliesAndComputeInsights = async () => {
     try {
       setLoading(true);
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
-      const response = await fetch(`${API_BASE}/api/anomalies?doc_id=${document.id}`);
+      const response = await fetch(`${API_URL}/api/anomalies?doc_id=${document.id}`);
 
       if (!response.ok) throw new Error('Failed to load anomalies');
 
@@ -78,7 +77,7 @@ export default function EvaluateView({ document, rows, onGenerateReport }: Evalu
       setAnomalies(anomalyList);
 
       // Fetch metrics from backend
-      const evalResponse = await fetch(`${API_BASE}/document/${document.id}/evaluate`);
+      const evalResponse = await fetch(`${API_URL}/document/${document.id}/evaluate`);
       if (evalResponse.ok) {
         const evalData = await evalResponse.json();
         const metrics = evalData.metrics || [];
@@ -113,9 +112,8 @@ export default function EvaluateView({ document, rows, onGenerateReport }: Evalu
 
   const handleGenerateReport = async () => {
     try {
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
       // Open in new tab to download
-      window.open(`${API_BASE}/document/${document.id}/report`, '_blank');
+      window.open(`${API_URL}/document/${document.id}/report`, '_blank');
     } catch (e) {
       console.error("Download failed", e);
       alert("Failed to generate report");
@@ -311,15 +309,7 @@ export default function EvaluateView({ document, rows, onGenerateReport }: Evalu
       </div>
 
       {/* Export Button */}
-      <div className="flex justify-center pt-4">
-        <button
-          onClick={handleGenerateReport}
-          className="px-6 py-3 bg-gradient-to-r from-cyan-400 to-green-400 text-[#0D0F12] font-semibold rounded-lg hover:opacity-90 transition-opacity flex items-center space-x-2 shadow-md hover:shadow-lg"
-        >
-          <FileDown className="h-5 w-5" />
-          <span>📄 Generate IC Report</span>
-        </button>
-      </div>
+      <div className="flex justify-center pt-4" />
 
       {/* Additional Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { FileText, Download, Eye, Trash2, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { API_URL } from '@/lib/api';
 
 interface Document {
   id: number;
@@ -33,8 +34,7 @@ export default function SimpleDocumentList({ refreshTrigger }: SimpleDocumentLis
   const fetchDocuments = async () => {
     try {
       setLoading(true);
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
-      const response = await fetch(`${API_BASE}/documents`);
+      const response = await fetch(`${API_URL}/documents`);
       if (response.ok) {
         const data = await response.json();
         setDocuments(data);
@@ -49,8 +49,7 @@ export default function SimpleDocumentList({ refreshTrigger }: SimpleDocumentLis
   // Fetch extracted rows for a document
   const fetchExtractedRows = async (documentId: number) => {
     try {
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
-      const response = await fetch(`${API_BASE}/document/${documentId}/rows`);
+      const response = await fetch(`${API_URL}/document/${documentId}/rows`);
       if (response.ok) {
         const data = await response.json();
         setExtractedRows(data);
@@ -63,8 +62,7 @@ export default function SimpleDocumentList({ refreshTrigger }: SimpleDocumentLis
   // Delete a document
   const deleteDocument = async (documentId: number) => {
     try {
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
-      const response = await fetch(`${API_BASE}/document/${documentId}`, {
+      const response = await fetch(`${API_URL}/document/${documentId}`, {
         method: 'DELETE'
       });
       if (response.ok) {

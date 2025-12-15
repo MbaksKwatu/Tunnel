@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+ import { API_URL } from '@/lib/api';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -9,10 +10,10 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
   : null;
 
 // Backend API base URL (local-first mode)
-const API_BASE = process.env.NEXT_PUBLIC_API_URL;
+const API_BASE = API_URL;
 
 // Check if we're in local-first mode (no Supabase)
-export const isLocalMode = !supabase;
+export const isLocalMode = true;
 
 // Types for our database tables
 export interface Document {
@@ -178,7 +179,8 @@ export async function updateDocumentStatus(
 export async function getDocuments(userId: string): Promise<Document[]> {
   if (isLocalMode || !supabase) {
     // Local mode: use backend API
-    const response = await fetch(`${API_BASE}/documents`);
+    const url = userId ? `${API_BASE}/documents?session_id=${encodeURIComponent(userId)}` : `${API_BASE}/documents`;
+    const response = await fetch(url);
     if (!response.ok) {
       throw new Error('Failed to fetch documents');
     }

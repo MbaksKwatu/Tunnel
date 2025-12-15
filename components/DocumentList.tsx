@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { FileText, Trash2, Download, Eye, AlertCircle, CheckCircle, Clock, Loader2, X, RefreshCw } from 'lucide-react';
 import { getDocuments, deleteDocument, Document } from '@/lib/supabase';
 import { format } from 'date-fns';
+import { API_URL } from '@/lib/api';
 
 interface DocumentListProps {
   userId: string;
@@ -205,8 +206,7 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
                     e.stopPropagation();
                     if (confirm(`Cancel processing for "${document.file_name}"?`)) {
                       try {
-                        const API_BASE = process.env.NEXT_PUBLIC_API_URL;
-                        const response = await fetch(`${API_BASE}/document/${document.id}/cancel`, {
+                        const response = await fetch(`${API_URL}/document/${document.id}/cancel`, {
                           method: 'POST'
                         });
                         if (response.ok) {
@@ -234,8 +234,7 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
                     e.stopPropagation();
                     if (confirm(`Retry processing for "${document.file_name}"?`)) {
                       try {
-                        const API_BASE = process.env.NEXT_PUBLIC_API_URL;
-                        const response = await fetch(`${API_BASE}/document/${document.id}/retry`, {
+                        const response = await fetch(`${API_URL}/document/${document.id}/retry`, {
                           method: 'POST'
                         });
                         if (response.ok) {

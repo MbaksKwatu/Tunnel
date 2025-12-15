@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { AlertTriangle, AlertCircle, Info, ChevronDown, ChevronUp } from 'lucide-react';
+import { API_URL } from '@/lib/api';
 
 interface Anomaly {
   id: string;
@@ -36,8 +37,7 @@ export default function AnomalyTable({ documentId, onRowClick }: AnomalyTablePro
     try {
       setLoading(true);
       setError(null);
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
-      const response = await fetch(`${API_BASE}/api/anomalies?doc_id=${documentId}`);
+      const response = await fetch(`${API_URL}/api/anomalies?doc_id=${documentId}`);
       if (!response.ok) throw new Error('Failed to load anomalies');
       const data = await response.json();
       setAnomalies(data.anomalies || []);
