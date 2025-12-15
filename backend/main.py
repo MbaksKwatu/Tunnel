@@ -345,12 +345,9 @@ async def parse_document(
             # Read file content
             file_content = await file.read()
             file_type = file.filename.split('.')[-1].lower()
-            
-            if file_type not in ['pdf', 'csv', 'xlsx']:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Unsupported file type: {file_type}"
-                )
+
+            if file_type not in ['pdf', 'csv']:
+                return {"status": "failed", "error": f"Unsupported file type: {file_type}"}
             
             # Create document record
             document_id = str(uuid.uuid4())
@@ -379,13 +376,7 @@ async def parse_document(
             if not rows:
                 storage.update_document_status(document_id, 'completed', rows_count=0, error_message='No data found')
                 investee_suggested = detect_investee_name([], file.filename)
-                return ParseResponse(
-                    success=True, 
-                    rows_extracted=0, 
-                    anomalies_count=0,
-                    document_id=document_id,
-                    investee_name_suggested=investee_suggested
-                )
+                return {"status": "completed", "document_id": document_id}
             
             # Detect investee name from parsed data
             investee_suggested = detect_investee_name(rows, file.filename)
@@ -415,28 +406,17 @@ async def parse_document(
             # Also set the suggested investee name on the document
             storage.set_investee_name(document_id, investee_suggested)
             
-            return ParseResponse(
-                success=True,
-                rows_extracted=rows_inserted,
-                anomalies_count=anomalies_count,
-                insights_summary=insights,
-                error=None,
-                document_id=document_id,
-                investee_name_suggested=investee_suggested
-            )
+            return {"status": "completed", "document_id": document_id}
         
         # Supabase mode: existing flow
         if not request:
-            raise HTTPException(status_code=400, detail="Either file upload or parse request required")
+            return {"status": "failed", "error": "Either file upload or parse request required"}
         
         logger.info(f"📨 Parse request received for document {request.document_id}")
-        
+
         # Validate file type
-        if request.file_type not in ['pdf', 'csv', 'xlsx']:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported file type: {request.file_type}"
-            )
+        if request.file_type not in ['pdf', 'csv']:
+            return {"status": "failed", "error": f"Unsupported file type: {request.file_type}"}
         
         # Process the document
         rows_extracted, anomalies, insights = await process_document(
@@ -446,21 +426,11 @@ async def parse_document(
             request.password
         )
         
-        return ParseResponse(
-            success=True,
-            rows_extracted=rows_extracted,
-            anomalies_count=len(anomalies) if anomalies else 0,
-            insights_summary=insights
-        )
+        return {"status": "completed", "document_id": request.document_id}
         
     except PasswordRequiredError:
         logger.warning(f"Password required for document {request.document_id if request else document_id}")
-        return ParseResponse(
-            success=False,
-            rows_extracted=0,
-            anomalies_count=0,
-            error="PASSWORD_REQUIRED"
-        )
+        return {"status": "failed", "document_id": request.document_id if request else document_id, "error": "PASSWORD_REQUIRED"}
         
     except Exception as e:
         logger.error(f"Error in parse endpoint: {e}", exc_info=True)
@@ -478,12 +448,7 @@ async def parse_document(
             except Exception as update_error:
                 logger.error(f"Failed to update document status: {update_error}")
         
-        return ParseResponse(
-            success=False,
-            rows_extracted=0,
-            anomalies_count=0,
-            error=str(e)
-        )
+        return {"status": "failed", "document_id": request.document_id if request else document_id, "error": str(e)}
 
 
 async def _process_uploaded_file_bytes(
@@ -537,7 +502,7 @@ def _run_background_process_uploaded_file_bytes(**kwargs):
 @app.post("/documents/upload")
 async def upload_document(background_tasks: BackgroundTasks, file: UploadFile = File(...), password: Optional[str] = Form(None), session_id: Optional[str] = Form(None)):
     file_type = file.filename.split('.')[-1].lower()
-    if file_type not in ['pdf', 'csv', 'xlsx']:
+    if file_type not in ['pdf', 'csv']:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_type}")
 
     document_id = str(uuid.uuid4())
