@@ -4,12 +4,12 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 // Make Supabase optional - use backend API if not available
-export const supabase = (supabaseUrl && supabaseAnonKey) 
+export const supabase = (supabaseUrl && supabaseAnonKey)
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
 
 // Backend API base URL (local-first mode)
-const API_BASE = process.env.NEXT_PUBLIC_PARSER_API_URL || 'http://localhost:8000';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 // Check if we're in local-first mode (no Supabase)
 export const isLocalMode = !supabase;
@@ -45,16 +45,16 @@ export async function uploadFile(file: File, userId: string) {
     // Local mode: upload directly to backend
     const formData = new FormData();
     formData.append('file', file);
-    
+
     const response = await fetch(`${API_BASE}/parse`, {
       method: 'POST',
       body: formData
     });
-    
+
     if (!response.ok) {
       throw new Error('File upload failed');
     }
-    
+
     const result = await response.json();
     return {
       path: file.name,
@@ -62,7 +62,7 @@ export async function uploadFile(file: File, userId: string) {
       document_id: result.document_id
     };
   }
-  
+
   // Supabase mode
   const fileExt = file.name.split('.').pop();
   const fileName = `${userId}/${Date.now()}_${file.name}`;
@@ -116,7 +116,7 @@ export async function createDocument(
       updated_at: new Date().toISOString()
     };
   }
-  
+
   // Supabase mode
   const { data, error } = await supabase
     .from('documents')
@@ -185,7 +185,7 @@ export async function getDocuments(userId: string): Promise<Document[]> {
     const data = await response.json();
     return data || [];
   }
-  
+
   // Supabase mode
   const { data, error } = await supabase
     .from('documents')
@@ -202,7 +202,7 @@ export async function getDocuments(userId: string): Promise<Document[]> {
 
 // Helper function to get extracted rows for a document
 export async function getExtractedRows(documentId: string): Promise<ExtractedRow[]> {
-    if (isLocalMode || !supabase) {
+  if (isLocalMode || !supabase) {
     // Local mode: use backend API
     const response = await fetch(`${API_BASE}/document/${documentId}/rows`);
     if (!response.ok) {
@@ -218,7 +218,7 @@ export async function getExtractedRows(documentId: string): Promise<ExtractedRow
       created_at: new Date().toISOString()
     }));
   }
-  
+
   // Supabase mode
   const { data, error } = await supabase
     .from('extracted_rows')
@@ -241,12 +241,12 @@ export async function deleteDocument(documentId: string) {
       const response = await fetch(`${API_BASE}/document/${documentId}`, {
         method: 'DELETE'
       });
-      
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
         throw new Error(errorData.detail || errorData.message || `HTTP ${response.status}: Failed to delete document`);
       }
-      
+
       const result = await response.json();
       return result;
     } catch (err: any) {

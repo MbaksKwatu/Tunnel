@@ -22,14 +22,14 @@ export interface ExtractedRow {
   created_at: string;
 }
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 // Helper function to upload file to local backend
 export async function uploadFile(file: File, userId: string) {
   // For demo, we'll store the file content directly
   const arrayBuffer = await file.arrayBuffer();
   const fileContent = new Uint8Array(arrayBuffer);
-  
+
   return {
     content: fileContent,
     url: `demo://${file.name}` // Mock URL
@@ -94,7 +94,7 @@ export async function updateDocumentStatus(
 // Helper function to get documents for a user
 export async function getDocuments(userId: string): Promise<Document[]> {
   const response = await fetch(`${API_BASE}/documents`);
-  
+
   if (!response.ok) {
     throw new Error('Failed to fetch documents');
   }
@@ -106,7 +106,7 @@ export async function getDocuments(userId: string): Promise<Document[]> {
 // Helper function to get extracted rows for a document
 export async function getExtractedRows(documentId: number): Promise<ExtractedRow[]> {
   const response = await fetch(`${API_BASE}/documents/${documentId}/rows`);
-  
+
   if (!response.ok) {
     throw new Error('Failed to fetch extracted rows');
   }

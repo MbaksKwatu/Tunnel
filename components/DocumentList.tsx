@@ -34,7 +34,7 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
 
   useEffect(() => {
     loadDocuments();
-    
+
     // Add timeout to prevent infinite loading
     const timeout = setTimeout(() => {
       if (loading) {
@@ -43,7 +43,7 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
         setLoading(false);
       }
     }, 10000); // 10 second timeout
-    
+
     return () => clearTimeout(timeout);
   }, [userId, refreshTrigger]);
 
@@ -133,7 +133,7 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
   return (
     <div className="space-y-3">
       <h2 className="text-lg font-semibold text-gray-200 mb-4">Your Documents</h2>
-      
+
       {documents.map((document) => (
         <div
           key={document.id}
@@ -142,10 +142,10 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
           <div className="flex items-start justify-between">
             <div className="flex items-start space-x-3 flex-1">
               <FileText className="h-6 w-6 text-gray-400 mt-1" />
-              
+
               <div className="flex-1">
                 <h3 className="font-medium text-white">{document.file_name}</h3>
-                
+
                 <div className="flex items-center space-x-4 mt-2 text-sm text-gray-400">
                   <span className="uppercase">{document.file_type}</span>
                   <span>•</span>
@@ -163,7 +163,7 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
                     {getStatusIcon(document.status)}
                     <span>{getStatusText(document.status)}</span>
                   </div>
-                  
+
                   {document.format_detected && (
                     <span className="text-xs text-gray-400">
                       Format: {document.format_detected}
@@ -191,7 +191,7 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
                   <Eye className="h-5 w-5" />
                 </button>
               )}
-              
+
               {/* Cancel button - show for processing files */}
               {document.status === 'processing' && (
                 <button
@@ -199,7 +199,7 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
                     e.stopPropagation();
                     if (confirm(`Cancel processing for "${document.file_name}"?`)) {
                       try {
-                        const API_BASE = process.env.NEXT_PUBLIC_PARSER_API_URL || 'http://localhost:8000';
+                        const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
                         const response = await fetch(`${API_BASE}/document/${document.id}/cancel`, {
                           method: 'POST'
                         });
@@ -220,7 +220,7 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
                   <X className="h-5 w-5" />
                 </button>
               )}
-              
+
               {/* Retry button - show for failed files */}
               {document.status === 'failed' && (
                 <button
@@ -228,7 +228,7 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
                     e.stopPropagation();
                     if (confirm(`Retry processing for "${document.file_name}"?`)) {
                       try {
-                        const API_BASE = process.env.NEXT_PUBLIC_PARSER_API_URL || 'http://localhost:8000';
+                        const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
                         const response = await fetch(`${API_BASE}/document/${document.id}/retry`, {
                           method: 'POST'
                         });
@@ -249,7 +249,7 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
                   <RefreshCw className="h-5 w-5" />
                 </button>
               )}
-              
+
               {/* Delete button - always visible */}
               <button
                 onClick={(e) => {
