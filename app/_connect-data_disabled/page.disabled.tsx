@@ -10,7 +10,7 @@ import DataReview from '@/components/DataReview';
 import { Upload, Database, Link as LinkIcon, FileText, Zap } from 'lucide-react';
 import { Document } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
-import { v4 as uuidv4 } from 'uuid';
+import { getSessionId } from '@/lib/session';
 
 export default function ConnectDataPage() {
   const router = useRouter();
@@ -19,16 +19,8 @@ export default function ConnectDataPage() {
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
 
   useEffect(() => {
-    const existing = typeof window !== 'undefined' ? localStorage.getItem('parity_user_id') : null;
-    if (existing) {
-      setUserId(existing);
-      return;
-    }
-    const generated = uuidv4();
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('parity_user_id', generated);
-    }
-    setUserId(generated);
+    const id = getSessionId();
+    setUserId(id || null);
   }, []);
 
   const handleUploadComplete = () => {

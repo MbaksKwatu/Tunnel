@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { X, Building2, Check, Loader2 } from 'lucide-react';
 import axios from 'axios';
+import { API_URL } from '@/lib/api';
 
 interface InvesteeConfirmModalProps {
   suggestedName: string;
@@ -31,8 +32,7 @@ export default function InvesteeConfirmModal({
     setError(null);
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-      await axios.post(`${apiUrl}/documents/${documentId}/set-investee`, {
+      await axios.post(`${API_URL}/documents/${documentId}/set-investee`, {
         investee_name: investeeName.trim()
       });
 

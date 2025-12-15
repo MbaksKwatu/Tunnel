@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { MessageSquare, Send, Reply, Trash2, X } from 'lucide-react';
+import { API_URL } from '@/lib/api';
 
 interface Note {
   id: string;
@@ -21,7 +22,6 @@ interface NotesPanelProps {
 }
 
 export default function NotesPanel({ documentId, anomalyId, onClose }: NotesPanelProps) {
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL;
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +41,7 @@ export default function NotesPanel({ documentId, anomalyId, onClose }: NotesPane
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch(`${API_BASE}/documents/${documentId}/notes`);
+      const response = await fetch(`${API_URL}/documents/${documentId}/notes`);
       if (!response.ok) throw new Error('Failed to load notes');
       const data = await response.json();
 
@@ -66,8 +66,8 @@ export default function NotesPanel({ documentId, anomalyId, onClose }: NotesPane
 
     try {
       const url = anomalyId
-        ? `${API_BASE}/anomalies/${anomalyId}/notes`
-        : `${API_BASE}/documents/${documentId}/notes`;
+        ? `${API_URL}/anomalies/${anomalyId}/notes`
+        : `${API_URL}/documents/${documentId}/notes`;
 
       const body = anomalyId
         ? { content: newNoteContent, author: newNoteAuthor, document_id: documentId }
@@ -92,7 +92,7 @@ export default function NotesPanel({ documentId, anomalyId, onClose }: NotesPane
     if (!replyContent.trim()) return;
 
     try {
-      const response = await fetch(`${API_BASE}/documents/${documentId}/notes`, {
+      const response = await fetch(`${API_URL}/documents/${documentId}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

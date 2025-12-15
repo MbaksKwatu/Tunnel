@@ -5,6 +5,7 @@ import { Download, X, Search, ArrowUpDown, ChevronLeft, ChevronRight, RefreshCw,
 import { getExtractedRows, Document, ExtractedRow } from '@/lib/supabase';
 import AnomalyTable from './AnomalyTable';
 import EvaluateView from './EvaluateView';
+import { API_URL } from '@/lib/api';
 
 interface DataReviewProps {
   document: Document;
@@ -44,8 +45,7 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
   const rerunDetection = async () => {
     try {
       setRerunLoading(true);
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
-      const response = await fetch(`${API_BASE}/api/anomalies/run`, {
+      const response = await fetch(`${API_URL}/api/anomalies/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ document_id: document.id })
@@ -58,29 +58,6 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
     } catch (err: any) {
       console.error('Error rerunning detection:', err);
       setError(err.message || 'Failed to rerun detection');
-    } finally {
-      setRerunLoading(false);
-    }
-  };
-
-  const generateReport = async () => {
-    try {
-      setRerunLoading(true);
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
-      const response = await fetch(`${API_BASE}/document/${document.id}/report`);
-
-      if (!response.ok) throw new Error('Failed to generate report');
-
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = window.document.createElement('a');
-      a.href = url;
-      a.download = `${document.file_name}_IC_Report.pdf`;
-      a.click();
-      window.URL.revokeObjectURL(url);
-    } catch (err: any) {
-      console.error('Error generating report:', err);
-      setError(err.message || 'Failed to generate report');
     } finally {
       setRerunLoading(false);
     }
@@ -302,7 +279,6 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
             <EvaluateView
               document={document}
               rows={rows}
-              onGenerateReport={generateReport}
             />
           ) : viewMode === 'anomalies' ? (
             <AnomalyTable documentId={document.id} />

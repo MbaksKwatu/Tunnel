@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { X, Save, Loader2, LayoutDashboard } from 'lucide-react';
 import axios from 'axios';
+import { API_URL } from '@/lib/api';
 
 interface SaveDashboardModalProps {
   investeeName: string;
@@ -31,8 +32,7 @@ export default function SaveDashboardModal({
     setError(null);
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-      const response = await axios.post(`${apiUrl}/dashboards/save`, {
+      const response = await axios.post(`${API_URL}/dashboards/save`, {
         investee_name: investeeName,
         dashboard_name: dashboardName.trim(),
         spec: dashboardSpec
