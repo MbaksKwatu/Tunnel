@@ -117,7 +117,7 @@ export default function DashboardPage() {
               <RefreshCw className={`w-5 h-5 text-slate-400 ${isLoading ? 'animate-spin' : ''}`} />
             </button>
             <button
-              onClick={() => router.push('/simple-page')}
+              onClick={() => router.push('/upload')}
               className="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 
                          text-white rounded-lg transition-colors"
             >
@@ -163,7 +163,7 @@ export default function DashboardPage() {
                   icon={Building2}
                   title="No investees yet"
                   description="Upload a document to create your first investee"
-                  action={() => router.push('/simple-page')}
+                  action={() => router.push('/upload')}
                   actionLabel="Upload Document"
                 />
               ) : (

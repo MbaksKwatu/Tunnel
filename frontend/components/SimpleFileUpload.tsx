@@ -5,13 +5,14 @@ import { useDropzone } from 'react-dropzone';
 import { Upload, File, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import { uploadFile, createDocument, parseDocument } from '@/lib/simple_supabase';
 import { FileType, UploadProgress } from '@/lib/types';
+import { v4 as uuidv4 } from 'uuid';
 
 const getDemoUserId = (): string | null => {
   if (typeof window === 'undefined') return null;
-  const existing = localStorage.getItem('demo_user_id');
+  const existing = localStorage.getItem('parity_user_id');
   if (existing) return existing;
-  const generated = crypto.randomUUID();
-  localStorage.setItem('demo_user_id', generated);
+  const generated = uuidv4();
+  localStorage.setItem('parity_user_id', generated);
   return generated;
 };
 
@@ -65,7 +66,7 @@ export default function SimpleFileUpload({ userId, onUploadComplete }: SimpleFil
       }
 
       // Parse the file using local backend
-      const API_BASE = process.env.NEXT_PUBLIC_PARSER_API_URL || 'http://localhost:8000';
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
       const response = await fetch(`${API_BASE}/parse`, {
         method: 'POST',
         body: formData,

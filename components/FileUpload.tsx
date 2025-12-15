@@ -405,14 +405,6 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
                     {upload.investeeConfirmed && upload.documentId && (
                       <div className="flex gap-2 mt-2">
                         <button
-                          onClick={() => router.push(`/simple-page?doc=${upload.documentId}`)}
-                          className="flex items-center gap-1 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 
-                                     text-white text-xs rounded-lg transition-colors"
-                        >
-                          <Eye className="w-3 h-3" />
-                          Review Data
-                        </button>
-                        <button
                           onClick={() => router.push(`/actions/evaluate?doc=${upload.documentId}&investee=${encodeURIComponent(upload.investeeNameSuggested || '')}`)}
                           className="flex items-center gap-1 px-3 py-1.5 bg-blue-500 hover:bg-blue-600 
                                      text-white text-xs rounded-lg transition-colors"

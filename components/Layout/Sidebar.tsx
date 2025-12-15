@@ -21,7 +21,7 @@ interface NavItem {
 
 const navigation: NavItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { name: 'Upload', href: '/simple-page', icon: Upload },
+  { name: 'Upload', href: '/upload', icon: Upload },
   { name: 'Reports', href: '/reports', icon: BarChart3 },
   { name: 'Actions', href: '/actions', icon: Bot },
   { name: 'Settings', href: '/rules', icon: Settings },

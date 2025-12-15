@@ -45,7 +45,13 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
     }, 60000); // 60 second timeout for Render cold starts
 
     return () => clearTimeout(timeout);
-  }, [userId, refreshTrigger]);
+  }, []);
+
+  useEffect(() => {
+    if (refreshTrigger !== undefined) {
+      loadDocuments();
+    }
+  }, [refreshTrigger]);
 
   const handleDelete = async (documentId: string, fileName: string) => {
     if (!confirm(`Are you sure you want to delete "${fileName}"?`)) {

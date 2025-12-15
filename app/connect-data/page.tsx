@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import AppLayout from '@/components/Layout/AppLayout';
 import FeatureCard from '@/components/FeatureCard';
 import FileUpload from '@/components/FileUpload';
@@ -10,12 +10,26 @@ import DataReview from '@/components/DataReview';
 import { Upload, Database, Link as LinkIcon, FileText, Zap } from 'lucide-react';
 import { Document } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
+import { v4 as uuidv4 } from 'uuid';
 
 export default function ConnectDataPage() {
   const router = useRouter();
-  const userId = '12345678-1234-1234-1234-123456789abc';
+  const [userId, setUserId] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
+
+  useEffect(() => {
+    const existing = typeof window !== 'undefined' ? localStorage.getItem('parity_user_id') : null;
+    if (existing) {
+      setUserId(existing);
+      return;
+    }
+    const generated = uuidv4();
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('parity_user_id', generated);
+    }
+    setUserId(generated);
+  }, []);
 
   const handleUploadComplete = () => {
     setRefreshTrigger(prev => prev + 1);
@@ -47,7 +61,7 @@ export default function ConnectDataPage() {
               title="Upload File"
               description="Upload PDF, CSV, or XLSX files to extract and analyze financial data."
             >
-              <FileUpload userId={userId} onUploadComplete={handleUploadComplete} />
+              {userId && <FileUpload userId={userId} onUploadComplete={handleUploadComplete} />}
             </FeatureCard>
 
             {/* Connect Database Card */}
@@ -74,11 +88,13 @@ export default function ConnectDataPage() {
               title="Your Documents"
               description="View and manage your uploaded documents."
             >
-              <DocumentList
-                userId={userId}
-                onViewDocument={handleViewDocument}
-                refreshTrigger={refreshTrigger}
-              />
+              {userId && (
+                <DocumentList
+                  userId={userId}
+                  onViewDocument={handleViewDocument}
+                  refreshTrigger={refreshTrigger}
+                />
+              )}
             </FeatureCard>
           </div>
         </div>
