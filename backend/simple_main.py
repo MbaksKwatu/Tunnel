@@ -11,10 +11,11 @@ import sqlite3
 import json
 import os
 import asyncio
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import pandas as pd
 import pdfplumber
 import io
+from uuid import uuid4, UUID
 
 # Initialize FastAPI
 app = FastAPI(
@@ -34,6 +35,17 @@ app.add_middleware(
 
 # SQLite database setup
 DB_PATH = "fundiq_demo.db"
+
+
+def ensure_uuid(user_id: Optional[str]) -> str:
+    """Normalize user_id to a UUID4 string."""
+    if not user_id or user_id == "demo-user":
+        return str(uuid4())
+    try:
+        UUID(user_id)
+        return user_id
+    except ValueError:
+        return str(uuid4())
 
 def init_db():
     """Initialize SQLite database"""
@@ -182,10 +194,11 @@ async def parse_document(file: UploadFile = File(...)):
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
+        resolved_user_id = ensure_uuid("demo-user")
         cursor.execute("""
             INSERT INTO documents (user_id, file_name, file_type, status)
             VALUES (?, ?, ?, ?)
-        """, ('demo-user', file.filename, file_type, 'processing'))
+        """, (resolved_user_id, file.filename, file_type, 'processing'))
         
         document_id = cursor.lastrowid
         conn.commit()

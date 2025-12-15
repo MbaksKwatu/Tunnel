@@ -12,8 +12,10 @@ import logging
 import os
 import time
 import uuid
+from uuid import uuid4, UUID
 import json
 import datetime
+import sqlite3
 from dotenv import load_dotenv
 from parsers import get_parser, PasswordRequiredError
 
@@ -91,6 +93,20 @@ evaluator = Evaluator()
 
 
 # ==================== HELPER FUNCTIONS ====================
+
+def ensure_uuid(user_id: Optional[str]) -> str:
+    """
+    Normalize user_id to a UUID string.
+    - If missing or demo placeholder, generate a new UUID4
+    - If invalid UUID, generate a new UUID4
+    """
+    if not user_id or user_id == "demo-user":
+        return str(uuid4())
+    try:
+        UUID(user_id)
+        return user_id
+    except ValueError:
+        return str(uuid4())
 
 def detect_investee_name(rows: List[Dict[str, Any]], filename: str) -> str:
     """
@@ -244,7 +260,7 @@ async def process_document(document_id: str, file_url: str, file_type: str, pass
         return rows_inserted, anomalies, insights
         
     except Exception as e:
-        logger.error(f"Error processing document {document_id}: {e}")
+        logger.error(f"Error processing document {document_id}: {e}", exc_info=True)
         debug_logger.log_error("PROCESS", e, {"document_id": document_id, "file_type": file_type})
         # Update document status to failed
         storage.update_document_status(
@@ -286,11 +302,30 @@ async def health_check():
     }
 
 
+@app.get("/health/db")
+async def health_db():
+    """Health check for database connectivity"""
+    try:
+        if isinstance(storage, SQLiteStorage):
+            conn = sqlite3.connect(storage.db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            conn.close()
+            return {"status": "ok", "storage": "sqlite", "db_path": storage.db_path}
+        else:
+            storage.supabase.table("documents").select("id").limit(1).execute()
+            return {"status": "ok", "storage": "supabase"}
+    except Exception as e:
+        logger.error("DB health check failed", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/parse")
 async def parse_document(
     request: Optional[ParseRequest] = None,
     file: Optional[UploadFile] = File(None),
-    password: Optional[str] = Form(None)
+    password: Optional[str] = Form(None),
+    user_id: Optional[str] = Form(None)
 ):
     """
     Parse a document and extract structured data with anomaly detection
@@ -318,9 +353,11 @@ async def parse_document(
             
             # Create document record
             document_id = str(uuid.uuid4())
+            resolved_user_id = ensure_uuid(user_id)
+            logger.info(f"Resolved user_id for upload: {resolved_user_id}")
             document_data = {
                 'id': document_id,
-                'user_id': '00000000-0000-0000-0000-000000000000',
+                'user_id': resolved_user_id,
                 'file_name': file.filename,
                 'file_type': file_type,
                 'file_url': None,
@@ -425,7 +462,8 @@ async def parse_document(
         )
         
     except Exception as e:
-        logger.error(f"Error in parse endpoint: {e}")
+        logger.error(f"Error in parse endpoint: {e}", exc_info=True)
+        logger.error("Upload failed", exc_info=True)
         debug_logger.log_error("PARSE", e, {"filename": file.filename if file else None})
         
         # Update document status to 'failed' if document was created

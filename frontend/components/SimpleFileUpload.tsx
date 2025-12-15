@@ -1,10 +1,19 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Upload, File, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import { uploadFile, createDocument, parseDocument } from '@/lib/simple_supabase';
 import { FileType, UploadProgress } from '@/lib/types';
+
+const getDemoUserId = (): string | null => {
+  if (typeof window === 'undefined') return null;
+  const existing = localStorage.getItem('demo_user_id');
+  if (existing) return existing;
+  const generated = crypto.randomUUID();
+  localStorage.setItem('demo_user_id', generated);
+  return generated;
+};
 
 interface SimpleFileUploadProps {
   userId: string;
@@ -14,6 +23,13 @@ interface SimpleFileUploadProps {
 export default function SimpleFileUpload({ userId, onUploadComplete }: SimpleFileUploadProps) {
   const [uploads, setUploads] = useState<UploadProgress[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [demoUserId, setDemoUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDemoUserId(getDemoUserId());
+  }, []);
+
+  const resolvedUserId = userId && userId !== 'demo-user' ? userId : demoUserId || undefined;
 
   const getFileType = (file: File): FileType | null => {
     const extension = file.name.split('.').pop()?.toLowerCase();
@@ -44,6 +60,9 @@ export default function SimpleFileUpload({ userId, onUploadComplete }: SimpleFil
       // Create FormData for file upload
       const formData = new FormData();
       formData.append('file', file);
+      if (resolvedUserId) {
+        formData.append('user_id', resolvedUserId);
+      }
 
       // Parse the file using local backend
       const API_BASE = process.env.NEXT_PUBLIC_PARSER_API_URL || 'http://localhost:8000';
@@ -103,7 +122,7 @@ export default function SimpleFileUpload({ userId, onUploadComplete }: SimpleFil
     setTimeout(() => {
       setUploads(prev => prev.filter(u => u.status === 'uploading' || u.status === 'processing'));
     }, 3000);
-  }, [userId, onUploadComplete]);
+  }, [resolvedUserId, onUploadComplete]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
