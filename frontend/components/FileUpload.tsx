@@ -25,12 +25,12 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
   const router = useRouter();
   const [uploads, setUploads] = useState<ExtendedUploadProgress[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-
+  
   // Password handling state
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [fileToRetry, setFileToRetry] = useState<File | null>(null);
-
+  
   // Investee confirmation state
   const [showInvesteeModal, setShowInvesteeModal] = useState(false);
   const [pendingInvesteeConfirm, setPendingInvesteeConfirm] = useState<{
@@ -49,17 +49,17 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
 
   const processFile = async (file: File, password?: string) => {
     const fileType = getFileType(file);
-
+    
     if (!fileType) {
       throw new Error('Unsupported file type. Please upload PDF, CSV, or XLSX files.');
     }
 
-    const parserUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    const parserUrl = process.env.NEXT_PUBLIC_PARSER_API_URL || 'http://localhost:8000';
 
     // Local-first mode: upload directly to backend
     if (isLocalMode) {
       // Update progress: uploading
-      setUploads(prev => prev.map(u =>
+      setUploads(prev => prev.map(u => 
         u.fileName === file.name ? { ...u, status: 'uploading', progress: 20, error: undefined } : u
       ));
 
@@ -71,7 +71,7 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
 
       try {
         // Upload and parse in one step
-        setUploads(prev => prev.map(u =>
+        setUploads(prev => prev.map(u => 
           u.fileName === file.name ? { ...u, status: 'processing', progress: 50 } : u
         ));
 
@@ -85,18 +85,18 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
         if (response.data.success) {
           const docId = response.data.document_id;
           const investeeSuggested = response.data.investee_name_suggested;
-
+          
           // Update progress: completed with document info
-          setUploads(prev => prev.map(u =>
-            u.fileName === file.name ? {
-              ...u,
-              status: 'completed',
+          setUploads(prev => prev.map(u => 
+            u.fileName === file.name ? { 
+              ...u, 
+              status: 'completed', 
               progress: 100,
               documentId: docId,
               investeeNameSuggested: investeeSuggested
             } : u
           ));
-
+          
           // Show investee confirmation modal
           if (docId && investeeSuggested) {
             setPendingInvesteeConfirm({
@@ -109,20 +109,20 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
         } else {
           // Check for password requirement
           if (response.data.error === 'PASSWORD_REQUIRED') {
-            throw new Error('PASSWORD_REQUIRED');
+             throw new Error('PASSWORD_REQUIRED');
           }
           throw new Error(response.data.error || 'Parsing failed');
         }
       } catch (error: any) {
-        const errorMessage = error.message === 'PASSWORD_REQUIRED'
-          ? 'PASSWORD_REQUIRED'
+        const errorMessage = error.message === 'PASSWORD_REQUIRED' 
+          ? 'PASSWORD_REQUIRED' 
           : (error.response?.data?.detail || error.message || 'Unknown error');
-
-        setUploads(prev => prev.map(u =>
+          
+        setUploads(prev => prev.map(u => 
           u.fileName === file.name ? { ...u, status: 'error', error: errorMessage, progress: 0 } : u
         ));
         if (errorMessage !== 'PASSWORD_REQUIRED') {
-          throw new Error(`Parsing failed: ${errorMessage}`);
+           throw new Error(`Parsing failed: ${errorMessage}`);
         }
       }
       return;
@@ -130,7 +130,7 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
 
     // Supabase mode: use existing flow
     // Update progress: uploading
-    setUploads(prev => prev.map(u =>
+    setUploads(prev => prev.map(u => 
       u.fileName === file.name ? { ...u, status: 'uploading', progress: 30, error: undefined } : u
     ));
 
@@ -138,7 +138,7 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
     const { url } = await uploadFile(file, userId);
 
     // Update progress: creating record
-    setUploads(prev => prev.map(u =>
+    setUploads(prev => prev.map(u => 
       u.fileName === file.name ? { ...u, progress: 50 } : u
     ));
 
@@ -146,7 +146,7 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
     const document = await createDocument(userId, file.name, fileType, url);
 
     // Update progress: processing
-    setUploads(prev => prev.map(u =>
+    setUploads(prev => prev.map(u => 
       u.fileName === file.name ? { ...u, status: 'processing', progress: 70 } : u
     ));
 
@@ -167,31 +167,31 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
       if (response.data.success) {
         // Update document status to completed
         await updateDocumentStatus(document.id, 'completed', response.data.rows_extracted);
-
+        
         // Update progress: completed
-        setUploads(prev => prev.map(u =>
+        setUploads(prev => prev.map(u => 
           u.fileName === file.name ? { ...u, status: 'completed', progress: 100 } : u
         ));
       } else {
         if (response.data.error === 'PASSWORD_REQUIRED') {
-          throw new Error('PASSWORD_REQUIRED');
+             throw new Error('PASSWORD_REQUIRED');
         }
         throw new Error(response.data.error || 'Parsing failed');
       }
     } catch (error: any) {
       // Update document status to failed
-      const errorMessage = error.message === 'PASSWORD_REQUIRED'
-        ? 'PASSWORD_REQUIRED'
-        : (error.response?.data?.detail || error.message || 'Unknown error');
-
+      const errorMessage = error.message === 'PASSWORD_REQUIRED' 
+          ? 'PASSWORD_REQUIRED' 
+          : (error.response?.data?.detail || error.message || 'Unknown error');
+      
       await updateDocumentStatus(document.id, 'failed', 0, errorMessage);
-
-      setUploads(prev => prev.map(u =>
-        u.fileName === file.name ? { ...u, status: 'error', error: errorMessage, progress: 0 } : u
+      
+      setUploads(prev => prev.map(u => 
+          u.fileName === file.name ? { ...u, status: 'error', error: errorMessage, progress: 0 } : u
       ));
-
+      
       if (errorMessage !== 'PASSWORD_REQUIRED') {
-        throw new Error(`Parsing failed: ${errorMessage}`);
+          throw new Error(`Parsing failed: ${errorMessage}`);
       }
     }
   };
@@ -226,7 +226,7 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
     }
 
     setIsUploading(false);
-
+    
     // Clear completed uploads after 5 seconds (keep errors for retry)
     setTimeout(() => {
       setUploads(prev => prev.filter(u => u.status === 'uploading' || u.status === 'processing' || u.status === 'error'));
@@ -239,46 +239,46 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
   // Intercept onDrop to store files
   const onDropWithStorage = useCallback((acceptedFiles: File[]) => {
     setFilesMap(prev => {
-      const newMap = new Map(prev);
-      acceptedFiles.forEach(f => newMap.set(f.name, f));
-      return newMap;
+        const newMap = new Map(prev);
+        acceptedFiles.forEach(f => newMap.set(f.name, f));
+        return newMap;
     });
     onDrop(acceptedFiles);
   }, [onDrop]);
 
   const handleRetryWithPassword = (fileName: string) => {
-    const file = filesMap.get(fileName);
-    if (file) {
-      setFileToRetry(file);
-      setPasswordInput('');
-      setShowPasswordModal(true);
-    }
+      const file = filesMap.get(fileName);
+      if (file) {
+          setFileToRetry(file);
+          setPasswordInput('');
+          setShowPasswordModal(true);
+      }
   };
 
   const handleRetry = (fileName: string) => {
-    const file = filesMap.get(fileName);
-    if (file) {
-      processFile(file);
-    }
+      const file = filesMap.get(fileName);
+      if (file) {
+          processFile(file);
+      }
   };
 
   const handleDismiss = (fileName: string) => {
-    setUploads(prev => prev.filter(u => u.fileName !== fileName));
+      setUploads(prev => prev.filter(u => u.fileName !== fileName));
   };
 
   const handlePasswordSubmit = async () => {
-    if (fileToRetry && passwordInput) {
-      setShowPasswordModal(false);
-      try {
-        await processFile(fileToRetry, passwordInput);
-        // Refresh
-        if (onUploadComplete) onUploadComplete();
-      } catch (e) {
-        console.error("Retry failed", e);
+      if (fileToRetry && passwordInput) {
+          setShowPasswordModal(false);
+          try {
+              await processFile(fileToRetry, passwordInput);
+              // Refresh
+              if (onUploadComplete) onUploadComplete();
+          } catch (e) {
+              console.error("Retry failed", e);
+          }
+          setFileToRetry(null);
+          setPasswordInput('');
       }
-      setFileToRetry(null);
-      setPasswordInput('');
-    }
   };
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -299,8 +299,8 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
         className={`
           border-2 border-dashed rounded-lg p-12 text-center cursor-pointer
           transition-colors duration-200
-          ${isDragActive
-            ? 'border-accent-cyan bg-accent-cyan/10'
+          ${isDragActive 
+            ? 'border-accent-cyan bg-accent-cyan/10' 
             : 'border-gray-600 hover:border-accent-cyan bg-base-900 shadow-inner-dark'
           }
           ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}
@@ -337,34 +337,34 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
                 </div>
                 <div className="flex items-center space-x-2">
                   {upload.error === 'PASSWORD_REQUIRED' ? (
-                    <button
-                      onClick={() => handleRetryWithPassword(upload.fileName)}
-                      className="flex items-center space-x-1 px-3 py-1 rounded bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30 transition-colors text-xs font-medium border border-yellow-500/50"
-                    >
-                      <Lock className="h-3 w-3" />
-                      <span>Unlock</span>
-                    </button>
+                      <button 
+                        onClick={() => handleRetryWithPassword(upload.fileName)}
+                        className="flex items-center space-x-1 px-3 py-1 rounded bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30 transition-colors text-xs font-medium border border-yellow-500/50"
+                      >
+                          <Lock className="h-3 w-3" />
+                          <span>Unlock</span>
+                      </button>
                   ) : null}
 
                   {upload.status === 'error' && upload.error !== 'PASSWORD_REQUIRED' ? (
-                    <div className="flex items-center space-x-2">
-                      <button
-                        onClick={() => handleRetry(upload.fileName)}
-                        className="p-1.5 rounded-full bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white transition-colors"
-                        title="Retry"
-                      >
-                        <RotateCcw className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDismiss(upload.fileName)}
-                        className="p-1.5 rounded-full hover:bg-gray-700 text-gray-500 hover:text-red-400 transition-colors"
-                        title="Dismiss"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
+                     <div className="flex items-center space-x-2">
+                        <button 
+                            onClick={() => handleRetry(upload.fileName)}
+                            className="p-1.5 rounded-full bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white transition-colors"
+                            title="Retry"
+                        >
+                            <RotateCcw className="h-4 w-4" />
+                        </button>
+                        <button 
+                            onClick={() => handleDismiss(upload.fileName)}
+                            className="p-1.5 rounded-full hover:bg-gray-700 text-gray-500 hover:text-red-400 transition-colors"
+                            title="Dismiss"
+                        >
+                            <X className="h-4 w-4" />
+                        </button>
+                     </div>
                   ) : null}
-
+                  
                   {upload.status === 'uploading' && (
                     <Loader2 className="h-5 w-5 text-accent-cyan animate-spin" />
                   )}
@@ -376,7 +376,7 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
                   )}
                 </div>
               </div>
-
+              
               {/* Progress Bar */}
               {(upload.status === 'uploading' || upload.status === 'processing') && (
                 <div className="w-full bg-gray-700 rounded-full h-2">
@@ -398,8 +398,8 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
                 {upload.status === 'completed' && (
                   <div className="space-y-2">
                     <p className="text-xs text-green-400">
-                      {upload.investeeConfirmed
-                        ? `Ready to review: ${upload.investeeNameSuggested}`
+                      {upload.investeeConfirmed 
+                        ? `Ready to review: ${upload.investeeNameSuggested}` 
                         : 'Completed successfully!'}
                     </p>
                     {upload.investeeConfirmed && upload.documentId && (
@@ -425,14 +425,14 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
                   </div>
                 )}
                 {upload.status === 'error' && (
-                  upload.error === 'PASSWORD_REQUIRED' ? (
-                    <p className="text-xs text-yellow-400 font-medium">Password required to decrypt file.</p>
-                  ) : (
-                    <p className="text-xs text-red-400 flex items-center">
-                      <XCircle className="h-3 w-3 mr-1" />
-                      {upload.error}
-                    </p>
-                  )
+                   upload.error === 'PASSWORD_REQUIRED' ? (
+                      <p className="text-xs text-yellow-400 font-medium">Password required to decrypt file.</p>
+                   ) : (
+                      <p className="text-xs text-red-400 flex items-center">
+                          <XCircle className="h-3 w-3 mr-1" />
+                          {upload.error}
+                      </p>
+                   )
                 )}
               </div>
             </div>
@@ -448,12 +448,12 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
               <Lock className="h-6 w-6" />
               <h3 className="text-xl font-bold text-white">Password Required</h3>
             </div>
-
+            
             <p className="text-gray-300 mb-6">
-              The file <span className="font-mono text-accent-cyan">{fileToRetry?.name}</span> is encrypted.
+              The file <span className="font-mono text-accent-cyan">{fileToRetry?.name}</span> is encrypted. 
               Please enter the password to continue.
             </p>
-
+            
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-gray-500 uppercase mb-1">Password</label>
@@ -467,13 +467,13 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
                   onKeyDown={(e) => e.key === 'Enter' && handlePasswordSubmit()}
                 />
               </div>
-
+              
               <div className="flex space-x-3 pt-2">
                 <button
                   onClick={() => {
-                    setShowPasswordModal(false);
-                    setFileToRetry(null);
-                    setPasswordInput('');
+                      setShowPasswordModal(false);
+                      setFileToRetry(null);
+                      setPasswordInput('');
                   }}
                   className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors font-medium"
                 >
@@ -500,14 +500,14 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
           documentId={pendingInvesteeConfirm.documentId}
           onConfirm={(confirmedName) => {
             // Update the upload state to mark as confirmed
-            setUploads(prev => prev.map(u =>
-              u.fileName === pendingInvesteeConfirm.fileName
+            setUploads(prev => prev.map(u => 
+              u.fileName === pendingInvesteeConfirm.fileName 
                 ? { ...u, investeeConfirmed: true, investeeNameSuggested: confirmedName }
                 : u
             ));
             setShowInvesteeModal(false);
             setPendingInvesteeConfirm(null);
-
+            
             // Trigger refresh callback
             if (onUploadComplete) {
               onUploadComplete();
@@ -515,8 +515,8 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
           }}
           onCancel={() => {
             // Still mark as confirmed with original name
-            setUploads(prev => prev.map(u =>
-              u.fileName === pendingInvesteeConfirm.fileName
+            setUploads(prev => prev.map(u => 
+              u.fileName === pendingInvesteeConfirm.fileName 
                 ? { ...u, investeeConfirmed: true }
                 : u
             ));

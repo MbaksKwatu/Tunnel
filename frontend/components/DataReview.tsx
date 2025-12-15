@@ -44,15 +44,15 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
   const rerunDetection = async () => {
     try {
       setRerunLoading(true);
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const API_BASE = process.env.NEXT_PUBLIC_PARSER_API_URL || 'http://localhost:8000';
       const response = await fetch(`${API_BASE}/api/anomalies/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ document_id: document.id })
       });
-
+      
       if (!response.ok) throw new Error('Failed to rerun detection');
-
+      
       // Refresh the page to show updated data
       window.location.reload();
     } catch (err: any) {
@@ -66,11 +66,11 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
   const generateReport = async () => {
     try {
       setRerunLoading(true);
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const API_BASE = process.env.NEXT_PUBLIC_PARSER_API_URL || 'http://localhost:8000';
       const response = await fetch(`${API_BASE}/document/${document.id}/report`);
-
+      
       if (!response.ok) throw new Error('Failed to generate report');
-
+      
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = window.document.createElement('a');
@@ -104,7 +104,7 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
     if (searchTerm) {
       filtered = filtered.filter(row => {
         const searchLower = searchTerm.toLowerCase();
-        return Object.values(row.raw_json).some(value =>
+        return Object.values(row.raw_json).some(value => 
           String(value).toLowerCase().includes(searchLower)
         );
       });
@@ -115,11 +115,11 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
       filtered = [...filtered].sort((a, b) => {
         const aVal = a.raw_json[sortColumn];
         const bVal = b.raw_json[sortColumn];
-
+        
         if (aVal === bVal) return 0;
         if (aVal == null) return 1;
         if (bVal == null) return -1;
-
+        
         const comparison = aVal < bVal ? -1 : 1;
         return sortDirection === 'asc' ? comparison : -comparison;
       });
@@ -149,7 +149,7 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
 
     // Create CSV content
     const headers = columns.join(',');
-    const csvRows = rows.map(row =>
+    const csvRows = rows.map(row => 
       columns.map(col => {
         const value = row.raw_json[col];
         // Escape quotes and wrap in quotes if contains comma
@@ -159,9 +159,9 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
           : stringValue;
       }).join(',')
     );
-
+    
     const csv = [headers, ...csvRows].join('\n');
-
+    
     // Download
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
@@ -194,34 +194,37 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
               {processedRows.length} rows {searchTerm && `(filtered from ${rows.length})`}
             </p>
           </div>
-
+          
           <div className="flex items-center space-x-3">
             {/* View Mode Toggle */}
             <div className="flex bg-[#0D0F12] rounded-lg p-1 border border-gray-700">
               <button
                 onClick={() => setViewMode('table')}
-                className={`px-3 py-1 rounded text-sm font-medium transition-colors ${viewMode === 'table'
-                    ? 'bg-[#1B1E23] text-gray-100 shadow-sm border border-gray-700'
+                className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
+                  viewMode === 'table' 
+                    ? 'bg-[#1B1E23] text-gray-100 shadow-sm border border-gray-700' 
                     : 'text-gray-400 hover:text-gray-200'
-                  }`}
+                }`}
               >
                 Table
               </button>
               <button
                 onClick={() => setViewMode('json')}
-                className={`px-3 py-1 rounded text-sm font-medium transition-colors ${viewMode === 'json'
-                    ? 'bg-[#1B1E23] text-gray-100 shadow-sm border border-gray-700'
+                className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
+                  viewMode === 'json' 
+                    ? 'bg-[#1B1E23] text-gray-100 shadow-sm border border-gray-700' 
                     : 'text-gray-400 hover:text-gray-200'
-                  }`}
+                }`}
               >
                 JSON
               </button>
               <button
                 onClick={() => setViewMode('anomalies')}
-                className={`px-3 py-1 rounded text-sm font-medium transition-colors relative ${viewMode === 'anomalies'
-                    ? 'bg-[#1B1E23] text-gray-100 shadow-sm border border-gray-700'
+                className={`px-3 py-1 rounded text-sm font-medium transition-colors relative ${
+                  viewMode === 'anomalies' 
+                    ? 'bg-[#1B1E23] text-gray-100 shadow-sm border border-gray-700' 
                     : 'text-gray-400 hover:text-gray-200'
-                  }`}
+                }`}
               >
                 Anomalies
                 {document.anomalies_count && document.anomalies_count > 0 && (
@@ -232,10 +235,11 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
               </button>
               <button
                 onClick={() => setViewMode('evaluate')}
-                className={`px-3 py-1 rounded text-sm font-medium transition-colors ${viewMode === 'evaluate'
-                    ? 'bg-[#1B1E23] text-gray-100 shadow-sm border border-gray-700'
+                className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
+                  viewMode === 'evaluate' 
+                    ? 'bg-[#1B1E23] text-gray-100 shadow-sm border border-gray-700' 
                     : 'text-gray-400 hover:text-gray-200'
-                  }`}
+                }`}
               >
                 Evaluate
               </button>
@@ -261,7 +265,7 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
               <Download className="h-4 w-4" />
               <span>CSV</span>
             </button>
-
+            
             <button
               onClick={downloadJSON}
               className="px-4 py-2 bg-gray-700 text-gray-200 rounded-lg hover:bg-gray-600 transition-colors flex items-center space-x-2"
@@ -299,8 +303,8 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
         {/* Content */}
         <div className="flex-1 overflow-auto p-6">
           {viewMode === 'evaluate' ? (
-            <EvaluateView
-              document={document}
+            <EvaluateView 
+              document={document} 
               rows={rows}
               onGenerateReport={generateReport}
             />
@@ -371,7 +375,7 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
             <div className="text-sm text-gray-400">
               Showing {(currentPage - 1) * rowsPerPage + 1} to {Math.min(currentPage * rowsPerPage, processedRows.length)} of {processedRows.length} rows
             </div>
-
+            
             <div className="flex items-center space-x-2">
               <button
                 onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
@@ -380,11 +384,11 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
               >
                 <ChevronLeft className="h-5 w-5" />
               </button>
-
+              
               <span className="text-sm text-gray-300">
                 Page {currentPage} of {totalPages}
               </span>
-
+              
               <button
                 onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                 disabled={currentPage === totalPages}

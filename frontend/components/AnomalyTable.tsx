@@ -36,7 +36,7 @@ export default function AnomalyTable({ documentId, onRowClick }: AnomalyTablePro
     try {
       setLoading(true);
       setError(null);
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const API_BASE = process.env.NEXT_PUBLIC_PARSER_API_URL || 'http://localhost:8000';
       const response = await fetch(`${API_BASE}/api/anomalies?doc_id=${documentId}`);
       if (!response.ok) throw new Error('Failed to load anomalies');
       const data = await response.json();
@@ -88,12 +88,12 @@ export default function AnomalyTable({ documentId, onRowClick }: AnomalyTablePro
 
   const getSuggestedAction = (anomaly: Anomaly) => {
     if (anomaly.suggested_action) return anomaly.suggested_action;
-
+    
     const type = anomaly.anomaly_type;
     const severity = anomaly.severity;
-
+    
     const actions: Record<string, string> = {
-      revenue_anomaly: severity === 'high'
+      revenue_anomaly: severity === 'high' 
         ? 'Verify data entry and check for refunds or reversals'
         : 'Review trend and confirm with business owner',
       expense_integrity: severity === 'high'
@@ -116,7 +116,7 @@ export default function AnomalyTable({ documentId, onRowClick }: AnomalyTablePro
 
   const sortedAnomalies = [...filteredAnomalies].sort((a, b) => {
     let aVal: any, bVal: any;
-
+    
     switch (sortColumn) {
       case 'severity':
         const severityOrder = { high: 3, medium: 2, low: 1 };
@@ -135,7 +135,7 @@ export default function AnomalyTable({ documentId, onRowClick }: AnomalyTablePro
         aVal = a.description;
         bVal = b.description;
     }
-
+    
     if (sortDirection === 'asc') {
       return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
     } else {

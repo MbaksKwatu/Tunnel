@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import {
-  TrendingUp, Activity, Wallet, Target, FileDown
+import { 
+  TrendingUp, Activity, Wallet, Target, FileDown 
 } from 'lucide-react';
-import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis,
-  CartesianGrid, Tooltip, ResponsiveContainer, Legend
+import { 
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, 
+  CartesianGrid, Tooltip, ResponsiveContainer, Legend 
 } from 'recharts';
 import { Document, ExtractedRow } from '@/lib/supabase';
 import { computeInsights, Anomaly, Insights } from '@/lib/evaluate';
@@ -27,19 +27,19 @@ interface InsightCardProps {
 }
 
 function InsightCard({ title, value, icon, unit = '', trend = 'neutral' }: InsightCardProps) {
-  const formattedValue = typeof value === 'number'
-    ? value.toLocaleString('en-US', {
-      maximumFractionDigits: value < 100 ? 1 : 0
-    })
+  const formattedValue = typeof value === 'number' 
+    ? value.toLocaleString('en-US', { 
+        maximumFractionDigits: value < 100 ? 1 : 0 
+      })
     : '0';
-
-  const iconColor = trend === 'positive' ? 'text-green-400'
-    : trend === 'negative' ? 'text-red-400'
-      : 'text-cyan-400';
-
-  const valueColor = trend === 'positive' ? 'text-green-400'
-    : trend === 'negative' ? 'text-red-400'
-      : 'text-gray-100';
+  
+  const iconColor = trend === 'positive' ? 'text-green-400' 
+    : trend === 'negative' ? 'text-red-400' 
+    : 'text-cyan-400';
+  
+  const valueColor = trend === 'positive' ? 'text-green-400' 
+    : trend === 'negative' ? 'text-red-400' 
+    : 'text-gray-100';
 
   return (
     <div className="bg-[#1B1E23] border border-gray-700 rounded-xl shadow-md hover:shadow-lg transition-shadow p-6">
@@ -68,40 +68,40 @@ export default function EvaluateView({ document, rows, onGenerateReport }: Evalu
   const loadAnomaliesAndComputeInsights = async () => {
     try {
       setLoading(true);
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const API_BASE = process.env.NEXT_PUBLIC_PARSER_API_URL || 'http://localhost:8000';
       const response = await fetch(`${API_BASE}/api/anomalies?doc_id=${document.id}`);
-
+      
       if (!response.ok) throw new Error('Failed to load anomalies');
-
+      
       const data = await response.json();
       const anomalyList = data.anomalies || [];
       setAnomalies(anomalyList);
-
+      
       // Fetch metrics from backend
       const evalResponse = await fetch(`${API_BASE}/document/${document.id}/evaluate`);
       if (evalResponse.ok) {
-        const evalData = await evalResponse.json();
-        const metrics = evalData.metrics || [];
-
-        // Map backend metrics to insights structure
-        const revenueGrowth = metrics.find((m: any) => m.name === 'Revenue Growth %')?.value || 0;
-        const cashFlowStability = metrics.find((m: any) => m.name === 'Cash Flow Stability')?.value || 0;
-        const expenseEfficiency = metrics.find((m: any) => m.name === 'Expense Efficiency')?.value || 0;
-
-        // Compute other stats client-side for now (or update backend later)
-        // We still use computeInsights for the charts/other stats but overwrite the core metrics
-        const computedInsights = computeInsights(rows, anomalyList);
-
-        setInsights({
-          ...computedInsights,
-          revenueGrowth,
-          cashFlowStability,
-          expenseRatio: expenseEfficiency
-        });
+          const evalData = await evalResponse.json();
+          const metrics = evalData.metrics || [];
+          
+          // Map backend metrics to insights structure
+          const revenueGrowth = metrics.find((m: any) => m.name === 'Revenue Growth %')?.value || 0;
+          const cashFlowStability = metrics.find((m: any) => m.name === 'Cash Flow Stability')?.value || 0;
+          const expenseEfficiency = metrics.find((m: any) => m.name === 'Expense Efficiency')?.value || 0;
+          
+          // Compute other stats client-side for now (or update backend later)
+          // We still use computeInsights for the charts/other stats but overwrite the core metrics
+          const computedInsights = computeInsights(rows, anomalyList);
+          
+          setInsights({
+              ...computedInsights,
+              revenueGrowth,
+              cashFlowStability,
+              expenseRatio: expenseEfficiency
+          });
       } else {
-        // Fallback to client-side
-        const computedInsights = computeInsights(rows, anomalyList);
-        setInsights(computedInsights);
+          // Fallback to client-side
+          const computedInsights = computeInsights(rows, anomalyList);
+          setInsights(computedInsights);
       }
 
     } catch (err: any) {
@@ -112,14 +112,14 @@ export default function EvaluateView({ document, rows, onGenerateReport }: Evalu
   };
 
   const handleGenerateReport = async () => {
-    try {
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      // Open in new tab to download
-      window.open(`${API_BASE}/document/${document.id}/report`, '_blank');
-    } catch (e) {
-      console.error("Download failed", e);
-      alert("Failed to generate report");
-    }
+      try {
+          const API_BASE = process.env.NEXT_PUBLIC_PARSER_API_URL || 'http://localhost:8000';
+          // Open in new tab to download
+          window.open(`${API_BASE}/document/${document.id}/report`, '_blank');
+      } catch (e) {
+          console.error("Download failed", e);
+          alert("Failed to generate report");
+      }
   };
 
   if (loading) {
@@ -129,7 +129,7 @@ export default function EvaluateView({ document, rows, onGenerateReport }: Evalu
           <div className="h-8 bg-gray-700 rounded w-1/4 mx-auto"></div>
           <div className="h-4 bg-gray-700 rounded w-1/3 mx-auto"></div>
         </div>
-
+        
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {[1, 2, 3, 4].map(i => (
             <div key={i} className="bg-[#1B1E23] border border-gray-700 rounded-xl p-6 h-32">
@@ -171,7 +171,7 @@ export default function EvaluateView({ document, rows, onGenerateReport }: Evalu
       <div className="text-center">
         <h1 className="text-3xl font-bold mb-2 text-gray-200">Evaluate</h1>
         <p className="text-gray-400 italic">
-          "The devil is in the details — Parity finds the devil."
+          "The devil is in the details — FundIQ finds the devil."
         </p>
       </div>
 
@@ -216,12 +216,12 @@ export default function EvaluateView({ document, rows, onGenerateReport }: Evalu
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={revenueData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis
-                  dataKey="period"
+                <XAxis 
+                  dataKey="period" 
                   stroke="#6b7280"
                   style={{ fontSize: '12px' }}
                 />
-                <YAxis
+                <YAxis 
                   stroke="#6b7280"
                   style={{ fontSize: '12px' }}
                 />
