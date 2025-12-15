@@ -54,7 +54,7 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
       throw new Error('Unsupported file type. Please upload PDF, CSV, or XLSX files.');
     }
 
-    const parserUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    const parserUrl = process.env.NEXT_PUBLIC_API_URL;
 
     // Local-first mode: upload directly to backend
     if (isLocalMode) {

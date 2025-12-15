@@ -22,7 +22,7 @@ export interface ExtractedRow {
   created_at: string;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL;
 
 // Helper function to upload file to local backend
 export async function uploadFile(file: File, userId: string) {

@@ -45,7 +45,7 @@ export default function EvaluatePage() {
 
     try {
       // Call backend to mutate dashboard based on instruction
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
       const response = await axios.post(`${API_BASE}/mutate-dashboard`, {
         dashboard: dashboard,
         instruction: userMessage

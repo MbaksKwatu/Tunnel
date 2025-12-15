@@ -31,11 +31,11 @@ export default function InvesteeConfirmModal({
     setError(null);
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL;
       await axios.post(`${apiUrl}/documents/${documentId}/set-investee`, {
         investee_name: investeeName.trim()
       });
-      
+
       onConfirm(investeeName.trim());
     } catch (err: any) {
       console.error('Error setting investee name:', err);
@@ -47,11 +47,11 @@ export default function InvesteeConfirmModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
-      <div 
+      <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={onCancel}
       />
-      
+
       {/* Modal */}
       <div className="relative bg-dark-card border border-slate-700 rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
         {/* Header */}
@@ -73,7 +73,7 @@ export default function InvesteeConfirmModal({
         {/* Content */}
         <div className="space-y-4">
           <p className="text-sm text-slate-400">
-            We detected the following company name from your document. 
+            We detected the following company name from your document.
             Please confirm or edit it.
           </p>
 

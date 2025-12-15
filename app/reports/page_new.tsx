@@ -51,7 +51,7 @@ export default function ReportsPage() {
     try {
       // Using the existing report generation endpoint logic
       // Note: In production, use the environment variable for API URL
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
       const response = await axios.post(`${API_BASE}/api/document/${selectedDocId}/report`, {}, {
         responseType: 'blob' // Important for PDF download
       });
@@ -78,7 +78,7 @@ export default function ReportsPage() {
     try {
       const mockSummary = `Financial data for document ${selectedDocId}. Revenue increased by 15% Q/Q. Operating expenses stable. Net profit margin 22%.`;
 
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
       const response = await axios.post(`${API_BASE}/generate-custom-report`, {
         data_summary: mockSummary
       });

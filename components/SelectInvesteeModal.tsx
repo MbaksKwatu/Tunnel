@@ -26,7 +26,7 @@ export default function SelectInvesteeModal({
   const [selectedInvestee, setSelectedInvestee] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
 
   useEffect(() => {
     fetchInvestees();
@@ -34,7 +34,7 @@ export default function SelectInvesteeModal({
 
   useEffect(() => {
     if (searchQuery.trim()) {
-      const filtered = investees.filter(inv => 
+      const filtered = investees.filter(inv =>
         inv.investee_name.toLowerCase().includes(searchQuery.toLowerCase())
       );
       setFilteredInvestees(filtered);
@@ -76,10 +76,10 @@ export default function SelectInvesteeModal({
   const formatDate = (dateString: string) => {
     try {
       const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', { 
-        month: 'short', 
-        day: 'numeric', 
-        year: 'numeric' 
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
       });
     } catch {
       return dateString;
@@ -89,11 +89,11 @@ export default function SelectInvesteeModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
-      <div 
+      <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={onCancel}
       />
-      
+
       {/* Modal */}
       <div className="relative bg-dark-card border border-slate-700 rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
         {/* Header */}
@@ -158,10 +158,10 @@ export default function SelectInvesteeModal({
                   disabled={isLoadingContext}
                   className={`w-full flex items-center justify-between p-4 rounded-lg border 
                              transition-all text-left group
-                             ${selectedInvestee === investee.investee_name 
-                               ? 'bg-blue-500/20 border-blue-500' 
-                               : 'bg-slate-800/50 border-slate-700 hover:bg-slate-800 hover:border-slate-600'
-                             }
+                             ${selectedInvestee === investee.investee_name
+                      ? 'bg-blue-500/20 border-blue-500'
+                      : 'bg-slate-800/50 border-slate-700 hover:bg-slate-800 hover:border-slate-600'
+                    }
                              disabled:opacity-50`}
                 >
                   <div className="flex items-center gap-3">
@@ -176,7 +176,7 @@ export default function SelectInvesteeModal({
                       </div>
                     </div>
                   </div>
-                  
+
                   {selectedInvestee === investee.investee_name && isLoadingContext ? (
                     <Loader2 className="w-5 h-5 animate-spin text-blue-400" />
                   ) : (

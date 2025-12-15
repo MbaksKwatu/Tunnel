@@ -31,13 +31,13 @@ export default function SaveDashboardModal({
     setError(null);
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL;
       const response = await axios.post(`${apiUrl}/dashboards/save`, {
         investee_name: investeeName,
         dashboard_name: dashboardName.trim(),
         spec: dashboardSpec
       });
-      
+
       onSave(response.data.dashboard_id);
     } catch (err: any) {
       console.error('Error saving dashboard:', err);
@@ -49,11 +49,11 @@ export default function SaveDashboardModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
-      <div 
+      <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={onCancel}
       />
-      
+
       {/* Modal */}
       <div className="relative bg-dark-card border border-slate-700 rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
         {/* Header */}

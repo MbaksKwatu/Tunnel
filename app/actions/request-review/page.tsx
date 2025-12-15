@@ -19,7 +19,7 @@ export default function RequestReviewPage() {
     if (!missingInfo.trim()) return;
     setIsGenerating(true);
     try {
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
       const response = await axios.post(`${API_BASE}/draft-review-email`, {
         missing_info: missingInfo
       });

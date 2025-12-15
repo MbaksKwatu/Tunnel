@@ -9,7 +9,7 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
   : null;
 
 // Backend API base URL (local-first mode)
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL;
 
 // Check if we're in local-first mode (no Supabase)
 export const isLocalMode = !supabase;

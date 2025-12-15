@@ -33,7 +33,7 @@ export default function SimpleDocumentList({ refreshTrigger }: SimpleDocumentLis
   const fetchDocuments = async () => {
     try {
       setLoading(true);
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
       const response = await fetch(`${API_BASE}/documents`);
       if (response.ok) {
         const data = await response.json();
@@ -49,7 +49,7 @@ export default function SimpleDocumentList({ refreshTrigger }: SimpleDocumentLis
   // Fetch extracted rows for a document
   const fetchExtractedRows = async (documentId: number) => {
     try {
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
       const response = await fetch(`${API_BASE}/document/${documentId}/rows`);
       if (response.ok) {
         const data = await response.json();
@@ -63,7 +63,7 @@ export default function SimpleDocumentList({ refreshTrigger }: SimpleDocumentLis
   // Delete a document
   const deleteDocument = async (documentId: number) => {
     try {
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
       const response = await fetch(`${API_BASE}/document/${documentId}`, {
         method: 'DELETE'
       });
@@ -193,8 +193,8 @@ export default function SimpleDocumentList({ refreshTrigger }: SimpleDocumentLis
               <div
                 key={doc.id}
                 className={`border rounded-lg p-4 cursor-pointer transition-colors ${selectedDocument?.id === doc.id
-                    ? 'border-primary-500 bg-primary-50'
-                    : 'border-gray-200 hover:border-gray-300'
+                  ? 'border-primary-500 bg-primary-50'
+                  : 'border-gray-200 hover:border-gray-300'
                   }`}
                 onClick={() => handleDocumentSelect(doc)}
               >

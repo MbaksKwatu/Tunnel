@@ -36,7 +36,7 @@ export default function AnomalyTable({ documentId, onRowClick }: AnomalyTablePro
     try {
       setLoading(true);
       setError(null);
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
       const response = await fetch(`${API_BASE}/api/anomalies?doc_id=${documentId}`);
       if (!response.ok) throw new Error('Failed to load anomalies');
       const data = await response.json();

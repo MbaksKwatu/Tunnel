@@ -44,7 +44,7 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
   const rerunDetection = async () => {
     try {
       setRerunLoading(true);
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
       const response = await fetch(`${API_BASE}/api/anomalies/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -66,7 +66,7 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
   const generateReport = async () => {
     try {
       setRerunLoading(true);
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
       const response = await fetch(`${API_BASE}/document/${document.id}/report`);
 
       if (!response.ok) throw new Error('Failed to generate report');
@@ -201,8 +201,8 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
               <button
                 onClick={() => setViewMode('table')}
                 className={`px-3 py-1 rounded text-sm font-medium transition-colors ${viewMode === 'table'
-                    ? 'bg-[#1B1E23] text-gray-100 shadow-sm border border-gray-700'
-                    : 'text-gray-400 hover:text-gray-200'
+                  ? 'bg-[#1B1E23] text-gray-100 shadow-sm border border-gray-700'
+                  : 'text-gray-400 hover:text-gray-200'
                   }`}
               >
                 Table
@@ -210,8 +210,8 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
               <button
                 onClick={() => setViewMode('json')}
                 className={`px-3 py-1 rounded text-sm font-medium transition-colors ${viewMode === 'json'
-                    ? 'bg-[#1B1E23] text-gray-100 shadow-sm border border-gray-700'
-                    : 'text-gray-400 hover:text-gray-200'
+                  ? 'bg-[#1B1E23] text-gray-100 shadow-sm border border-gray-700'
+                  : 'text-gray-400 hover:text-gray-200'
                   }`}
               >
                 JSON
@@ -219,8 +219,8 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
               <button
                 onClick={() => setViewMode('anomalies')}
                 className={`px-3 py-1 rounded text-sm font-medium transition-colors relative ${viewMode === 'anomalies'
-                    ? 'bg-[#1B1E23] text-gray-100 shadow-sm border border-gray-700'
-                    : 'text-gray-400 hover:text-gray-200'
+                  ? 'bg-[#1B1E23] text-gray-100 shadow-sm border border-gray-700'
+                  : 'text-gray-400 hover:text-gray-200'
                   }`}
               >
                 Anomalies
@@ -233,8 +233,8 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
               <button
                 onClick={() => setViewMode('evaluate')}
                 className={`px-3 py-1 rounded text-sm font-medium transition-colors ${viewMode === 'evaluate'
-                    ? 'bg-[#1B1E23] text-gray-100 shadow-sm border border-gray-700'
-                    : 'text-gray-400 hover:text-gray-200'
+                  ? 'bg-[#1B1E23] text-gray-100 shadow-sm border border-gray-700'
+                  : 'text-gray-400 hover:text-gray-200'
                   }`}
               >
                 Evaluate

@@ -21,7 +21,7 @@ interface NotesPanelProps {
 }
 
 export default function NotesPanel({ documentId, anomalyId, onClose }: NotesPanelProps) {
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL;
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

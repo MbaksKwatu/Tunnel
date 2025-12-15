@@ -46,7 +46,7 @@ export default function SimpleFileUpload({ userId, onUploadComplete }: SimpleFil
       formData.append('file', file);
 
       // Parse the file using local backend
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
       const response = await fetch(`${API_BASE}/parse`, {
         method: 'POST',
         body: formData,

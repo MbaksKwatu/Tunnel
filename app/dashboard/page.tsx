@@ -3,12 +3,12 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
-import { 
-  Building2, 
-  LayoutDashboard, 
-  FileText, 
-  Calendar, 
-  ChevronRight, 
+import {
+  Building2,
+  LayoutDashboard,
+  FileText,
+  Calendar,
+  ChevronRight,
   Loader2,
   Plus,
   RefreshCw
@@ -44,7 +44,7 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'investees' | 'dashboards' | 'reports'>('investees');
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
 
   useEffect(() => {
     fetchAllData();
@@ -58,7 +58,7 @@ export default function DashboardPage() {
         axios.get(`${apiUrl}/dashboards`),
         axios.get(`${apiUrl}/reports`)
       ]);
-      
+
       setInvestees(investeesRes.data);
       setDashboards(dashboardsRes.data);
       setReports(reportsRes.data);
@@ -72,10 +72,10 @@ export default function DashboardPage() {
   const formatDate = (dateString: string) => {
     try {
       const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', { 
-        month: 'short', 
-        day: 'numeric', 
-        year: 'numeric' 
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
       });
     } catch {
       return dateString;
@@ -99,7 +99,7 @@ export default function DashboardPage() {
   return (
     <div className="flex min-h-screen bg-base-950">
       <Sidebar />
-      
+
       <main className="flex-1 p-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
@@ -107,7 +107,7 @@ export default function DashboardPage() {
             <h1 className="text-2xl font-bold text-white">Dashboard</h1>
             <p className="text-slate-400 mt-1">Manage your investees, dashboards, and reports</p>
           </div>
-          
+
           <div className="flex items-center gap-3">
             <button
               onClick={fetchAllData}
@@ -134,10 +134,10 @@ export default function DashboardPage() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors
-                         ${activeTab === tab.id 
-                           ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50' 
-                           : 'bg-slate-800/50 text-slate-400 hover:bg-slate-800 border border-transparent'
-                         }`}
+                         ${activeTab === tab.id
+                  ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50'
+                  : 'bg-slate-800/50 text-slate-400 hover:bg-slate-800 border border-transparent'
+                }`}
             >
               <tab.icon className="w-4 h-4" />
               <span>{tab.label}</span>
@@ -159,7 +159,7 @@ export default function DashboardPage() {
             {/* Investees Tab */}
             {activeTab === 'investees' && (
               investees.length === 0 ? (
-                <EmptyState 
+                <EmptyState
                   icon={Building2}
                   title="No investees yet"
                   description="Upload a document to create your first investee"
@@ -195,7 +195,7 @@ export default function DashboardPage() {
             {/* Dashboards Tab */}
             {activeTab === 'dashboards' && (
               dashboards.length === 0 ? (
-                <EmptyState 
+                <EmptyState
                   icon={LayoutDashboard}
                   title="No saved dashboards"
                   description="Create and save a dashboard from the Evaluate view"
@@ -230,7 +230,7 @@ export default function DashboardPage() {
             {/* Reports Tab */}
             {activeTab === 'reports' && (
               reports.length === 0 ? (
-                <EmptyState 
+                <EmptyState
                   icon={FileText}
                   title="No reports generated"
                   description="Generate an IC Report from the Evaluate view"
@@ -270,17 +270,17 @@ export default function DashboardPage() {
 }
 
 // Empty State Component
-function EmptyState({ 
-  icon: Icon, 
-  title, 
-  description, 
-  action, 
-  actionLabel 
-}: { 
-  icon: any; 
-  title: string; 
-  description: string; 
-  action?: () => void; 
+function EmptyState({
+  icon: Icon,
+  title,
+  description,
+  action,
+  actionLabel
+}: {
+  icon: any;
+  title: string;
+  description: string;
+  action?: () => void;
   actionLabel?: string;
 }) {
   return (

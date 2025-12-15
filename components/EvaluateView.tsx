@@ -68,7 +68,7 @@ export default function EvaluateView({ document, rows, onGenerateReport }: Evalu
   const loadAnomaliesAndComputeInsights = async () => {
     try {
       setLoading(true);
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
       const response = await fetch(`${API_BASE}/api/anomalies?doc_id=${document.id}`);
 
       if (!response.ok) throw new Error('Failed to load anomalies');
@@ -113,7 +113,7 @@ export default function EvaluateView({ document, rows, onGenerateReport }: Evalu
 
   const handleGenerateReport = async () => {
     try {
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
       // Open in new tab to download
       window.open(`${API_BASE}/document/${document.id}/report`, '_blank');
     } catch (e) {
