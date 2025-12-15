@@ -32,7 +32,6 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
     const extension = file.name.split('.').pop()?.toLowerCase();
     if (extension === 'pdf') return 'pdf';
     if (extension === 'csv') return 'csv';
-    if (extension === 'xlsx' || extension === 'xls') return 'xlsx';
     return null;
   };
 
@@ -40,48 +39,8 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
     const fileType = getFileType(file);
 
     if (!fileType) {
-      throw new Error('Unsupported file type. Please upload PDF, CSV, or XLSX files.');
+      throw new Error('Unsupported file type. Please upload PDF or CSV files.');
     }
-
-    const pollStatus = async (documentId: string) => {
-      let attempts = 0;
-      while (attempts < 300) {
-        attempts += 1;
-        try {
-          const res = await fetch(`${API_URL}/documents/${documentId}/status`);
-          const data = await res.json().catch(() => ({}));
-          const status = String(data.status || '').toLowerCase();
-
-          if (status === 'complete' || status === 'completed') {
-            setUploads(prev => prev.map(u =>
-              u.documentId === documentId ? { ...u, status: 'completed', progress: 100 } : u
-            ));
-            if (onUploadComplete) onUploadComplete();
-            return;
-          }
-
-          if (status === 'failed') {
-            setUploads(prev => prev.map(u =>
-              u.documentId === documentId ? { ...u, status: 'error', error: data.error || data.message || 'Analysis failed', progress: 0 } : u
-            ));
-            if (onUploadComplete) onUploadComplete();
-            return;
-          }
-
-          setUploads(prev => prev.map(u =>
-            u.documentId === documentId ? { ...u, status: 'processing', progress: Math.max(u.progress, 60) } : u
-          ));
-        } catch {
-          // keep polling
-        }
-
-        await new Promise(resolve => setTimeout(resolve, 2500));
-      }
-
-      setUploads(prev => prev.map(u =>
-        u.documentId === documentId ? { ...u, status: 'error', error: 'Status polling timeout', progress: 0 } : u
-      ));
-    };
 
     // Local-first mode: upload directly to backend
     if (isLocalMode) {
@@ -123,10 +82,10 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
         }
 
         setUploads(prev => prev.map(u =>
-          u.fileName === file.name ? { ...u, status: 'processing', progress: 60, documentId: docId } : u
+          u.fileName === file.name ? { ...u, status: 'processing', progress: 100, documentId: docId } : u
         ));
 
-        void pollStatus(docId);
+        if (onUploadComplete) onUploadComplete();
       } catch (error: any) {
         const errorMessage = error.message === 'PASSWORD_REQUIRED'
           ? 'PASSWORD_REQUIRED'
@@ -234,9 +193,7 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
     onDrop: onDropWithStorage,
     accept: {
       'application/pdf': ['.pdf'],
-      'text/csv': ['.csv'],
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-      'application/vnd.ms-excel': ['.xls']
+      'text/csv': ['.csv']
     },
     disabled: isUploading
   });
@@ -261,11 +218,11 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
           <p className="text-lg text-accent-cyan">Drop the files here...</p>
         ) : (
           <>
-            <p className="text-lg text-gray-200 mb-2">
+            <p className="text-lg text-gray-700 mb-2">
               Drag & drop files here, or click to select
             </p>
-            <p className="text-sm text-gray-400">
-              Supports: PDF, CSV, XLSX (Max 50MB per file)
+            <p className="text-sm text-gray-500">
+              Supports: PDF, CSV (Excel coming soon)
             </p>
           </>
         )}

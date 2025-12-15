@@ -1,11 +1,15 @@
 import { v4 as uuidv4 } from "uuid";
 
-export function getSessionId(): string {
-  if (typeof window === "undefined") return "server";
-  let id = localStorage.getItem("parity_session_id");
+export function getOrCreateParityUserId(): string {
+  if (typeof window === "undefined") return "";
+  let id = localStorage.getItem("parity_user_id");
   if (!id) {
     id = uuidv4();
-    localStorage.setItem("parity_session_id", id);
+    localStorage.setItem("parity_user_id", id);
   }
   return id;
+}
+
+export function getSessionId(): string {
+  return getOrCreateParityUserId();
 }

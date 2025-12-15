@@ -35,12 +35,14 @@ export default function SimpleDocumentList({ refreshTrigger }: SimpleDocumentLis
     try {
       setLoading(true);
       const response = await fetch(`${API_URL}/documents`);
-      if (response.ok) {
-        const data = await response.json();
-        setDocuments(data);
+      if (!response.ok) {
+        setDocuments([]);
+        return;
       }
+      const data = await response.json().catch(() => ([]));
+      setDocuments(data || []);
     } catch (error) {
-      console.error('Error fetching documents:', error);
+      setDocuments([]);
     } finally {
       setLoading(false);
     }

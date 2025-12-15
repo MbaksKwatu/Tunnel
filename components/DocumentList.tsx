@@ -15,19 +15,21 @@ interface DocumentListProps {
 export default function DocumentList({ userId, onViewDocument, refreshTrigger }: DocumentListProps) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   const loadDocuments = async () => {
     try {
       setLoading(true);
-      setError(null);
+      if (!userId) {
+        setDocuments([]);
+        return;
+      }
       console.log('Loading documents for user:', userId);
       const docs = await getDocuments(userId);
-      console.log('Documents loaded:', docs);
+      console.log('Documents loaded:', docs.length);
       setDocuments(docs);
-    } catch (err: any) {
-      console.error('Error loading documents:', err);
-      setError(err.message || 'Failed to load documents');
+    } catch (err) {
+      console.log('Documents load failed (showing empty state)');
+      setDocuments([]);
     } finally {
       setLoading(false);
     }
@@ -35,17 +37,6 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
 
   useEffect(() => {
     loadDocuments();
-
-    // Add timeout to prevent infinite loading
-    const timeout = setTimeout(() => {
-      if (loading) {
-        console.warn('Document loading timeout - setting error');
-        setError('Loading timeout - please check your connection');
-        setLoading(false);
-      }
-    }, 60000); // 60 second timeout for Render cold starts
-
-    return () => clearTimeout(timeout);
   }, []);
 
   useEffect(() => {
@@ -115,14 +106,6 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 text-cyan-400 animate-spin" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="bg-red-900/20 border border-red-800 rounded-lg p-4">
-        <p className="text-red-400">{error}</p>
       </div>
     );
   }

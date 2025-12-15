@@ -8,15 +8,15 @@ import DocumentList from '@/components/DocumentList';
 import DataReview from '@/components/DataReview';
 import { Upload } from 'lucide-react';
 import { Document } from '@/lib/supabase';
-import { getSessionId } from '@/lib/session';
+import { getOrCreateParityUserId } from '@/lib/session';
 
 export default function UploadPage() {
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
 
   useEffect(() => {
-    setSessionId(getSessionId());
+    setUserId(getOrCreateParityUserId());
   }, []);
 
   const handleUploadComplete = () => {
@@ -40,9 +40,9 @@ export default function UploadPage() {
           <FeatureCard
             icon={Upload}
             title="Upload File"
-            description="Upload PDF, CSV, or XLSX files to extract and analyze financial data."
+            description="Upload PDF or CSV files to extract and analyze financial data."
           >
-            {sessionId && <FileUpload userId={sessionId} onUploadComplete={handleUploadComplete} />}
+            {userId && <FileUpload userId={userId} onUploadComplete={handleUploadComplete} />}
           </FeatureCard>
 
           <FeatureCard
@@ -50,9 +50,9 @@ export default function UploadPage() {
             title="Your Documents"
             description="View and manage your uploaded documents."
           >
-            {sessionId && (
+            {userId && (
               <DocumentList
-                userId={sessionId}
+                userId={userId}
                 onViewDocument={handleViewDocument}
                 refreshTrigger={refreshTrigger}
               />

@@ -51,7 +51,7 @@ export default function ConnectDataPage() {
             <FeatureCard
               icon={Upload}
               title="Upload File"
-              description="Upload PDF, CSV, or XLSX files to extract and analyze financial data."
+              description="Upload PDF or CSV files to extract and analyze financial data."
             >
               {userId && <FileUpload userId={userId} onUploadComplete={handleUploadComplete} />}
             </FeatureCard>

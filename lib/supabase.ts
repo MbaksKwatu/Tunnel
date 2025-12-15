@@ -180,12 +180,21 @@ export async function getDocuments(userId: string): Promise<Document[]> {
   if (isLocalMode || !supabase) {
     // Local mode: use backend API
     const url = userId ? `${API_BASE}/documents?session_id=${encodeURIComponent(userId)}` : `${API_BASE}/documents`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error('Failed to fetch documents');
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        return [];
+      }
+
+      const data = await response.json().catch(() => ([]));
+      return data || [];
+    } catch {
+      return [];
     }
-    const data = await response.json();
-    return data || [];
   }
 
   // Supabase mode
