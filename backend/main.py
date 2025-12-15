@@ -320,7 +320,7 @@ async def parse_document(
             document_id = str(uuid.uuid4())
             document_data = {
                 'id': document_id,
-                'user_id': 'demo-user',
+                'user_id': '00000000-0000-0000-0000-000000000000',
                 'file_name': file.filename,
                 'file_type': file_type,
                 'file_url': None,

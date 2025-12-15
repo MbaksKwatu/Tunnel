@@ -42,7 +42,7 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
         setError('Loading timeout - please check your connection');
         setLoading(false);
       }
-    }, 10000); // 10 second timeout
+    }, 60000); // 60 second timeout for Render cold starts
 
     return () => clearTimeout(timeout);
   }, [userId, refreshTrigger]);
