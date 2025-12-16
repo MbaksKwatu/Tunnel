@@ -42,7 +42,7 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
       throw new Error('Unsupported file type. Please upload PDF or CSV files.');
     }
 
-    // Local-first mode: upload directly to backend
+    // Local-first mode: upload to backend and process asynchronously
     if (isLocalMode) {
       // Update progress: uploading
       setUploads(prev => prev.map(u =>
@@ -51,48 +51,74 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
 
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('user_id', userId);
+      formData.append('session_id', userId);
       if (password) {
         formData.append('password', password);
       }
 
       try {
         setUploads(prev => prev.map(u =>
-          u.fileName === file.name ? { ...u, status: 'processing', progress: 60 } : u
+          u.fileName === file.name ? { ...u, status: 'processing', progress: 40 } : u
         ));
 
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 30000);
-
-        const response = await fetch(`${API_URL}/parse`, {
+        const uploadRes = await fetch(`${API_URL}/documents/upload`, {
           method: 'POST',
-          body: formData,
-          signal: controller.signal
+          body: formData
         });
 
-        clearTimeout(timeout);
-
-        const result = await response.json().catch(() => ({}));
-
-        const status = String(result.status || '').toLowerCase();
-        const docId = String(result.document_id || '');
-
-        if (status === 'completed') {
-          setUploads(prev => prev.map(u =>
-            u.fileName === file.name ? { ...u, status: 'completed', progress: 100, documentId: docId || u.documentId } : u
-          ));
-          if (onUploadComplete) onUploadComplete();
-          return;
+        const uploadJson = await uploadRes.json().catch(() => ({}));
+        if (!uploadRes.ok) {
+          const msg = String(uploadJson?.detail || uploadJson?.error || 'Upload failed');
+          throw new Error(msg);
         }
 
-        const errorMessage = String(result.error || 'Parsing failed');
+        const docId = String(uploadJson.document_id || '');
+        if (!docId) {
+          throw new Error('Upload failed: missing document_id');
+        }
+
         setUploads(prev => prev.map(u =>
-          u.fileName === file.name ? { ...u, status: 'error', error: errorMessage, progress: 0, documentId: docId || u.documentId } : u
+          u.fileName === file.name ? { ...u, status: 'processing', progress: 60, documentId: docId } : u
+        ));
+
+        const start = Date.now();
+        const maxMs = 120_000;
+        const pollEveryMs = 3_000;
+
+        while (Date.now() - start < maxMs) {
+          await new Promise(r => setTimeout(r, pollEveryMs));
+
+          const statusRes = await fetch(`${API_URL}/documents/${docId}/status`);
+          const statusJson = await statusRes.json().catch(() => ({}));
+          const status = String(statusJson.status || '').toLowerCase();
+          const err = String(statusJson.error || '');
+
+          if (status === 'completed') {
+            setUploads(prev => prev.map(u =>
+              u.fileName === file.name ? { ...u, status: 'completed', progress: 100, documentId: docId } : u
+            ));
+            if (onUploadComplete) onUploadComplete();
+            return;
+          }
+
+          if (status === 'failed') {
+            const normalized = err === 'PASSWORD_REQUIRED' ? 'PASSWORD_REQUIRED' : (err || 'Processing failed');
+            setUploads(prev => prev.map(u =>
+              u.fileName === file.name ? { ...u, status: 'error', error: normalized, progress: 0, documentId: docId } : u
+            ));
+            return;
+          }
+
+          setUploads(prev => prev.map(u =>
+            u.fileName === file.name ? { ...u, status: 'processing', progress: 75, documentId: docId } : u
+          ));
+        }
+
+        setUploads(prev => prev.map(u =>
+          u.fileName === file.name ? { ...u, status: 'error', error: 'Processing timed out. Please retry.', progress: 0, documentId: docId } : u
         ));
       } catch (error: any) {
-        const errorMessage = error?.name === 'AbortError'
-          ? 'Parsing timed out'
-          : (error.message || 'Unknown error');
+        const errorMessage = (error.message || 'Unknown error');
 
         setUploads(prev => prev.map(u =>
           u.fileName === file.name ? { ...u, status: 'error', error: errorMessage, progress: 0 } : u

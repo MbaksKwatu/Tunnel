@@ -95,8 +95,9 @@ evaluator = Evaluator()
 
 # ==================== HELPER FUNCTIONS ====================
 
-EXTRACTION_TIMEOUT_SECONDS = 90
-STALE_PROCESSING_MAX_AGE_SECONDS = 90
+SYNC_PARSE_TIMEOUT_SECONDS = 25
+ASYNC_PARSE_TIMEOUT_SECONDS = 90
+STALE_PROCESSING_MAX_AGE_SECONDS = 120
 
 def ensure_uuid(user_id: Optional[str]) -> str:
     """
@@ -166,7 +167,7 @@ def cleanup_stale_processing_documents(max_age_seconds: int = STALE_PROCESSING_M
                 """
                 UPDATE documents
                 SET status = 'failed',
-                    error_message = 'Extraction timeout',
+                    error_message = 'Parsing timed out',
                     updated_at = CURRENT_TIMESTAMP
                 WHERE status = 'processing'
                   AND datetime(created_at, '+' || ? || ' seconds') < datetime('now')
@@ -183,7 +184,7 @@ def cleanup_stale_processing_documents(max_age_seconds: int = STALE_PROCESSING_M
             cutoff = (datetime.datetime.utcnow() - datetime.timedelta(seconds=max_age_seconds)).isoformat()
             result = (
                 supabase_client.table('documents')
-                .update({'status': 'failed', 'error_message': 'Extraction timeout'})
+                .update({'status': 'failed', 'error_message': 'Parsing timed out'})
                 .eq('status', 'processing')
                 .lt('created_at', cutoff)
                 .execute()
@@ -252,11 +253,8 @@ async def process_document(document_id: str, file_url: str, file_type: str, pass
         # Parse the file
         rows = await asyncio.wait_for(
             parser.parse(file_url, password=password),
-            timeout=EXTRACTION_TIMEOUT_SECONDS,
+            timeout=SYNC_PARSE_TIMEOUT_SECONDS,
         )
-
-        if (time.time() - parse_start_time) > EXTRACTION_TIMEOUT_SECONDS:
-            raise asyncio.TimeoutError()
         
         if not rows:
             logger.warning(f"No data extracted from document {document_id}")
@@ -278,7 +276,7 @@ async def process_document(document_id: str, file_url: str, file_type: str, pass
         anomalies = anomaly_detector.detect_all(rows)
         detection_time = time.time() - detection_start_time
 
-        if (time.time() - parse_start_time) > EXTRACTION_TIMEOUT_SECONDS:
+        if (time.time() - parse_start_time) > SYNC_PARSE_TIMEOUT_SECONDS:
             raise asyncio.TimeoutError()
         
         # Log individual anomalies
@@ -320,7 +318,7 @@ async def process_document(document_id: str, file_url: str, file_type: str, pass
         storage.update_document_status(
             document_id,
             'failed',
-            error_message='Extraction timeout' if isinstance(e, asyncio.TimeoutError) else str(e)
+            error_message='Parsing timed out' if isinstance(e, asyncio.TimeoutError) else str(e)
         )
         raise
 
@@ -423,7 +421,7 @@ async def parse_document(
             try:
                 rows = await asyncio.wait_for(
                     parser.parse(file_url=None, file_content=file_content, password=password),
-                    timeout=EXTRACTION_TIMEOUT_SECONDS,
+                    timeout=SYNC_PARSE_TIMEOUT_SECONDS,
                 )
             except PasswordRequiredError:
                 raise # Re-raise to be caught by outer block
@@ -431,7 +429,7 @@ async def parse_document(
                 logger.error(f"Parser error: {e}")
                 raise ValueError(f"Failed to parse file: {str(e)}")
 
-            if (time.time() - parse_start_time) > EXTRACTION_TIMEOUT_SECONDS:
+            if (time.time() - parse_start_time) > SYNC_PARSE_TIMEOUT_SECONDS:
                 raise asyncio.TimeoutError()
             
             if not rows:
@@ -452,7 +450,7 @@ async def parse_document(
             if anomalies:
                 anomalies_count = storage.store_anomalies(document_id, anomalies)
 
-            if (time.time() - parse_start_time) > EXTRACTION_TIMEOUT_SECONDS:
+            if (time.time() - parse_start_time) > SYNC_PARSE_TIMEOUT_SECONDS:
                 raise asyncio.TimeoutError()
             
             # Generate insights
@@ -466,9 +464,6 @@ async def parse_document(
                 anomalies_count=anomalies_count,
                 insights_summary=insights
             )
-            
-            # Also set the suggested investee name on the document
-            storage.set_investee_name(document_id, investee_suggested)
             
             return {"status": "completed", "document_id": document_id}
         
@@ -506,13 +501,13 @@ async def parse_document(
                 storage.update_document_status(
                     document_id,
                     'failed',
-                    error_message='Extraction timeout' if isinstance(e, asyncio.TimeoutError) else str(e)
+                    error_message='Parsing timed out' if isinstance(e, asyncio.TimeoutError) else str(e)
                 )
                 logger.info(f"✅ Updated document {document_id} status to 'failed'")
             except Exception as update_error:
                 logger.error(f"Failed to update document status: {update_error}")
         
-        error_value = 'Extraction timeout' if isinstance(e, asyncio.TimeoutError) else str(e)
+        error_value = 'Parsing timed out' if isinstance(e, asyncio.TimeoutError) else str(e)
         return {"status": "failed", "document_id": request.document_id if request else document_id, "error": error_value}
 
 
@@ -526,16 +521,18 @@ async def _process_uploaded_file_bytes(
     password: Optional[str] = None
 ):
     try:
+        cleanup_stale_processing_documents()
+        storage.update_document_status(document_id, 'processing')
         parser = get_parser(file_type)
-        rows = await parser.parse(file_url=None, file_content=file_content, password=password)
+        rows = await asyncio.wait_for(
+            parser.parse(file_url=None, file_content=file_content, password=password),
+            timeout=ASYNC_PARSE_TIMEOUT_SECONDS,
+        )
 
         if not rows:
             storage.update_document_status(document_id, 'completed', rows_count=0, error_message='No data found')
-            investee_suggested = detect_investee_name([], filename)
-            storage.set_investee_name(document_id, investee_suggested)
             return
 
-        investee_suggested = detect_investee_name(rows, filename)
         rows_inserted = storage.store_rows(document_id, rows)
 
         anomalies = anomaly_detector.detect_all(rows)
@@ -552,9 +549,10 @@ async def _process_uploaded_file_bytes(
             anomalies_count=anomalies_count,
             insights_summary=insights
         )
-        storage.set_investee_name(document_id, investee_suggested)
     except PasswordRequiredError:
         storage.update_document_status(document_id, 'failed', error_message='PASSWORD_REQUIRED')
+    except asyncio.TimeoutError:
+        storage.update_document_status(document_id, 'failed', error_message='Parsing timed out')
     except Exception as e:
         logger.error(f"Background processing failed for {document_id}: {e}", exc_info=True)
         storage.update_document_status(document_id, 'failed', error_message=str(e))
@@ -573,13 +571,15 @@ async def upload_document(background_tasks: BackgroundTasks, file: UploadFile = 
     document_id = str(uuid.uuid4())
     resolved_user_id = ensure_uuid(session_id)
 
+    cleanup_stale_processing_documents()
+
     storage.store_document({
         'id': document_id,
         'user_id': resolved_user_id,
         'file_name': file.filename,
         'file_type': file_type,
         'file_url': None,
-        'status': 'processing'
+        'status': 'uploaded'
     })
 
     file_content = await file.read()

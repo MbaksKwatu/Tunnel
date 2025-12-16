@@ -852,11 +852,18 @@ class SupabaseStorage(StorageInterface):
     
     def set_investee_name(self, document_id: str, investee_name: str):
         """Set investee name for a document"""
-        self.supabase.table('documents').update({'investee_name': investee_name}).eq('id', document_id).execute()
+        try:
+            self.supabase.table('documents').update({'investee_name': investee_name}).eq('id', document_id).execute()
+        except Exception as e:
+            logger.warning(f"Skipping investee_name update (likely missing column): {e}")
     
     def get_unique_investees(self) -> List[Dict[str, Any]]:
         """Get list of unique investees with last upload date"""
-        result = self.supabase.table('documents').select('investee_name, created_at').execute()
+        try:
+            result = self.supabase.table('documents').select('investee_name, created_at').execute()
+        except Exception as e:
+            logger.warning(f"Skipping get_unique_investees (likely missing column): {e}")
+            return []
         
         unique = {}
         for row in result.data:
@@ -870,7 +877,11 @@ class SupabaseStorage(StorageInterface):
     
     def get_investee_full_context(self, investee_name: str) -> Dict[str, Any]:
         """Get full context for an investee"""
-        docs = self.supabase.table('documents').select('*').eq('investee_name', investee_name).execute().data
+        try:
+            docs = self.supabase.table('documents').select('*').eq('investee_name', investee_name).execute().data
+        except Exception as e:
+            logger.warning(f"Skipping get_investee_full_context (likely missing column): {e}")
+            return {'documents': [], 'rows': [], 'anomalies': [], 'analysis': []}
         doc_ids = [d['id'] for d in docs]
         
         if not doc_ids:
