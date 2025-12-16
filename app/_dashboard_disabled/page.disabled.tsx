@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import axios from 'axios';
 import {
   Building2,
   LayoutDashboard,
@@ -54,14 +53,20 @@ export default function DashboardPage() {
     setIsLoading(true);
     try {
       const [investeesRes, dashboardsRes, reportsRes] = await Promise.all([
-        axios.get(`${apiUrl}/investees`),
-        axios.get(`${apiUrl}/dashboards`),
-        axios.get(`${apiUrl}/reports`)
+        fetch(`${apiUrl}/investees`),
+        fetch(`${apiUrl}/dashboards`),
+        fetch(`${apiUrl}/reports`)
       ]);
 
-      setInvestees(investeesRes.data);
-      setDashboards(dashboardsRes.data);
-      setReports(reportsRes.data);
+      const [investeesData, dashboardsData, reportsData] = await Promise.all([
+        investeesRes.ok ? investeesRes.json() : [],
+        dashboardsRes.ok ? dashboardsRes.json() : [],
+        reportsRes.ok ? reportsRes.json() : [],
+      ]);
+
+      setInvestees(investeesData);
+      setDashboards(dashboardsData);
+      setReports(reportsData);
     } catch (err) {
       console.error('Error fetching data:', err);
     } finally {

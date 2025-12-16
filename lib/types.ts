@@ -1,5 +1,5 @@
 export type FileType = 'pdf' | 'csv' | 'xlsx';
-export type DocumentStatus = 'uploaded' | 'processing' | 'completed' | 'failed';
+export type DocumentStatus = 'uploaded' | 'processing' | 'partial' | 'completed' | 'failed';
 
 export interface UploadProgress {
   fileName: string;

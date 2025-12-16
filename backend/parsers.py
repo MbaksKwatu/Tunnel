@@ -7,6 +7,7 @@ import pandas as pd
 from typing import List, Dict, Any, Optional
 import logging
 import io
+import time
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -15,6 +16,24 @@ logger = logging.getLogger(__name__)
 class PasswordRequiredError(Exception):
     """Raised when a file requires a password to open"""
     pass
+
+
+class PartialParseError(Exception):
+    def __init__(
+        self,
+        *,
+        rows: List[Dict[str, Any]],
+        error_code: str,
+        error_message: str,
+        next_action: str,
+        rows_expected: Optional[int] = None,
+    ):
+        super().__init__(error_message)
+        self.rows = rows
+        self.error_code = error_code
+        self.error_message = error_message
+        self.next_action = next_action
+        self.rows_expected = rows_expected
 
 
 class FileParser:
@@ -29,7 +48,12 @@ class FileParser:
             return response.content
             
     @staticmethod
-    async def parse(file_url: str, password: Optional[str] = None, file_content: Optional[bytes] = None) -> List[Dict[str, Any]]:
+    async def parse(
+        file_url: str,
+        password: Optional[str] = None,
+        file_content: Optional[bytes] = None,
+        max_seconds: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
         """Parse file and return rows"""
         raise NotImplementedError
 
@@ -38,7 +62,12 @@ class PDFParser(FileParser):
     """Parser for PDF files using pdfplumber"""
     
     @staticmethod
-    async def parse(file_url: str, password: Optional[str] = None, file_content: Optional[bytes] = None) -> List[Dict[str, Any]]:
+    async def parse(
+        file_url: str,
+        password: Optional[str] = None,
+        file_content: Optional[bytes] = None,
+        max_seconds: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Extract tables and text from PDF
         Returns a list of dictionaries representing rows
@@ -51,14 +80,28 @@ class PDFParser(FileParser):
         elif not file_content:
             raise ValueError("Either file_url or file_content must be provided")
         
-        all_rows = []
+        all_rows: List[Dict[str, Any]] = []
+        start_time = time.time()
         
         try:
             # Open PDF with pdfplumber
             with pdfplumber.open(io.BytesIO(file_content), password=password or "") as pdf:
                 logger.info(f"PDF has {len(pdf.pages)} pages")
+
+                total_pages = len(pdf.pages)
                 
                 for page_num, page in enumerate(pdf.pages, start=1):
+                    if max_seconds is not None and (time.time() - start_time) > float(max_seconds):
+                        if all_rows:
+                            raise PartialParseError(
+                                rows=all_rows,
+                                error_code='PARSE_TIMEOUT',
+                                error_message=f"We processed {len(all_rows)} rows before timing out.",
+                                next_action='retry_upload',
+                                rows_expected=None,
+                            )
+                        raise TimeoutError("Parsing timed out")
+
                     # Try to extract tables first
                     tables = page.extract_tables()
                     
@@ -116,7 +159,12 @@ class CSVParser(FileParser):
     """Parser for CSV files using pandas"""
     
     @staticmethod
-    async def parse(file_url: str, password: Optional[str] = None, file_content: Optional[bytes] = None) -> List[Dict[str, Any]]:
+    async def parse(
+        file_url: str,
+        password: Optional[str] = None,
+        file_content: Optional[bytes] = None,
+        max_seconds: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Parse CSV file
         Returns a list of dictionaries representing rows
@@ -188,7 +236,12 @@ class ExcelParser(FileParser):
     """Parser for Excel files using pandas"""
     
     @staticmethod
-    async def parse(file_url: str, password: Optional[str] = None, file_content: Optional[bytes] = None) -> List[Dict[str, Any]]:
+    async def parse(
+        file_url: str,
+        password: Optional[str] = None,
+        file_content: Optional[bytes] = None,
+        max_seconds: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Parse Excel file
         Returns a list of dictionaries representing rows

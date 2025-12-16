@@ -2,7 +2,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 import os
 import json
-import time
+import asyncio
 from local_storage import get_storage
 
 router = APIRouter()
@@ -32,7 +32,7 @@ async def mutate_dashboard(payload: DashboardMutationRequest):
     data_context = f"Financial Data Sample: {json.dumps([r.get('raw_json') for r in rows])}\n"
     data_context += f"Detected Anomalies: {json.dumps(anomalies)}\n"
 
-    time.sleep(1.0) 
+    await asyncio.sleep(1.0)
 
     try:
         if os.getenv("OPENAI_API_KEY"):
@@ -80,84 +80,8 @@ async def mutate_dashboard(payload: DashboardMutationRequest):
     except Exception as e:
         print(f"OpenAI failed: {e}")
 
-    # ... existing mock fallback ...
-    new_dashboard = dashboard.copy()
-    
-    if "revenue" in instruction.lower() or "growth" in instruction.lower():
-        new_dashboard["cards"] = [
-            {
-                "type": "metric",
-                "title": "Annual Revenue Run Rate",
-                "value": "$4.2M",
-                "trend": "+15%",
-                "status": "positive"
-            },
-            {
-                "type": "line_chart",
-                "title": "Revenue Trend (12 Months)",
-                "data": [
-                    {"name": "Jan", "value": 300},
-                    {"name": "Feb", "value": 310},
-                    {"name": "Mar", "value": 340},
-                    {"name": "Apr", "value": 330},
-                    {"name": "May", "value": 360},
-                    {"name": "Jun", "value": 380},
-                    {"name": "Jul", "value": 390},
-                    {"name": "Aug", "value": 410},
-                    {"name": "Sep", "value": 405},
-                    {"name": "Oct", "value": 430},
-                    {"name": "Nov", "value": 450},
-                    {"name": "Dec", "value": 480}
-                ]
-            },
-            {
-                "type": "insights",
-                "title": "Revenue Analysis",
-                "items": [
-                    "Consistent MoM growth averaging 4%.",
-                    "Q4 shows strongest performance due to seasonality.",
-                    "churn rate remains low at 2%."
-                ]
-            }
-        ]
-    elif "profit" in instruction.lower() or "margin" in instruction.lower():
-         new_dashboard["cards"] = [
-            {
-                "type": "metric",
-                "title": "Net Profit Margin",
-                "value": "22%",
-                "trend": "+2.5%",
-                "status": "positive"
-            },
-             {
-                "type": "metric",
-                "title": "Gross Margin",
-                "value": "68%",
-                "trend": "-1%",
-                "status": "warning"
-            },
-            {
-                "type": "line_chart",
-                "title": "EBITDA vs Net Income",
-                "data": [
-                    {"name": "Q1", "value": 120},
-                    {"name": "Q2", "value": 140},
-                    {"name": "Q3", "value": 110},
-                    {"name": "Q4", "value": 180}
-                ]
-            }
-         ]
-    else:
-        # Default add a card
-        new_dashboard["cards"].append({
-            "type": "metric",
-            "title": "New Metric",
-            "value": "100",
-            "trend": "0%",
-            "status": "neutral"
-        })
-
     return {
-        "dashboard": new_dashboard, 
-        "message": "I've updated the dashboard based on your keywords (Demo Fallback)."
+        "error_code": "LLM_UNAVAILABLE",
+        "error_message": "LLM is unavailable (missing OPENAI_API_KEY or upstream failure).",
+        "next_action": "configure_openai_key",
     }

@@ -91,7 +91,9 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
           const statusRes = await fetch(`${API_URL}/documents/${docId}/status`);
           const statusJson = await statusRes.json().catch(() => ({}));
           const status = String(statusJson.status || '').toLowerCase();
-          const err = String(statusJson.error || '');
+          const errMsg = String(statusJson.error_message || '');
+          const errCode = String(statusJson.error_code || '');
+          const nextAction = String(statusJson.next_action || '');
 
           if (status === 'completed') {
             setUploads(prev => prev.map(u =>
@@ -102,7 +104,17 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
           }
 
           if (status === 'failed') {
-            const normalized = err === 'PASSWORD_REQUIRED' ? 'PASSWORD_REQUIRED' : (err || 'Processing failed');
+            const token = errCode || errMsg;
+            const normalized = token === 'PASSWORD_REQUIRED' ? 'PASSWORD_REQUIRED' : (token || 'Processing failed');
+            setUploads(prev => prev.map(u =>
+              u.fileName === file.name ? { ...u, status: 'error', error: normalized, progress: 0, documentId: docId } : u
+            ));
+            return;
+          }
+
+          if (status === 'partial') {
+            const token = errCode || errMsg;
+            const normalized = token === 'PASSWORD_REQUIRED' ? 'PASSWORD_REQUIRED' : (token || nextAction || 'Partial success');
             setUploads(prev => prev.map(u =>
               u.fileName === file.name ? { ...u, status: 'error', error: normalized, progress: 0, documentId: docId } : u
             ));

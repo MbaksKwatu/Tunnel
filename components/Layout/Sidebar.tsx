@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
   Brain,
-  Upload
+  Upload,
+  LayoutDashboard
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -16,6 +17,7 @@ interface NavItem {
 
 const navigation: NavItem[] = [
   { name: 'Upload', href: '/upload', icon: Upload },
+  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
 ];
 
 export default function Sidebar() {

@@ -155,3 +155,6 @@ test_*.json
 # Arbitrary artifacts from cleanup
 *.pdf
 fix_*.sql
+
+# Legacy frontend app (not used)
+frontend/

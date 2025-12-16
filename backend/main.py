@@ -18,7 +18,7 @@ import json
 import datetime
 import sqlite3
 from dotenv import load_dotenv
-from parsers import get_parser, PasswordRequiredError
+from parsers import get_parser, PasswordRequiredError, PartialParseError
 
 # Import new modules
 from local_storage import get_storage, StorageInterface, SQLiteStorage
@@ -379,137 +379,15 @@ async def parse_document(
     password: Optional[str] = Form(None),
     user_id: Optional[str] = Form(None)
 ):
-    """
-    Parse a document and extract structured data with anomaly detection
-    
-    This endpoint supports two modes:
-    1. Direct file upload (local-first): POST with multipart/form-data file
-    2. Supabase mode: POST with JSON containing document_id, file_url, file_type
-    """
-    parse_start_time = time.time()
-    document_id = None  # Track document ID for error handling
-    try:
-        # Check if direct file upload (local-first mode)
-        if file:
-            cleanup_stale_processing_documents()
-            logger.info(f"📨 Direct file upload: {file.filename}")
-            debug_logger.log_upload(file.filename, file.filename.split('.')[-1], file.size, "new")
-            
-            # Read file content
-            file_content = await file.read()
-            file_type = file.filename.split('.')[-1].lower()
-
-            if file_type not in ['pdf', 'csv']:
-                return {"status": "failed", "error": f"Unsupported file type: {file_type}"}
-            
-            # Create document record
-            document_id = str(uuid.uuid4())
-            resolved_user_id = ensure_uuid(user_id)
-            logger.info(f"Resolved user_id for upload: {resolved_user_id}")
-            document_data = {
-                'id': document_id,
-                'user_id': resolved_user_id,
-                'file_name': file.filename,
-                'file_type': file_type,
-                'file_url': None,
-                'status': 'processing'
-            }
-            storage.store_document(document_data)
-            
-            # Save file temporarily (or process directly)
-            parser = get_parser(file_type)
-            try:
-                rows = await asyncio.wait_for(
-                    parser.parse(file_url=None, file_content=file_content, password=password),
-                    timeout=SYNC_PARSE_TIMEOUT_SECONDS,
-                )
-            except PasswordRequiredError:
-                raise # Re-raise to be caught by outer block
-            except Exception as e:
-                logger.error(f"Parser error: {e}")
-                raise ValueError(f"Failed to parse file: {str(e)}")
-
-            if (time.time() - parse_start_time) > SYNC_PARSE_TIMEOUT_SECONDS:
-                raise asyncio.TimeoutError()
-            
-            if not rows:
-                storage.update_document_status(document_id, 'completed', rows_count=0, error_message='No data found')
-                investee_suggested = detect_investee_name([], file.filename)
-                return {"status": "completed", "document_id": document_id}
-            
-            # Detect investee name from parsed data
-            investee_suggested = detect_investee_name(rows, file.filename)
-            logger.info(f"📋 Detected investee name: {investee_suggested}")
-            
-            # Store rows
-            rows_inserted = storage.store_rows(document_id, rows)
-            
-            # Run anomaly detection
-            anomalies = anomaly_detector.detect_all(rows)
-            anomalies_count = 0
-            if anomalies:
-                anomalies_count = storage.store_anomalies(document_id, anomalies)
-
-            if (time.time() - parse_start_time) > SYNC_PARSE_TIMEOUT_SECONDS:
-                raise asyncio.TimeoutError()
-            
-            # Generate insights
-            insights = insight_generator.generate_insights(anomalies)
-            
-            # Update document with suggested investee name
-            storage.update_document_status(
-                document_id,
-                'completed',
-                rows_count=rows_inserted,
-                anomalies_count=anomalies_count,
-                insights_summary=insights
-            )
-            
-            return {"status": "completed", "document_id": document_id}
-        
-        # Supabase mode: existing flow
-        if not request:
-            return {"status": "failed", "error": "Either file upload or parse request required"}
-        
-        logger.info(f"📨 Parse request received for document {request.document_id}")
-
-        # Validate file type
-        if request.file_type not in ['pdf', 'csv']:
-            return {"status": "failed", "error": f"Unsupported file type: {request.file_type}"}
-        
-        # Process the document
-        rows_extracted, anomalies, insights = await process_document(
-            request.document_id,
-            request.file_url,
-            request.file_type,
-            request.password
-        )
-        
-        return {"status": "completed", "document_id": request.document_id}
-        
-    except PasswordRequiredError:
-        logger.warning(f"Password required for document {request.document_id if request else document_id}")
-        return {"status": "failed", "document_id": request.document_id if request else document_id, "error": "PASSWORD_REQUIRED"}
-        
-    except Exception as e:
-        logger.error(f"Error in parse endpoint: {e}", exc_info=True)
-        debug_logger.log_error("PARSE", e, {"filename": file.filename if file else None})
-        
-        # Update document status to 'failed' if document was created
-        if document_id:
-            try:
-                storage.update_document_status(
-                    document_id,
-                    'failed',
-                    error_message='Parsing timed out' if isinstance(e, asyncio.TimeoutError) else str(e)
-                )
-                logger.info(f"✅ Updated document {document_id} status to 'failed'")
-            except Exception as update_error:
-                logger.error(f"Failed to update document status: {update_error}")
-        
-        error_value = 'Parsing timed out' if isinstance(e, asyncio.TimeoutError) else str(e)
-        return {"status": "failed", "document_id": request.document_id if request else document_id, "error": error_value}
-
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "status": "failed",
+            "error_code": "SYNC_PARSE_DISABLED",
+            "error_message": "Synchronous parse is disabled. Use /documents/upload + polling.",
+            "next_action": "use_async_upload",
+        },
+    )
 
 async def _process_uploaded_file_bytes(
     *,
@@ -522,15 +400,58 @@ async def _process_uploaded_file_bytes(
 ):
     try:
         cleanup_stale_processing_documents()
-        storage.update_document_status(document_id, 'processing')
-        parser = get_parser(file_type)
-        rows = await asyncio.wait_for(
-            parser.parse(file_url=None, file_content=file_content, password=password),
-            timeout=ASYNC_PARSE_TIMEOUT_SECONDS,
+        storage.update_document_status(
+            document_id,
+            'processing',
+            rows_parsed=0,
+            error_code=None,
+            error_message=None,
+            next_action=None,
         )
+        parser = get_parser(file_type)
+        try:
+            rows = await parser.parse(
+                file_url=None,
+                file_content=file_content,
+                password=password,
+                max_seconds=ASYNC_PARSE_TIMEOUT_SECONDS,
+            )
+        except PartialParseError as pe:
+            rows = pe.rows
+            if rows:
+                rows_inserted = storage.store_rows(document_id, rows)
+                storage.update_document_status(
+                    document_id,
+                    'partial',
+                    rows_count=rows_inserted,
+                    rows_parsed=rows_inserted,
+                    rows_expected=pe.rows_expected,
+                    error_code=pe.error_code,
+                    error_message=pe.error_message,
+                    next_action=pe.next_action,
+                )
+                return
+            storage.update_document_status(
+                document_id,
+                'failed',
+                rows_count=0,
+                rows_parsed=0,
+                error_code=pe.error_code,
+                error_message=pe.error_message,
+                next_action=pe.next_action,
+            )
+            return
 
         if not rows:
-            storage.update_document_status(document_id, 'completed', rows_count=0, error_message='No data found')
+            storage.update_document_status(
+                document_id,
+                'completed',
+                rows_count=0,
+                rows_parsed=0,
+                error_code='NO_DATA',
+                error_message='No data found',
+                next_action='upload_new_file',
+            )
             return
 
         rows_inserted = storage.store_rows(document_id, rows)
@@ -546,16 +467,29 @@ async def _process_uploaded_file_bytes(
             document_id,
             'completed',
             rows_count=rows_inserted,
+            rows_parsed=rows_inserted,
             anomalies_count=anomalies_count,
             insights_summary=insights
         )
     except PasswordRequiredError:
-        storage.update_document_status(document_id, 'failed', error_message='PASSWORD_REQUIRED')
-    except asyncio.TimeoutError:
-        storage.update_document_status(document_id, 'failed', error_message='Parsing timed out')
+        storage.update_document_status(
+            document_id,
+            'partial',
+            rows_count=0,
+            rows_parsed=0,
+            error_code='PASSWORD_REQUIRED',
+            error_message='PASSWORD_REQUIRED',
+            next_action='provide_password',
+        )
     except Exception as e:
         logger.error(f"Background processing failed for {document_id}: {e}", exc_info=True)
-        storage.update_document_status(document_id, 'failed', error_message=str(e))
+        storage.update_document_status(
+            document_id,
+            'failed',
+            error_code='PROCESSING_FAILED',
+            error_message=str(e),
+            next_action='retry_upload',
+        )
 
 
 def _run_background_process_uploaded_file_bytes(**kwargs):
@@ -565,7 +499,7 @@ def _run_background_process_uploaded_file_bytes(**kwargs):
 @app.post("/documents/upload")
 async def upload_document(background_tasks: BackgroundTasks, file: UploadFile = File(...), password: Optional[str] = Form(None), session_id: Optional[str] = Form(None)):
     file_type = file.filename.split('.')[-1].lower()
-    if file_type not in ['pdf', 'csv']:
+    if file_type not in ['pdf', 'csv', 'xlsx']:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_type}")
 
     document_id = str(uuid.uuid4())
@@ -606,7 +540,11 @@ async def get_document_status(document_id: str):
     return {
         "document_id": document_id,
         "status": doc.get('status'),
-        "error": doc.get('error_message')
+        "rows_parsed": doc.get('rows_parsed'),
+        "rows_expected": doc.get('rows_expected'),
+        "error_code": doc.get('error_code'),
+        "error_message": doc.get('error_message'),
+        "next_action": doc.get('next_action'),
     }
 
 
@@ -673,6 +611,7 @@ async def get_all_documents(session_id: Optional[str] = None):
                 cursor.execute("""
                     SELECT id, user_id, file_name, file_type, file_url, format_detected,
                            upload_date, status, rows_count, anomalies_count, error_message,
+                           error_code, next_action, rows_parsed, rows_expected,
                            insights_summary, created_at, updated_at
                     FROM documents
                     WHERE user_id = ?
@@ -682,6 +621,7 @@ async def get_all_documents(session_id: Optional[str] = None):
                 cursor.execute("""
                     SELECT id, user_id, file_name, file_type, file_url, format_detected,
                            upload_date, status, rows_count, anomalies_count, error_message,
+                           error_code, next_action, rows_parsed, rows_expected,
                            insights_summary, created_at, updated_at
                     FROM documents
                     ORDER BY upload_date DESC
@@ -701,9 +641,13 @@ async def get_all_documents(session_id: Optional[str] = None):
                     'rows_count': row[8] or 0,
                     'anomalies_count': row[9] or 0,
                     'error_message': row[10],
-                    'insights_summary': json.loads(row[11]) if row[11] else None,
-                    'created_at': row[12] or '',
-                    'updated_at': row[13] or ''
+                    'error_code': row[11],
+                    'next_action': row[12],
+                    'rows_parsed': row[13],
+                    'rows_expected': row[14],
+                    'insights_summary': json.loads(row[15]) if row[15] else None,
+                    'created_at': row[16] or '',
+                    'updated_at': row[17] or ''
                 }
                 documents.append(doc)
             

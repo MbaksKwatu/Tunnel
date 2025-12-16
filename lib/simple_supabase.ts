@@ -142,21 +142,5 @@ export async function parseDocument(
   fileContent: Uint8Array,
   fileType: 'pdf' | 'csv' | 'xlsx'
 ) {
-  const response = await fetch(`${API_BASE}/parse`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      document_id: documentId,
-      file_content: Array.from(fileContent), // Convert to array for JSON
-      file_type: fileType
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to parse document');
-  }
-
-  return response.json();
+  throw new Error('Synchronous parse is disabled. Use /documents/upload + polling.');
 }

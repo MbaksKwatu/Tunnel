@@ -69,6 +69,8 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
         return <Clock className="h-4 w-4 text-gray-500" />;
       case 'processing':
         return <Loader2 className="h-4 w-4 text-yellow-500 animate-spin" />;
+      case 'partial':
+        return <AlertCircle className="h-4 w-4 text-yellow-500" />;
       case 'completed':
         return <CheckCircle className="h-4 w-4 text-green-500" />;
       case 'failed':
@@ -82,6 +84,8 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
         return 'Uploaded';
       case 'processing':
         return 'Processing...';
+      case 'partial':
+        return 'Partial';
       case 'completed':
         return 'Completed';
       case 'failed':
@@ -94,6 +98,8 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
       case 'uploaded':
         return 'text-gray-400 bg-gray-800';
       case 'processing':
+        return 'text-yellow-400 bg-yellow-900/20';
+      case 'partial':
         return 'text-yellow-400 bg-yellow-900/20';
       case 'completed':
         return 'text-green-400 bg-green-900/20';
@@ -161,10 +167,14 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
                   )}
                 </div>
 
-                {document.status === 'failed' && document.error_message && (
-                  <div className="mt-2 text-xs text-red-400 bg-red-900/20 border border-red-800 p-2 rounded">
-                    {document.error_message}
-                  </div>
+                {(document.status === 'failed' || document.status === 'partial') && (
+                  (document.error_message || document.error_code || document.next_action) ? (
+                    <div className={`mt-2 text-xs ${document.status === 'failed' ? 'text-red-400 bg-red-900/20 border-red-800' : 'text-yellow-400 bg-yellow-900/20 border-yellow-800'} border p-2 rounded`}>
+                      {document.error_code ? <div>{document.error_code}</div> : null}
+                      {document.error_message ? <div>{document.error_message}</div> : null}
+                      {document.next_action ? <div>{document.next_action}</div> : null}
+                    </div>
+                  ) : null
                 )}
               </div>
             </div>

@@ -35,9 +35,13 @@ class StorageInterface:
     def update_document_status(
         self, 
         document_id: str, 
-        status: str, 
+        status: Optional[str], 
         rows_count: Optional[int] = None,
+        rows_parsed: Optional[int] = None,
+        rows_expected: Optional[int] = None,
+        error_code: Optional[str] = None,
         error_message: Optional[str] = None,
+        next_action: Optional[str] = None,
         anomalies_count: Optional[int] = None,
         insights_summary: Optional[Dict[str, Any]] = None
     ):
@@ -83,8 +87,12 @@ class SQLiteStorage(StorageInterface):
                 upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 status TEXT DEFAULT 'uploaded',
                 rows_count INTEGER DEFAULT 0,
+                rows_parsed INTEGER DEFAULT 0,
+                rows_expected INTEGER,
                 anomalies_count INTEGER DEFAULT 0,
+                error_code TEXT,
                 error_message TEXT,
+                next_action TEXT,
                 insights_summary TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -209,7 +217,7 @@ class SQLiteStorage(StorageInterface):
             conn.close()
     
     def _migrate_documents_table(self):
-        """Add investee_name column to documents table if it doesn't exist"""
+        """Add missing columns to documents table if they don't exist"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -220,6 +228,22 @@ class SQLiteStorage(StorageInterface):
             if 'investee_name' not in columns:
                 logger.info("Migrating documents table: adding investee_name")
                 cursor.execute("ALTER TABLE documents ADD COLUMN investee_name TEXT")
+
+            if 'rows_parsed' not in columns:
+                logger.info("Migrating documents table: adding rows_parsed")
+                cursor.execute("ALTER TABLE documents ADD COLUMN rows_parsed INTEGER DEFAULT 0")
+
+            if 'rows_expected' not in columns:
+                logger.info("Migrating documents table: adding rows_expected")
+                cursor.execute("ALTER TABLE documents ADD COLUMN rows_expected INTEGER")
+
+            if 'error_code' not in columns:
+                logger.info("Migrating documents table: adding error_code")
+                cursor.execute("ALTER TABLE documents ADD COLUMN error_code TEXT")
+
+            if 'next_action' not in columns:
+                logger.info("Migrating documents table: adding next_action")
+                cursor.execute("ALTER TABLE documents ADD COLUMN next_action TEXT")
             
             conn.commit()
         except Exception as e:
@@ -238,10 +262,11 @@ class SQLiteStorage(StorageInterface):
         cursor.execute("""
             INSERT INTO documents (
                 id, user_id, file_name, file_type, file_url, 
-                format_detected, investee_name, status, rows_count, anomalies_count, 
-                insights_summary, error_message
+                format_detected, investee_name, status, rows_count, rows_parsed, rows_expected,
+                anomalies_count, error_code, error_message, next_action,
+                insights_summary
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             document_id,
             document_data.get('user_id'),
@@ -252,9 +277,13 @@ class SQLiteStorage(StorageInterface):
             document_data.get('investee_name'),
             document_data.get('status', 'uploaded'),
             document_data.get('rows_count', 0),
+            document_data.get('rows_parsed', 0),
+            document_data.get('rows_expected'),
             document_data.get('anomalies_count', 0),
-            json.dumps(document_data.get('insights_summary')) if document_data.get('insights_summary') else None,
-            document_data.get('error_message')
+            document_data.get('error_code'),
+            document_data.get('error_message'),
+            document_data.get('next_action'),
+            json.dumps(document_data.get('insights_summary')) if document_data.get('insights_summary') else None
         ))
         
         conn.commit()
@@ -335,35 +364,62 @@ class SQLiteStorage(StorageInterface):
     def update_document_status(
         self, 
         document_id: str, 
-        status: str, 
+        status: Optional[str], 
         rows_count: Optional[int] = None,
+        rows_parsed: Optional[int] = None,
+        rows_expected: Optional[int] = None,
+        error_code: Optional[str] = None,
         error_message: Optional[str] = None,
+        next_action: Optional[str] = None,
         anomalies_count: Optional[int] = None,
         insights_summary: Optional[Dict[str, Any]] = None
     ):
         """Update document status"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
-        updates = ['status = ?']
-        params = [status]
+
+        updates: List[str] = []
+        params: List[Any] = []
+
+        if status is not None:
+            updates.append('status = ?')
+            params.append(status)
         
         if rows_count is not None:
             updates.append('rows_count = ?')
             params.append(rows_count)
-        
+
+        if rows_parsed is not None:
+            updates.append('rows_parsed = ?')
+            params.append(rows_parsed)
+
+        if rows_expected is not None:
+            updates.append('rows_expected = ?')
+            params.append(rows_expected)
+
         if anomalies_count is not None:
             updates.append('anomalies_count = ?')
             params.append(anomalies_count)
-        
         if error_message is not None:
             updates.append('error_message = ?')
             params.append(error_message)
+
+        if error_code is not None:
+            updates.append('error_code = ?')
+            params.append(error_code)
+
+        if next_action is not None:
+            updates.append('next_action = ?')
+            params.append(next_action)
         
         if insights_summary is not None:
             updates.append('insights_summary = ?')
             params.append(json.dumps(insights_summary))
         
+        if not updates:
+            conn.close()
+            return
+
         updates.append('updated_at = CURRENT_TIMESTAMP')
         params.append(document_id)
         
@@ -747,27 +803,58 @@ class SupabaseStorage(StorageInterface):
     def update_document_status(
         self, 
         document_id: str, 
-        status: str, 
+        status: Optional[str], 
         rows_count: Optional[int] = None,
+        rows_parsed: Optional[int] = None,
+        rows_expected: Optional[int] = None,
+        error_code: Optional[str] = None,
         error_message: Optional[str] = None,
+        next_action: Optional[str] = None,
         anomalies_count: Optional[int] = None,
         insights_summary: Optional[Dict[str, Any]] = None
     ):
         """Update document status"""
-        update_data = {}
-        
-        if status:
+        update_data: Dict[str, Any] = {}
+
+        if status is not None:
             update_data['status'] = status
         if rows_count is not None:
             update_data['rows_count'] = rows_count
+        if rows_parsed is not None:
+            update_data['rows_parsed'] = rows_parsed
+        if rows_expected is not None:
+            update_data['rows_expected'] = rows_expected
         if anomalies_count is not None:
             update_data['anomalies_count'] = anomalies_count
+        if error_code is not None:
+            update_data['error_code'] = error_code
         if error_message is not None:
             update_data['error_message'] = error_message
+        if next_action is not None:
+            update_data['next_action'] = next_action
         if insights_summary is not None:
             update_data['insights_summary'] = insights_summary
-        
-        self.supabase.table('documents').update(update_data).eq('id', document_id).execute()
+
+        if not update_data:
+            return
+
+        try:
+            self.supabase.table('documents').update(update_data).eq('id', document_id).execute()
+        except Exception as e:
+            logger.warning(f"Document status update failed (likely schema mismatch): {e}")
+            safe_update_data: Dict[str, Any] = {}
+            if status is not None:
+                safe_update_data['status'] = status
+            if rows_count is not None:
+                safe_update_data['rows_count'] = rows_count
+            if anomalies_count is not None:
+                safe_update_data['anomalies_count'] = anomalies_count
+            if error_message is not None:
+                safe_update_data['error_message'] = error_message
+            if insights_summary is not None:
+                safe_update_data['insights_summary'] = insights_summary
+            if safe_update_data:
+                self.supabase.table('documents').update(safe_update_data).eq('id', document_id).execute()
     
     def store_anomalies(self, document_id: str, anomalies: List[Dict[str, Any]]) -> int:
         """Store anomalies for document"""

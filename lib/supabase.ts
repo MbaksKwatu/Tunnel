@@ -13,7 +13,9 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
 const API_BASE = API_URL;
 
 // Check if we're in local-first mode (no Supabase)
-export const isLocalMode = true;
+export const isLocalMode =
+  process.env.NEXT_PUBLIC_FORCE_LOCAL_MODE === 'true' ||
+  !supabase;
 
 // Types for our database tables
 export interface Document {
@@ -24,10 +26,14 @@ export interface Document {
   file_url: string | null;
   format_detected: string | null;
   upload_date: string;
-  status: 'uploaded' | 'processing' | 'completed' | 'failed';
+  status: 'uploaded' | 'processing' | 'partial' | 'completed' | 'failed';
   rows_count: number;
+  rows_parsed?: number | null;
+  rows_expected?: number | null;
   anomalies_count?: number;
+  error_code?: string | null;
   error_message: string | null;
+  next_action?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -43,11 +49,12 @@ export interface ExtractedRow {
 // Helper function to upload file to Supabase Storage or backend
 export async function uploadFile(file: File, userId: string) {
   if (isLocalMode || !supabase) {
-    // Local mode: upload directly to backend
+    // Local mode: upload to backend and process asynchronously
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('session_id', userId);
 
-    const response = await fetch(`${API_BASE}/parse`, {
+    const response = await fetch(`${API_BASE}/documents/upload`, {
       method: 'POST',
       body: formData
     });

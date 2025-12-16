@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 import os
-import time
+import asyncio
 
 router = APIRouter()
 
@@ -12,7 +12,7 @@ class EmailDraftRequest(BaseModel):
 async def draft_review_email(payload: EmailDraftRequest):
     missing_info = payload.missing_info
     
-    time.sleep(1.5)
+    await asyncio.sleep(1.5)
 
     try:
         if os.getenv("OPENAI_API_KEY"):
@@ -29,7 +29,6 @@ async def draft_review_email(payload: EmailDraftRequest):
     except Exception as e:
         print(f"OpenAI failed: {e}")
 
-    # Mock Response
     email = f"""Subject: Outstanding Items for Due Diligence - FundIQ Review
 
 Dear Team,
@@ -48,4 +47,9 @@ Best regards,
 
 Parity Investment Team
 """
-    return {"email": email}
+    return {
+        "email": email,
+        "error_code": "LLM_UNAVAILABLE",
+        "error_message": "LLM is unavailable (missing OPENAI_API_KEY or upstream failure). Returned a static template.",
+        "next_action": "configure_openai_key",
+    }
