@@ -49,6 +49,7 @@ backend/.env
 .env.test.local
 .env.production.local
 .env.*.local
+.env*
 
 # Database files
 backend/fundiq_demo.db
