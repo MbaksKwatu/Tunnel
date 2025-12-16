@@ -95,6 +95,9 @@ evaluator = Evaluator()
 
 # ==================== HELPER FUNCTIONS ====================
 
+EXTRACTION_TIMEOUT_SECONDS = 90
+STALE_PROCESSING_MAX_AGE_SECONDS = 90
+
 def ensure_uuid(user_id: Optional[str]) -> str:
     """
     Normalize user_id to a UUID string.
@@ -153,6 +156,46 @@ def detect_investee_name(rows: List[Dict[str, Any]], filename: str) -> str:
     return name.title() if name else "Unknown Company"
 
 
+def cleanup_stale_processing_documents(max_age_seconds: int = STALE_PROCESSING_MAX_AGE_SECONDS) -> int:
+    try:
+        if isinstance(storage, SQLiteStorage):
+            db_path = storage.db_path
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE documents
+                SET status = 'failed',
+                    error_message = 'Extraction timeout',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE status = 'processing'
+                  AND datetime(created_at, '+' || ? || ' seconds') < datetime('now')
+                """,
+                (max_age_seconds,),
+            )
+            updated_count = cursor.rowcount
+            conn.commit()
+            conn.close()
+            return int(updated_count or 0)
+
+        supabase_client = getattr(storage, 'supabase', None)
+        if supabase_client:
+            cutoff = (datetime.datetime.utcnow() - datetime.timedelta(seconds=max_age_seconds)).isoformat()
+            result = (
+                supabase_client.table('documents')
+                .update({'status': 'failed', 'error_message': 'Extraction timeout'})
+                .eq('status', 'processing')
+                .lt('created_at', cutoff)
+                .execute()
+            )
+            return len(result.data) if getattr(result, 'data', None) else 0
+
+        return 0
+    except Exception as e:
+        logger.warning(f"Cleanup stale processing failed: {e}")
+        return 0
+
+
 # Pydantic models
 class ParseRequest(BaseModel):
     document_id: str = Field(..., description="Document ID from database")
@@ -196,6 +239,7 @@ async def process_document(document_id: str, file_url: str, file_type: str, pass
     parse_start_time = time.time()
     
     try:
+        cleanup_stale_processing_documents()
         debug_logger.log_parse_start(document_id, file_type)
         logger.info(f"Processing document {document_id} ({file_type})")
         
@@ -206,7 +250,13 @@ async def process_document(document_id: str, file_url: str, file_type: str, pass
         parser = get_parser(file_type)
         
         # Parse the file
-        rows = await parser.parse(file_url, password=password)
+        rows = await asyncio.wait_for(
+            parser.parse(file_url, password=password),
+            timeout=EXTRACTION_TIMEOUT_SECONDS,
+        )
+
+        if (time.time() - parse_start_time) > EXTRACTION_TIMEOUT_SECONDS:
+            raise asyncio.TimeoutError()
         
         if not rows:
             logger.warning(f"No data extracted from document {document_id}")
@@ -227,6 +277,9 @@ async def process_document(document_id: str, file_url: str, file_type: str, pass
         detection_start_time = time.time()
         anomalies = anomaly_detector.detect_all(rows)
         detection_time = time.time() - detection_start_time
+
+        if (time.time() - parse_start_time) > EXTRACTION_TIMEOUT_SECONDS:
+            raise asyncio.TimeoutError()
         
         # Log individual anomalies
         for anomaly in anomalies:
@@ -267,7 +320,7 @@ async def process_document(document_id: str, file_url: str, file_type: str, pass
         storage.update_document_status(
             document_id,
             'failed',
-            error_message=str(e)
+            error_message='Extraction timeout' if isinstance(e, asyncio.TimeoutError) else str(e)
         )
         raise
 
@@ -335,10 +388,12 @@ async def parse_document(
     1. Direct file upload (local-first): POST with multipart/form-data file
     2. Supabase mode: POST with JSON containing document_id, file_url, file_type
     """
+    parse_start_time = time.time()
     document_id = None  # Track document ID for error handling
     try:
         # Check if direct file upload (local-first mode)
         if file:
+            cleanup_stale_processing_documents()
             logger.info(f"📨 Direct file upload: {file.filename}")
             debug_logger.log_upload(file.filename, file.filename.split('.')[-1], file.size, "new")
             
@@ -366,12 +421,18 @@ async def parse_document(
             # Save file temporarily (or process directly)
             parser = get_parser(file_type)
             try:
-                rows = await parser.parse(file_url=None, file_content=file_content, password=password)
+                rows = await asyncio.wait_for(
+                    parser.parse(file_url=None, file_content=file_content, password=password),
+                    timeout=EXTRACTION_TIMEOUT_SECONDS,
+                )
             except PasswordRequiredError:
                 raise # Re-raise to be caught by outer block
             except Exception as e:
                 logger.error(f"Parser error: {e}")
                 raise ValueError(f"Failed to parse file: {str(e)}")
+
+            if (time.time() - parse_start_time) > EXTRACTION_TIMEOUT_SECONDS:
+                raise asyncio.TimeoutError()
             
             if not rows:
                 storage.update_document_status(document_id, 'completed', rows_count=0, error_message='No data found')
@@ -390,6 +451,9 @@ async def parse_document(
             anomalies_count = 0
             if anomalies:
                 anomalies_count = storage.store_anomalies(document_id, anomalies)
+
+            if (time.time() - parse_start_time) > EXTRACTION_TIMEOUT_SECONDS:
+                raise asyncio.TimeoutError()
             
             # Generate insights
             insights = insight_generator.generate_insights(anomalies)
@@ -442,13 +506,14 @@ async def parse_document(
                 storage.update_document_status(
                     document_id,
                     'failed',
-                    error_message=str(e)
+                    error_message='Extraction timeout' if isinstance(e, asyncio.TimeoutError) else str(e)
                 )
                 logger.info(f"✅ Updated document {document_id} status to 'failed'")
             except Exception as update_error:
                 logger.error(f"Failed to update document status: {update_error}")
         
-        return {"status": "failed", "document_id": request.document_id if request else document_id, "error": str(e)}
+        error_value = 'Extraction timeout' if isinstance(e, asyncio.TimeoutError) else str(e)
+        return {"status": "failed", "document_id": request.document_id if request else document_id, "error": error_value}
 
 
 async def _process_uploaded_file_bytes(
@@ -533,6 +598,7 @@ async def upload_document(background_tasks: BackgroundTasks, file: UploadFile = 
 
 @app.get("/documents/{document_id}/status")
 async def get_document_status(document_id: str):
+    cleanup_stale_processing_documents()
     doc = storage.get_document(document_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -594,6 +660,7 @@ async def analyze_document(request: AnalyzeRequest):
 async def get_all_documents(session_id: Optional[str] = None):
     """Get all documents (for local mode)"""
     try:
+        cleanup_stale_processing_documents()
         # Use storage interface to get documents
         # For SQLite, query directly
         if isinstance(storage, SQLiteStorage):
@@ -643,9 +710,15 @@ async def get_all_documents(session_id: Optional[str] = None):
             conn.close()
             return documents
         else:
-            # For Supabase, use storage methods
-            # Return empty for now - would need to implement get_all in storage interface
-            return []
+            supabase_client = getattr(storage, 'supabase', None)
+            if not supabase_client:
+                return []
+
+            query = supabase_client.table('documents').select('*').order('upload_date', desc=True)
+            if session_id:
+                query = query.eq('user_id', ensure_uuid(session_id))
+            result = query.execute()
+            return result.data or []
         
     except Exception as e:
         logger.error(f"Error fetching documents: {e}")
