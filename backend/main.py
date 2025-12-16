@@ -18,7 +18,7 @@ import json
 import datetime
 import sqlite3
 from dotenv import load_dotenv
-from parsers import get_parser, PasswordRequiredError, PartialParseError
+from parsers import get_parser, PasswordRequiredError, PartialParseError, normalize_transaction_rows
 
 # Import new modules
 from local_storage import get_storage, StorageInterface, SQLiteStorage
@@ -255,6 +255,8 @@ async def process_document(document_id: str, file_url: str, file_type: str, pass
             parser.parse(file_url, password=password),
             timeout=SYNC_PARSE_TIMEOUT_SECONDS,
         )
+
+        rows = normalize_transaction_rows(rows)
         
         if not rows:
             logger.warning(f"No data extracted from document {document_id}")
@@ -418,6 +420,7 @@ async def _process_uploaded_file_bytes(
             )
         except PartialParseError as pe:
             rows = pe.rows
+            rows = normalize_transaction_rows(rows)
             if rows:
                 rows_inserted = storage.store_rows(document_id, rows)
                 storage.update_document_status(
@@ -431,16 +434,20 @@ async def _process_uploaded_file_bytes(
                     next_action=pe.next_action,
                 )
                 return
+
             storage.update_document_status(
                 document_id,
                 'failed',
                 rows_count=0,
                 rows_parsed=0,
+                rows_expected=pe.rows_expected,
                 error_code=pe.error_code,
                 error_message=pe.error_message,
                 next_action=pe.next_action,
             )
             return
+
+        rows = normalize_transaction_rows(rows)
 
         if not rows:
             storage.update_document_status(
@@ -558,7 +565,7 @@ async def analyze_document(request: AnalyzeRequest):
             raise HTTPException(status_code=404, detail="Document not found or has no rows")
         
         # Extract raw_json from rows
-        rows = [row['raw_json'] for row in rows_data]
+        rows = normalize_transaction_rows([row['raw_json'] for row in rows_data])
         
         # Run anomaly detection
         detection_start_time = time.time()
@@ -799,7 +806,7 @@ async def evaluate_document(document_id: str):
         if not rows_data:
              return {"metrics": []}
              
-        rows = [row['raw_json'] for row in rows_data]
+        rows = normalize_transaction_rows([row['raw_json'] for row in rows_data])
         return evaluator.evaluate(rows)
     except Exception as e:
         logger.error(f"Error evaluating document: {e}")
@@ -818,7 +825,7 @@ async def generate_ic_report(document_id: str):
             raise HTTPException(status_code=404, detail="Document not found")
             
         rows_data = storage.get_rows(document_id, limit=100000)
-        rows = [row['raw_json'] for row in rows_data]
+        rows = normalize_transaction_rows([row['raw_json'] for row in rows_data])
         
         anomalies = storage.get_anomalies(document_id)
         notes = notes_manager.get_all_notes(document_id)

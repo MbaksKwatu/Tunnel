@@ -71,6 +71,21 @@ export function computeInsights(
  * Calculate month-over-month revenue growth
  */
 function calculateRevenueGrowth(rows: ExtractedRow[]): number {
+  if (hasCanonicalAmount(rows)) {
+    const amounts = extractCanonicalAmounts(rows);
+    const revenues = amounts.filter(a => a > 0);
+    if (revenues.length < 2) return 0;
+
+    const firstHalf = revenues.slice(0, Math.floor(revenues.length / 2));
+    const secondHalf = revenues.slice(Math.floor(revenues.length / 2));
+
+    const firstAvg = firstHalf.reduce((a, b) => a + b, 0) / firstHalf.length;
+    const secondAvg = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length;
+
+    if (firstAvg === 0) return 0;
+    return ((secondAvg - firstAvg) / firstAvg) * 100;
+  }
+
   const revenueField = findRevenueField(rows);
   if (!revenueField) return 0;
 
@@ -93,13 +108,17 @@ function calculateRevenueGrowth(rows: ExtractedRow[]): number {
  * Higher score = more stable
  */
 function calculateStability(rows: ExtractedRow[]): number {
-  const cashFlowFields = findCashFlowFields(rows);
-  if (cashFlowFields.length === 0) return 50; // Neutral if no data
-
   const allValues: number[] = [];
-  cashFlowFields.forEach(field => {
-    allValues.push(...extractNumericValues(rows, field));
-  });
+  if (hasCanonicalAmount(rows)) {
+    allValues.push(...extractCanonicalAmounts(rows));
+  } else {
+    const cashFlowFields = findCashFlowFields(rows);
+    if (cashFlowFields.length === 0) return 50; // Neutral if no data
+
+    cashFlowFields.forEach(field => {
+      allValues.push(...extractNumericValues(rows, field));
+    });
+  }
 
   if (allValues.length < 2) return 50;
 
@@ -119,6 +138,15 @@ function calculateStability(rows: ExtractedRow[]): number {
  * Calculate expense to revenue ratio
  */
 function calculateExpenseRatio(rows: ExtractedRow[]): number {
+  if (hasCanonicalAmount(rows)) {
+    const amounts = extractCanonicalAmounts(rows);
+    const totalRevenue = amounts.filter(a => a > 0).reduce((a, b) => a + b, 0);
+    const totalExpenses = amounts.filter(a => a < 0).reduce((a, b) => a + Math.abs(b), 0);
+
+    if (totalRevenue === 0) return 0;
+    return (totalExpenses / totalRevenue) * 100;
+  }
+
   const revenueField = findRevenueField(rows);
   const expenseField = findExpenseField(rows);
 
@@ -139,6 +167,13 @@ function calculateExpenseRatio(rows: ExtractedRow[]): number {
  * Calculate average revenue
  */
 function calculateAverageRevenue(rows: ExtractedRow[]): number {
+  if (hasCanonicalAmount(rows)) {
+    const revenues = extractCanonicalAmounts(rows).filter(a => a > 0);
+    if (revenues.length === 0) return 0;
+    const sum = revenues.reduce((a, b) => a + b, 0);
+    return sum / revenues.length;
+  }
+
   const revenueField = findRevenueField(rows);
   if (!revenueField) return 0;
 
@@ -153,6 +188,12 @@ function calculateAverageRevenue(rows: ExtractedRow[]): number {
  * Calculate total expenses
  */
 function calculateTotalExpenses(rows: ExtractedRow[]): number {
+  if (hasCanonicalAmount(rows)) {
+    return extractCanonicalAmounts(rows)
+      .filter(a => a < 0)
+      .reduce((a, b) => a + Math.abs(b), 0);
+  }
+
   const expenseField = findExpenseField(rows);
   if (!expenseField) return 0;
 
@@ -195,6 +236,29 @@ function findRevenueField(rows: ExtractedRow[]): string | null {
 function findExpenseField(rows: ExtractedRow[]): string | null {
   const keywords = ['expense', 'cost', 'payment', 'outgoing', 'spend'];
   return findFieldByKeywords(rows, keywords);
+}
+
+function hasCanonicalAmount(rows: ExtractedRow[]): boolean {
+  if (rows.length === 0) return false;
+  const firstRow = rows[0];
+  const rawJson = firstRow.raw_json || {};
+  return Object.prototype.hasOwnProperty.call(rawJson, 'amount');
+}
+
+function extractCanonicalAmounts(rows: ExtractedRow[]): number[] {
+  const values: number[] = [];
+  for (const row of rows) {
+    const rawJson = row.raw_json || {};
+    const value = rawJson['amount'];
+    if (value === null || value === undefined || value === '') {
+      continue;
+    }
+    const numValue = toNumber(value);
+    if (numValue !== null && !isNaN(numValue)) {
+      values.push(numValue);
+    }
+  }
+  return values;
 }
 
 function findCashFlowFields(rows: ExtractedRow[]): string[] {

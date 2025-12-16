@@ -33,12 +33,17 @@ class Evaluator:
             # Pre-process columns to numeric
             rev_series = pd.Series([0]*len(df))
             exp_series = pd.Series([0]*len(df))
-            
-            if revenue_col:
-                rev_series = df[revenue_col].apply(self._to_numeric).fillna(0)
-            
-            if expense_col:
-                exp_series = df[expense_col].apply(self._to_numeric).fillna(0)
+
+            if 'amount' in df.columns:
+                amt_series = df['amount'].apply(self._to_numeric).fillna(0)
+                rev_series = amt_series.clip(lower=0)
+                exp_series = (-amt_series.clip(upper=0))
+            else:
+                if revenue_col:
+                    rev_series = df[revenue_col].apply(self._to_numeric).fillna(0)
+                
+                if expense_col:
+                    exp_series = df[expense_col].apply(self._to_numeric).fillna(0)
                 
             # Filter out zero rows for meaningful calc? 
             # Requirement says (last - first). Assuming time series order.

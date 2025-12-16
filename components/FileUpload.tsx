@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Upload, File, CheckCircle, XCircle, Loader2, Lock, Unlock, RotateCcw, X } from 'lucide-react';
+import { Upload, File, CheckCircle, XCircle, Loader2, Lock, Unlock, RotateCcw, X, AlertTriangle } from 'lucide-react';
 import { isLocalMode } from '@/lib/supabase';
 import { FileType, UploadProgress } from '@/lib/types';
 import { API_URL } from '@/lib/api';
@@ -17,11 +17,16 @@ interface ExtendedUploadProgress extends UploadProgress {
   documentId?: string;
   investeeNameSuggested?: string;
   investeeConfirmed?: boolean;
+  rowsParsed?: number;
+  rowsExpected?: number | null;
+  errorCode?: string;
+  nextAction?: string;
 }
 
 export default function FileUpload({ userId, onUploadComplete }: FileUploadProps) {
   const [uploads, setUploads] = useState<ExtendedUploadProgress[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [dropError, setDropError] = useState<string | null>(null);
 
   // Password handling state
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -94,10 +99,12 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
           const errMsg = String(statusJson.error_message || '');
           const errCode = String(statusJson.error_code || '');
           const nextAction = String(statusJson.next_action || '');
+          const rowsParsed = typeof statusJson.rows_parsed === 'number' ? statusJson.rows_parsed : undefined;
+          const rowsExpected = typeof statusJson.rows_expected === 'number' ? statusJson.rows_expected : null;
 
           if (status === 'completed') {
             setUploads(prev => prev.map(u =>
-              u.fileName === file.name ? { ...u, status: 'completed', progress: 100, documentId: docId } : u
+              u.fileName === file.name ? { ...u, status: 'completed', progress: 100, documentId: docId, rowsParsed, rowsExpected, errorCode: errCode || undefined, nextAction: nextAction || undefined } : u
             ));
             if (onUploadComplete) onUploadComplete();
             return;
@@ -107,17 +114,25 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
             const token = errCode || errMsg;
             const normalized = token === 'PASSWORD_REQUIRED' ? 'PASSWORD_REQUIRED' : (token || 'Processing failed');
             setUploads(prev => prev.map(u =>
-              u.fileName === file.name ? { ...u, status: 'error', error: normalized, progress: 0, documentId: docId } : u
+              u.fileName === file.name ? { ...u, status: 'error', error: normalized, progress: 0, documentId: docId, rowsParsed, rowsExpected, errorCode: errCode || undefined, nextAction: nextAction || undefined } : u
             ));
             return;
           }
 
           if (status === 'partial') {
             const token = errCode || errMsg;
-            const normalized = token === 'PASSWORD_REQUIRED' ? 'PASSWORD_REQUIRED' : (token || nextAction || 'Partial success');
+            if (token === 'PASSWORD_REQUIRED') {
+              setUploads(prev => prev.map(u =>
+                u.fileName === file.name ? { ...u, status: 'error', error: 'PASSWORD_REQUIRED', progress: 0, documentId: docId, rowsParsed, rowsExpected, errorCode: errCode || undefined, nextAction: nextAction || undefined } : u
+              ));
+              return;
+            }
+
+            const normalized = token || nextAction || 'Partial success';
             setUploads(prev => prev.map(u =>
-              u.fileName === file.name ? { ...u, status: 'error', error: normalized, progress: 0, documentId: docId } : u
+              u.fileName === file.name ? { ...u, status: 'partial', error: normalized, progress: 100, documentId: docId, rowsParsed, rowsExpected, errorCode: errCode || undefined, nextAction: nextAction || undefined } : u
             ));
+            if (onUploadComplete) onUploadComplete();
             return;
           }
 
@@ -143,6 +158,7 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
   };
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    setDropError(null);
     setIsUploading(true);
 
     // Initialize upload progress for all files
@@ -166,8 +182,11 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
       // Let's just process.
       try {
         await processFile(file);
-      } catch {
-        // errors are handled per-file in state
+      } catch (e: any) {
+        const message = e?.message || 'Upload failed';
+        setUploads(prev => prev.map(u =>
+          u.fileName === file.name ? { ...u, status: 'error', error: message, progress: 0 } : u
+        ));
       }
     }
 
@@ -175,9 +194,25 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
 
     // Clear completed uploads after 5 seconds (keep errors for retry)
     setTimeout(() => {
-      setUploads(prev => prev.filter(u => u.status === 'uploading' || u.status === 'processing' || u.status === 'error'));
+      setUploads(prev => prev.filter(u => u.status === 'uploading' || u.status === 'processing' || u.status === 'error' || u.status === 'partial'));
     }, 5000);
   }, [userId, onUploadComplete]);
+
+  const onDropRejected = useCallback((fileRejections: any[]) => {
+    setDropError('Unsupported file type. Please upload PDF or CSV files.');
+    if (Array.isArray(fileRejections) && fileRejections.length > 0) {
+      const rejectedUploads: UploadProgress[] = fileRejections.map((r: any) => {
+        const name = String(r?.file?.name || 'Unknown file');
+        return {
+          fileName: name,
+          progress: 0,
+          status: 'error',
+          error: 'Unsupported file type. Please upload PDF or CSV files.',
+        };
+      });
+      setUploads(prev => [...prev, ...rejectedUploads]);
+    }
+  }, []);
 
   // Need to keep track of files for retry
   const [filesMap, setFilesMap] = useState<Map<string, File>>(new Map());
@@ -204,7 +239,17 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
   const handleRetry = (fileName: string) => {
     const file = filesMap.get(fileName);
     if (file) {
-      processFile(file);
+      if (confirm(`Re-upload and retry processing for "${file.name}"?`)) {
+        processFile(file);
+      }
+    }
+  };
+
+  const scrollToUpload = () => {
+    try {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch {
+      window.scrollTo(0, 0);
     }
   };
 
@@ -229,6 +274,7 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop: onDropWithStorage,
+    onDropRejected,
     accept: {
       'application/pdf': ['.pdf'],
       'text/csv': ['.csv']
@@ -260,11 +306,18 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
               Drag & drop files here, or click to select
             </p>
             <p className="text-sm text-gray-500">
-              Supports: PDF, CSV (Excel coming soon)
+              Supports: PDF, CSV
             </p>
           </>
         )}
       </div>
+
+      {dropError && (
+        <p className="mt-2 text-xs text-red-400 flex items-center">
+          <XCircle className="h-3 w-3 mr-1" />
+          {dropError}
+        </p>
+      )}
 
       {/* Upload Progress */}
       {uploads.length > 0 && (
@@ -290,15 +343,32 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
                     </button>
                   ) : null}
 
-                  {upload.status === 'error' && upload.error !== 'PASSWORD_REQUIRED' ? (
+                  {(upload.status === 'error' || upload.status === 'partial') && upload.error !== 'PASSWORD_REQUIRED' ? (
                     <div className="flex items-center space-x-2">
-                      <button
-                        onClick={() => handleRetry(upload.fileName)}
-                        className="p-1.5 rounded-full bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white transition-colors"
-                        title="Retry"
-                      >
-                        <RotateCcw className="h-4 w-4" />
-                      </button>
+                      {(upload.nextAction === 'retry_upload' || upload.status === 'error') && (
+                        <button
+                          onClick={() => handleRetry(upload.fileName)}
+                          className="flex items-center space-x-1 px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors text-xs font-medium border border-gray-600"
+                          title="Re-upload"
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                          <span>Re-upload</span>
+                        </button>
+                      )}
+
+                      {upload.nextAction === 'upload_new_file' && (
+                        <button
+                          onClick={() => {
+                            scrollToUpload();
+                          }}
+                          className="flex items-center space-x-1 px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-200 transition-colors text-xs font-medium border border-gray-700"
+                          title="Fix formatting and re-upload"
+                        >
+                          <AlertTriangle className="h-3 w-3" />
+                          <span>Fix formatting</span>
+                        </button>
+                      )}
+
                       <button
                         onClick={() => handleDismiss(upload.fileName)}
                         className="p-1.5 rounded-full hover:bg-gray-700 text-gray-500 hover:text-red-400 transition-colors"
@@ -344,16 +414,49 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
                     <p className="text-xs text-green-400">
                       Completed successfully!
                     </p>
+                    {typeof upload.rowsParsed === 'number' ? (
+                      <p className="text-xs text-gray-400">Parsed: {upload.rowsParsed} rows</p>
+                    ) : null}
+                  </div>
+                )}
+                {upload.status === 'partial' && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-yellow-400 font-medium">
+                      Partial success
+                    </p>
+                    <div className="text-xs text-gray-300">
+                      <div>Parsed: {typeof upload.rowsParsed === 'number' ? upload.rowsParsed : 'N/A'} rows</div>
+                      {typeof upload.rowsExpected === 'number' ? (
+                        <div>Expected: {upload.rowsExpected} rows</div>
+                      ) : null}
+                      {typeof upload.rowsParsed === 'number' && typeof upload.rowsExpected === 'number' && upload.rowsExpected > upload.rowsParsed ? (
+                        <div>Missing: {upload.rowsExpected - upload.rowsParsed} rows</div>
+                      ) : null}
+                    </div>
+                    {upload.error && upload.error !== 'PASSWORD_REQUIRED' ? (
+                      <p className="text-xs text-yellow-300">{upload.error}</p>
+                    ) : null}
+                    {upload.nextAction ? (
+                      <p className="text-xs text-gray-400">Next action: {upload.nextAction}</p>
+                    ) : null}
                   </div>
                 )}
                 {upload.status === 'error' && (
                   upload.error === 'PASSWORD_REQUIRED' ? (
                     <p className="text-xs text-yellow-400 font-medium">Password required to decrypt file.</p>
                   ) : (
-                    <p className="text-xs text-red-400 flex items-center">
-                      <XCircle className="h-3 w-3 mr-1" />
-                      {upload.error}
-                    </p>
+                    <div className="space-y-1">
+                      <p className="text-xs text-red-400 flex items-center">
+                        <XCircle className="h-3 w-3 mr-1" />
+                        {upload.error}
+                      </p>
+                      {upload.errorCode ? (
+                        <p className="text-xs text-gray-400">Error code: {upload.errorCode}</p>
+                      ) : null}
+                      {upload.nextAction ? (
+                        <p className="text-xs text-gray-400">Next action: {upload.nextAction}</p>
+                      ) : null}
+                    </div>
                   )
                 )}
               </div>

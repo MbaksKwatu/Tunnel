@@ -4,7 +4,7 @@ export type DocumentStatus = 'uploaded' | 'processing' | 'partial' | 'completed'
 export interface UploadProgress {
   fileName: string;
   progress: number;
-  status: 'uploading' | 'processing' | 'completed' | 'error';
+  status: 'uploading' | 'processing' | 'completed' | 'partial' | 'error';
   error?: string;
 }
 

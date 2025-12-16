@@ -9,8 +9,157 @@ import logging
 import io
 import time
 import httpx
+import re
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_key(key: str) -> str:
+    return re.sub(r"\s+", " ", str(key or "").strip().lower())
+
+
+def _to_number(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    s = str(value).strip()
+    if not s:
+        return None
+
+    s_lower = s.lower()
+    sign = 1.0
+
+    if " dr" in f" {s_lower}" or s_lower.endswith("dr"):
+        sign = -1.0
+    elif " cr" in f" {s_lower}" or s_lower.endswith("cr"):
+        sign = 1.0
+
+    if "(" in s and ")" in s:
+        sign *= -1.0
+        s = s.replace("(", "").replace(")", "")
+
+    if s.endswith("-"):
+        sign *= -1.0
+        s = s[:-1]
+
+    s = s.replace("$", "").replace(",", "").replace(" ", "")
+    s = re.sub(r"[^0-9.+-]", "", s)
+
+    if not s:
+        return None
+
+    try:
+        return float(s) * sign
+    except Exception:
+        return None
+
+
+def _to_iso_date(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        dt = pd.to_datetime(s, errors='coerce', infer_datetime_format=True)
+        if pd.isna(dt):
+            return None
+        return dt.date().isoformat()
+    except Exception:
+        return None
+
+
+def normalize_transaction_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not rows:
+        return rows
+
+    date_aliases = [
+        'transaction_date',
+        'transaction date',
+        'date',
+        'posting date',
+        'post date',
+        'value date',
+        'booking date',
+        'timestamp',
+        'time',
+    ]
+
+    amount_aliases = [
+        'amount',
+        'transaction amount',
+        'txn amount',
+        'net amount',
+        'amt',
+        'value',
+    ]
+
+    debit_aliases = ['debit', 'dr', 'withdrawal', 'outflow', 'money out']
+    credit_aliases = ['credit', 'cr', 'deposit', 'inflow', 'money in']
+
+    normalized: List[Dict[str, Any]] = []
+
+    for row in rows:
+        if not isinstance(row, dict):
+            normalized.append(row)
+            continue
+
+        out = dict(row)
+        key_map = { _normalize_key(k): k for k in row.keys() }
+
+        date_val = None
+        for alias in date_aliases:
+            src_key = key_map.get(alias)
+            if src_key is None:
+                continue
+            date_val = row.get(src_key)
+            if date_val not in (None, ''):
+                break
+
+        out['transaction_date'] = _to_iso_date(date_val)
+
+        amount_val = None
+        for alias in amount_aliases:
+            src_key = key_map.get(alias)
+            if src_key is None:
+                continue
+            amount_val = row.get(src_key)
+            if amount_val not in (None, ''):
+                break
+
+        amount_num = _to_number(amount_val)
+
+        if amount_num is None:
+            debit_val = None
+            credit_val = None
+            for alias in debit_aliases:
+                src_key = key_map.get(alias)
+                if src_key is not None:
+                    debit_val = row.get(src_key)
+                    if debit_val not in (None, ''):
+                        break
+            for alias in credit_aliases:
+                src_key = key_map.get(alias)
+                if src_key is not None:
+                    credit_val = row.get(src_key)
+                    if credit_val not in (None, ''):
+                        break
+
+            debit_num = _to_number(debit_val)
+            credit_num = _to_number(credit_val)
+
+            if debit_num is not None or credit_num is not None:
+                amount_num = float(credit_num or 0.0) - float(debit_num or 0.0)
+
+        out['amount'] = amount_num
+        normalized.append(out)
+
+    return normalized
 
 
 class PasswordRequiredError(Exception):
