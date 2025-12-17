@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 // Import Inter font
@@ -23,6 +24,7 @@ export default function RootLayout({
     <html lang="en" className={`dark ${inter.variable}`}>
       <body className="font-body bg-base-950 text-gray-200 antialiased">
         {children}
+        <Analytics />
       </body>
     </html>
   );
