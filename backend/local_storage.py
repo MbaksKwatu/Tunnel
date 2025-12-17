@@ -908,7 +908,7 @@ class SupabaseStorage(StorageInterface):
                 .order('severity', ascending=False)
                 .execute()
             )
-            return result.data
+            return result.data or []
         except Exception as e:
             logger.error(f"Error getting anomalies from Supabase: {e}")
             raise e

@@ -736,7 +736,52 @@ async def get_document_rows(document_id: str, limit: int = 100, offset: int = 0)
 async def get_document_anomalies(document_id: str):
     """Get all anomalies for a document"""
     try:
-        anomalies = storage.get_anomalies(document_id)
+        raw_anomalies = storage.get_anomalies(document_id) or []
+
+        anomalies: List[Dict[str, Any]] = []
+        for a in raw_anomalies:
+            if isinstance(a, dict):
+                metadata = a.get('metadata')
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except Exception:
+                        metadata = None
+                if metadata is None:
+                    metadata = {}
+
+                evidence = a.get('evidence')
+                if isinstance(evidence, str):
+                    try:
+                        evidence = json.loads(evidence)
+                    except Exception:
+                        evidence = None
+
+                raw_json = a.get('raw_json')
+                if isinstance(raw_json, str):
+                    try:
+                        raw_json = json.loads(raw_json)
+                    except Exception:
+                        raw_json = None
+
+                anomalies.append(
+                    {
+                        'id': a.get('id'),
+                        'document_id': a.get('document_id') or document_id,
+                        'row_index': a.get('row_index'),
+                        'anomaly_type': a.get('anomaly_type'),
+                        'severity': a.get('severity') or 'low',
+                        'description': a.get('description'),
+                        'score': a.get('score'),
+                        'suggested_action': a.get('suggested_action'),
+                        'metadata': metadata,
+                        'raw_json': raw_json,
+                        'evidence': evidence,
+                        'detected_at': a.get('detected_at'),
+                    }
+                )
+            else:
+                anomalies.append({'row_index': None, 'description': str(a), 'severity': 'low'})
         return {
             "document_id": document_id,
             "anomalies": anomalies,
