@@ -76,9 +76,9 @@ function inferGranularity(dates: Date[]): 'day' | 'month' {
 }
 
 function severityColor(sev: Severity): string {
-  if (sev === 'high') return '#EF4444';
-  if (sev === 'medium') return '#F59E0B';
-  return '#3B82F6';
+  if (sev === 'high') return 'rgba(248,113,113,0.55)';
+  if (sev === 'medium') return 'rgba(251,191,36,0.55)';
+  return 'rgba(34,211,238,0.45)';
 }
 
 export default function InsightsDashboard({ rows, anomalies }: InsightsDashboardProps) {
@@ -163,60 +163,39 @@ export default function InsightsDashboard({ rows, anomalies }: InsightsDashboard
       .slice(0, 10);
   }, [anomaliesArray]);
 
+  const AnomalyOverviewTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload || payload.length === 0) return null;
+    const entry = payload?.[0]?.payload;
+    const sev = typeof entry?.severity === 'string' ? String(entry.severity).toUpperCase() : '';
+
+    return (
+      <div className="bg-[#0D0F12] border border-gray-700 rounded-lg px-3 py-2">
+        <div className="text-sm text-gray-200 font-medium">{label}</div>
+        {sev && <div className="text-xs text-gray-500 mt-0.5">{sev}</div>}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
-      {!hasAnomalies && (
-        <div className="bg-[#0D0F12] border border-gray-700 rounded-lg p-4">
-          <div className="text-sm font-semibold text-gray-200 mb-2">✅ Clean Data Snapshot</div>
-          <div className="text-sm text-gray-300 leading-relaxed">
-            No anomalies were detected by the current detection engines for this dataset.
-            <div className="mt-2 text-xs text-gray-500">
-              Disclaimer: This reflects only the checks currently enabled and does not guarantee the absence of financial, operational, or fraud risk.
-            </div>
-          </div>
-
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
-            <div className="bg-[#0B0D10] border border-gray-800 rounded p-3">
-              <div className="text-[11px] text-gray-500">Rows analyzed</div>
-              <div className="text-sm text-gray-200 mt-1">{rows.length.toLocaleString()}</div>
-            </div>
-            <div className="bg-[#0B0D10] border border-gray-800 rounded p-3">
-              <div className="text-[11px] text-gray-500">Date range</div>
-              <div className="text-sm text-gray-200 mt-1">
-                {dateRange.min} → {dateRange.max}
-              </div>
-            </div>
-            <div className="bg-[#0B0D10] border border-gray-800 rounded p-3">
-              <div className="text-[11px] text-gray-500">Engines</div>
-              <div className="text-sm text-gray-200 mt-1">Rules + statistical outliers</div>
-            </div>
-            <div className="bg-[#0B0D10] border border-gray-800 rounded p-3">
-              <div className="text-[11px] text-gray-500">Evaluated</div>
-              <div className="text-sm text-gray-200 mt-1">{evaluatedAt}</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="bg-[#0D0F12] border border-gray-700 rounded-lg p-4">
+      <div className="bg-[#0D0F12] border border-gray-700 rounded-lg p-5">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <div className="text-sm font-semibold text-gray-200">Risk Coverage</div>
+            <div className="text-sm font-semibold text-gray-100">Risk Coverage</div>
             <div className="text-xs text-gray-500 mt-1">Coverage reflects the breadth of enabled detection checks.</div>
           </div>
 
           <div className="text-right">
-            <div className="text-2xl font-semibold text-cyan-300">72%</div>
-            <div className="text-[11px] text-gray-500">coverage</div>
+            <div className="text-2xl font-semibold text-cyan-200">72%</div>
+            <div className="text-[11px] uppercase tracking-wider text-gray-500">coverage</div>
           </div>
         </div>
 
-        <div className="mt-3 h-2 bg-[#0B0D10] border border-gray-800 rounded overflow-hidden">
+        <div className="mt-4 h-2 bg-[#0B0D10] border border-gray-800 rounded overflow-hidden">
           <div className="h-full bg-cyan-500/40" style={{ width: '72%' }} />
         </div>
-        {/* TODO: compute dynamically as detection engines increase */}
 
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <div className="text-xs font-semibold text-gray-300 mb-2">Completed checks</div>
             <div className="space-y-2 text-sm text-gray-200">
@@ -236,7 +215,7 @@ export default function InsightsDashboard({ rows, anomalies }: InsightsDashboard
           </div>
 
           <div>
-            <div className="text-xs font-semibold text-gray-300 mb-2">Disabled checks</div>
+            <div className="text-xs font-semibold text-gray-300 mb-2">Roadmap</div>
             <div className="space-y-2 text-sm text-gray-400">
               <div className="flex items-center justify-between bg-[#0B0D10] border border-gray-800 rounded px-3 py-2 opacity-70">
                 <div className="flex items-center gap-2">
@@ -263,6 +242,43 @@ export default function InsightsDashboard({ rows, anomalies }: InsightsDashboard
           </div>
         </div>
       </div>
+
+      {!hasAnomalies && (
+        <div className="bg-[#0D0F12] border border-gray-700 rounded-lg p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-sm font-semibold text-gray-100">Clean Data Snapshot</div>
+              <div className="mt-1 text-sm text-gray-300 leading-relaxed">
+                No anomalies were detected by the current detection engines for this dataset.
+              </div>
+              <div className="mt-2 text-xs text-gray-500">
+                This reflects only the checks currently enabled and does not guarantee the absence of financial, operational, or fraud risk.
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div className="bg-[#0B0D10] border border-gray-800 rounded p-3">
+                  <div className="text-[11px] text-gray-500">Rows analyzed</div>
+                  <div className="text-sm text-gray-200 mt-1">{rows.length.toLocaleString()}</div>
+                </div>
+                <div className="bg-[#0B0D10] border border-gray-800 rounded p-3">
+                  <div className="text-[11px] text-gray-500">Date range</div>
+                  <div className="text-sm text-gray-200 mt-1">
+                    {dateRange.min} → {dateRange.max}
+                  </div>
+                </div>
+                <div className="bg-[#0B0D10] border border-gray-800 rounded p-3">
+                  <div className="text-[11px] text-gray-500">Engines</div>
+                  <div className="text-sm text-gray-200 mt-1">Rules + statistical outliers</div>
+                </div>
+                <div className="bg-[#0B0D10] border border-gray-800 rounded p-3">
+                  <div className="text-[11px] text-gray-500">Evaluated</div>
+                  <div className="text-sm text-gray-200 mt-1">{evaluatedAt}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-[#0D0F12] border border-gray-700 rounded-lg p-4">
@@ -317,10 +333,7 @@ export default function InsightsDashboard({ rows, anomalies }: InsightsDashboard
                   height={60}
                   tick={{ fill: '#9CA3AF', fontSize: 12 }}
                 />
-                <YAxis tick={{ fill: '#9CA3AF', fontSize: 12 }} allowDecimals={false} />
-                <Tooltip
-                  contentStyle={{ background: '#0D0F12', border: '1px solid #374151', color: '#E5E7EB' }}
-                />
+                <Tooltip content={<AnomalyOverviewTooltip />} />
                 <Bar dataKey="count">
                   {anomalyTop.map((entry, idx) => (
                     <Cell key={idx} fill={severityColor(entry.severity)} />

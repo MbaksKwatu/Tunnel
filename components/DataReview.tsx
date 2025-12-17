@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { Download, X, Search, ArrowUpDown, ChevronLeft, ChevronRight, RefreshCw, AlertTriangle } from 'lucide-react';
+import { X, Search, ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { getExtractedRows, Document, ExtractedRow } from '@/lib/supabase';
 import AnomalyTable from './AnomalyTable';
 import InsightsDashboard from './InsightsDashboard';
@@ -25,7 +25,6 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState(1);
   const [viewMode, setViewMode] = useState<'data' | 'anomalies' | 'insights'>('data');
-  const [rerunLoading, setRerunLoading] = useState(false);
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   const rowsPerPage = 50;
@@ -41,7 +40,6 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
   }, [document.id]);
 
   useEffect(() => {
-    if (viewMode !== 'insights') return;
     if (anomaliesLoading) return;
     if (anomaliesLoaded) return;
 
@@ -63,7 +61,7 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
     };
 
     loadAnomalies();
-  }, [viewMode, anomaliesLoading, anomaliesLoaded, document.id]);
+  }, [anomaliesLoading, anomaliesLoaded, document.id]);
 
   const loadRows = async () => {
     try {
@@ -79,26 +77,7 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
     }
   };
 
-  const rerunDetection = async () => {
-    try {
-      setRerunLoading(true);
-      const response = await fetch(`${API_URL}/api/anomalies/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ document_id: document.id })
-      });
-
-      if (!response.ok) throw new Error('Failed to rerun detection');
-
-      // Refresh the page to show updated data
-      window.location.reload();
-    } catch (err: any) {
-      console.error('Error rerunning detection:', err);
-      setError(err.message || 'Failed to rerun detection');
-    } finally {
-      setRerunLoading(false);
-    }
-  };
+  const anomaliesPresent = anomalies.length > 0;
 
   // Get all unique columns from the data
   const columns = useMemo(() => {
@@ -211,34 +190,6 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
     }
   };
 
-  const downloadCSV = () => {
-    if (rows.length === 0) return;
-
-    // Create CSV content
-    const headers = columns.join(',');
-    const csvRows = rows.map(row =>
-      columns.map(col => {
-        const value = row.raw_json[col];
-        // Escape quotes and wrap in quotes if contains comma
-        const stringValue = String(value ?? '');
-        return stringValue.includes(',') || stringValue.includes('"')
-          ? `"${stringValue.replace(/"/g, '""')}"`
-          : stringValue;
-      }).join(',')
-    );
-
-    const csv = [headers, ...csvRows].join('\n');
-
-    // Download
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = window.document.createElement('a');
-    a.href = url;
-    a.download = `${document.file_name}_extracted.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-  };
-
   const startResize = (column: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -290,14 +241,12 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
                 className={`px-3 py-1 rounded text-sm font-medium transition-colors relative ${viewMode === 'anomalies'
                   ? 'bg-[#1B1E23] text-gray-100 shadow-sm border border-gray-700'
                   : 'text-gray-400 hover:text-gray-200'
+                  } ${anomaliesPresent
+                    ? 'ring-1 ring-cyan-400/40 shadow-[0_0_16px_rgba(34,211,238,0.12)]'
+                    : ''
                   }`}
               >
                 Anomalies
-                {document.anomalies_count && document.anomalies_count > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
-                    {document.anomalies_count}
-                  </span>
-                )}
               </button>
               <button
                 onClick={() => setViewMode('insights')}
@@ -309,36 +258,6 @@ export default function DataReview({ document, onClose }: DataReviewProps) {
                 Insights
               </button>
             </div>
-
-            {/* Re-run Detection Button (shown only in Anomalies tab) */}
-            {viewMode === 'anomalies' && (
-              <button
-                onClick={rerunDetection}
-                disabled={rerunLoading}
-                className="px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 transition-colors flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <RefreshCw className={`h-4 w-4 ${rerunLoading ? 'animate-spin' : ''}`} />
-                <span>{rerunLoading ? 'Running...' : 'Re-run Detection'}</span>
-              </button>
-            )}
-
-            
-            <button
-              disabled
-              className="px-4 py-2 bg-gray-800 text-gray-400 rounded-lg border border-gray-700 cursor-not-allowed"
-              title="Disabled"
-            >
-              Generate Report
-            </button>
-
-            {/* Download Buttons */}
-            <button
-              onClick={downloadCSV}
-              className="px-4 py-2 bg-gradient-to-r from-cyan-400 to-green-400 text-[#0D0F12] font-semibold rounded-lg hover:opacity-90 transition-opacity flex items-center space-x-2"
-            >
-              <Download className="h-4 w-4" />
-              <span>CSV</span>
-            </button>
 
             <button
               onClick={onClose}

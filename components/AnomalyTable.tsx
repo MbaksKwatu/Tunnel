@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { AlertTriangle, AlertCircle, Info, ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { API_URL } from '@/lib/api';
 
 interface Anomaly {
@@ -12,6 +12,7 @@ interface Anomaly {
   severity: 'high' | 'medium' | 'low';
   description: string;
   suggested_action?: string;
+  raw_json?: Record<string, any>;
   detected_at?: string;
 }
 
@@ -48,27 +49,17 @@ export default function AnomalyTable({ documentId, onRowClick }: AnomalyTablePro
     }
   };
 
-  const getSeverityIcon = (severity: string) => {
-    switch (severity) {
-      case 'high':
-        return <AlertCircle className="h-4 w-4 text-red-600" />;
-      case 'medium':
-        return <AlertTriangle className="h-4 w-4 text-yellow-600" />;
-      case 'low':
-        return <Info className="h-4 w-4 text-blue-600" />;
-      default:
-        return null;
-    }
-  };
-
   const getSeverityBadge = (severity: string) => {
     const colors = {
-      high: 'bg-red-100 text-red-800 border-red-300',
-      medium: 'bg-yellow-100 text-yellow-800 border-yellow-300',
-      low: 'bg-blue-100 text-blue-800 border-blue-300'
+      high: 'border-red-500/40 text-red-300',
+      medium: 'border-amber-500/40 text-amber-300',
+      low: 'border-cyan-400/30 text-cyan-200',
     };
+
     return (
-      <span className={`px-2 py-1 rounded text-xs font-medium border ${colors[severity as keyof typeof colors]}`}>
+      <span
+        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border bg-transparent ${colors[severity as keyof typeof colors] || 'border-gray-600 text-gray-300'}`}
+      >
         {severity.toUpperCase()}
       </span>
     );
@@ -86,26 +77,44 @@ export default function AnomalyTable({ documentId, onRowClick }: AnomalyTablePro
     return names[type] || type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
   };
 
-  const getSuggestedAction = (anomaly: Anomaly) => {
-    if (anomaly.suggested_action) return anomaly.suggested_action;
+  const getTransactionContext = (anomaly: Anomaly) => {
+    const raw = anomaly.raw_json || {};
 
-    const type = anomaly.anomaly_type;
-    const severity = anomaly.severity;
-
-    const actions: Record<string, string> = {
-      revenue_anomaly: severity === 'high'
-        ? 'Verify data entry and check for refunds or reversals'
-        : 'Review trend and confirm with business owner',
-      expense_integrity: severity === 'high'
-        ? 'Investigate potential duplicate charges or fraud'
-        : 'Add missing descriptions or verify amounts',
-      cashflow_consistency: 'Reconcile balance jumps with transaction log',
-      payroll_pattern: severity === 'high'
-        ? 'Verify employee count and payment authorization'
-        : 'Check for overtime, bonuses, or seasonal factors',
-      declared_mismatch: 'Reconcile declared totals with detailed breakdown'
+    const findValue = (pred: (key: string, value: any) => boolean) => {
+      for (const [k, v] of Object.entries(raw)) {
+        if (v == null || v === '') continue;
+        if (pred(k, v)) return v;
+      }
+      return undefined;
     };
-    return actions[type] || 'Review data for accuracy';
+
+    const txType =
+      (typeof raw.type === 'string' && raw.type) ||
+      (typeof raw.transaction_type === 'string' && raw.transaction_type) ||
+      (typeof findValue((k, v) => /transaction\s*type/i.test(k) && typeof v === 'string') === 'string'
+        ? (findValue((k, v) => /transaction\s*type/i.test(k) && typeof v === 'string') as string)
+        : undefined);
+
+    const direction =
+      (typeof raw.direction === 'string' && raw.direction) ||
+      (typeof raw.paid_in_out === 'string' && raw.paid_in_out) ||
+      (typeof findValue((k, v) => /(paid\s*in\s*\/?\s*out|direction|debit|credit)/i.test(k) && typeof v === 'string') === 'string'
+        ? (findValue((k, v) => /(paid\s*in\s*\/?\s*out|direction|debit|credit)/i.test(k) && typeof v === 'string') as string)
+        : undefined);
+
+    const amountVal =
+      raw.amount ??
+      raw.Amount ??
+      findValue((k, _v) => /amount/i.test(k));
+
+    const amount = (() => {
+      if (amountVal == null || amountVal === '') return undefined;
+      if (typeof amountVal === 'number' && Number.isFinite(amountVal)) return amountVal.toLocaleString('en-US');
+      return String(amountVal);
+    })();
+
+    const parts = [txType, amount, direction, anomaly.row_index >= 0 ? `Row ${anomaly.row_index + 1}` : undefined].filter(Boolean);
+    return parts.length > 0 ? `Transaction: ${parts.join(' · ')}` : undefined;
   };
 
   const filteredAnomalies = anomalies.filter(a => {
@@ -156,16 +165,16 @@ export default function AnomalyTable({ documentId, onRowClick }: AnomalyTablePro
 
   if (loading) {
     return (
-      <div className="p-4 bg-white rounded-lg shadow">
+      <div className="p-4 bg-[#1B1E23] border border-gray-700 rounded-lg">
         <div className="animate-pulse space-y-4">
-          <div className="h-6 bg-gray-200 rounded w-1/4"></div>
+          <div className="h-6 bg-gray-700/50 rounded w-1/4"></div>
           <div className="flex gap-4">
-            <div className="h-8 bg-gray-200 rounded w-32"></div>
-            <div className="h-8 bg-gray-200 rounded w-32"></div>
+            <div className="h-8 bg-gray-700/50 rounded w-32"></div>
+            <div className="h-8 bg-gray-700/50 rounded w-32"></div>
           </div>
           <div className="space-y-2">
             {[1, 2, 3, 4, 5].map(i => (
-              <div key={i} className="h-12 bg-gray-100 rounded w-full"></div>
+              <div key={i} className="h-12 bg-gray-800/60 rounded w-full"></div>
             ))}
           </div>
         </div>
@@ -175,41 +184,35 @@ export default function AnomalyTable({ documentId, onRowClick }: AnomalyTablePro
 
   if (error) {
     return (
-      <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-        <p className="text-red-800">Error: {error}</p>
+      <div className="p-4 bg-red-900/20 border border-red-800 rounded-lg">
+        <p className="text-red-300">{error}</p>
       </div>
     );
   }
 
   if (anomalies.length === 0) {
     return (
-      <div className="p-4 bg-white rounded-lg shadow">
-        <h3 className="font-semibold mb-2">Anomalies</h3>
-        <p className="text-gray-500">No anomalies detected. Data appears clean.</p>
+      <div className="p-6 bg-[#1B1E23] border border-gray-700 rounded-lg">
+        <h3 className="text-lg font-semibold text-gray-100 mb-2">Anomalies</h3>
+        <p className="text-gray-400">No anomalies detected. Data appears clean.</p>
       </div>
     );
   }
 
   return (
-    <div className="p-4 bg-white rounded-lg shadow">
+    <div className="p-6 bg-[#1B1E23] border border-gray-700 rounded-lg">
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-lg font-semibold">Detected Anomalies ({anomalies.length})</h3>
-        <button
-          onClick={loadAnomalies}
-          className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-        >
-          Refresh
-        </button>
+        <h3 className="text-lg font-semibold text-gray-100">Detected Anomalies</h3>
       </div>
 
       {/* Filters */}
-      <div className="flex gap-4 mb-4">
+      <div className="flex flex-wrap gap-4 mb-6">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Severity</label>
+          <label className="block text-xs font-medium text-gray-400 mb-1">Severity</label>
           <select
             value={filterSeverity}
             onChange={(e) => setFilterSeverity(e.target.value as any)}
-            className="border rounded px-2 py-1 text-sm"
+            className="bg-[#0D0F12] border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:ring-2 focus:ring-cyan-400 focus:border-transparent"
           >
             <option value="all">All</option>
             <option value="high">High</option>
@@ -218,11 +221,11 @@ export default function AnomalyTable({ documentId, onRowClick }: AnomalyTablePro
           </select>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+          <label className="block text-xs font-medium text-gray-400 mb-1">Type</label>
           <select
             value={filterType}
             onChange={(e) => setFilterType(e.target.value)}
-            className="border rounded px-2 py-1 text-sm"
+            className="bg-[#0D0F12] border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:ring-2 focus:ring-cyan-400 focus:border-transparent"
           >
             <option value="all">All Types</option>
             {uniqueTypes.map(type => (
@@ -235,10 +238,10 @@ export default function AnomalyTable({ documentId, onRowClick }: AnomalyTablePro
       {/* Table */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b">
+          <thead className="bg-[#0D0F12] border-b border-gray-700">
+            <tr>
               <th
-                className="text-left p-2 cursor-pointer hover:bg-gray-50"
+                className="text-left px-3 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-[#23272E] transition-colors"
                 onClick={() => handleSort('severity')}
               >
                 <div className="flex items-center gap-1">
@@ -248,55 +251,30 @@ export default function AnomalyTable({ documentId, onRowClick }: AnomalyTablePro
                   )}
                 </div>
               </th>
-              <th
-                className="text-left p-2 cursor-pointer hover:bg-gray-50"
-                onClick={() => handleSort('type')}
-              >
-                <div className="flex items-center gap-1">
-                  Type
-                  {sortColumn === 'type' && (
-                    sortDirection === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
-                  )}
-                </div>
-              </th>
-              <th className="text-left p-2">Description</th>
-              <th className="text-left p-2">Suggested Action</th>
-              <th
-                className="text-left p-2 cursor-pointer hover:bg-gray-50"
-                onClick={() => handleSort('row')}
-              >
-                <div className="flex items-center gap-1">
-                  Row
-                  {sortColumn === 'row' && (
-                    sortDirection === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
-                  )}
-                </div>
-              </th>
-              <th className="text-left p-2">Actions</th>
+              <th className="text-left px-3 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Anomaly</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-gray-700">
             {sortedAnomalies.map((anomaly) => (
-              <tr key={anomaly.id} className="border-b hover:bg-gray-50">
-                <td className="p-2">
-                  <div className="flex items-center gap-2">
-                    {getSeverityIcon(anomaly.severity)}
-                    {getSeverityBadge(anomaly.severity)}
-                  </div>
+              <tr
+                key={anomaly.id}
+                className={`${onRowClick && anomaly.row_index >= 0 ? 'cursor-pointer' : ''} hover:bg-[#23272E] transition-colors`}
+                onClick={() => {
+                  if (!onRowClick) return;
+                  if (anomaly.row_index < 0) return;
+                  onRowClick(anomaly.row_index);
+                }}
+              >
+                <td className="px-3 py-3">
+                  {getSeverityBadge(anomaly.severity)}
                 </td>
-                <td className="p-2">{getAnomalyTypeName(anomaly.anomaly_type)}</td>
-                <td className="p-2">{anomaly.description}</td>
-                <td className="p-2 text-gray-600 text-xs">{getSuggestedAction(anomaly)}</td>
-                <td className="p-2">{anomaly.row_index >= 0 ? `Row ${anomaly.row_index + 1}` : 'N/A'}</td>
-                <td className="p-2">
-                  {anomaly.row_index >= 0 && onRowClick && (
-                    <button
-                      onClick={() => onRowClick(anomaly.row_index)}
-                      className="text-blue-600 hover:text-blue-800 text-sm"
-                    >
-                      View Row
-                    </button>
-                  )}
+                <td className="px-3 py-3">
+                  <div className="space-y-1">
+                    <div className="text-gray-100 font-medium">{anomaly.description}</div>
+                    {getTransactionContext(anomaly) && (
+                      <div className="text-gray-400 text-xs">{getTransactionContext(anomaly)}</div>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -305,7 +283,7 @@ export default function AnomalyTable({ documentId, onRowClick }: AnomalyTablePro
       </div>
 
       {sortedAnomalies.length === 0 && (
-        <p className="text-center text-gray-500 py-4">No anomalies match the selected filters.</p>
+        <p className="text-center text-gray-400 py-6">No anomalies match the selected filters.</p>
       )}
     </div>
   );
