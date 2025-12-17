@@ -923,8 +923,18 @@ class SupabaseStorage(StorageInterface):
             )
             return result.data or []
         except Exception as e:
-            logger.error(f"Error getting anomalies from Supabase: {e}")
-            raise e
+            logger.warning(f"Error getting anomalies from Supabase with severity ordering, retrying without ordering: {e}")
+            try:
+                result = (
+                    self.supabase.table('anomalies')
+                    .select('*')
+                    .eq('document_id', document_id)
+                    .execute()
+                )
+                return result.data or []
+            except Exception as e2:
+                logger.error(f"Error getting anomalies from Supabase: {e2}")
+                raise e2
     
     def delete_document(self, document_id: str):
         """Delete a document and all associated data"""
