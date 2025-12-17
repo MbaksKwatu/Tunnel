@@ -439,13 +439,20 @@ class SQLiteStorage(StorageInterface):
         
         anomalies_to_insert = []
         for anomaly in anomalies:
+            severity = anomaly.get('severity') or 'low'
+            if isinstance(severity, str):
+                severity = severity.lower()
+            if severity not in ('low', 'medium', 'high'):
+                severity = 'low'
+
+            description = anomaly.get('description') or ''
             anomalies_to_insert.append((
                 str(uuid.uuid4()),
                 document_id,
                 anomaly.get('row_index'),
                 anomaly.get('anomaly_type'),
-                anomaly.get('severity'),
-                anomaly.get('description'),
+                severity,
+                description,
                 anomaly.get('score'),
                 anomaly.get('suggested_action'),
                 json.dumps(anomaly.get('metadata')) if anomaly.get('metadata') else None,
@@ -862,12 +869,18 @@ class SupabaseStorage(StorageInterface):
             # Prepare data for Supabase
             anomalies_to_insert = []
             for anomaly in anomalies:
+                severity = anomaly.get('severity') or 'low'
+                if isinstance(severity, str):
+                    severity = severity.lower()
+                if severity not in ('low', 'medium', 'high'):
+                    severity = 'low'
+
                 anomalies_to_insert.append({
                     'document_id': document_id,
                     'row_index': anomaly.get('row_index'),
                     'anomaly_type': anomaly.get('anomaly_type'),
-                    'severity': anomaly.get('severity'),
-                    'description': anomaly.get('description'),
+                    'severity': severity,
+                    'description': anomaly.get('description') or '',
                     'score': anomaly.get('score'),
                     'suggested_action': anomaly.get('suggested_action'),
                     'metadata': anomaly.get('metadata'),  # Supabase handles JSON automatically if column is JSONB

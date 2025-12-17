@@ -736,33 +736,33 @@ async def get_document_rows(document_id: str, limit: int = 100, offset: int = 0)
 async def get_document_anomalies(document_id: str):
     """Get all anomalies for a document"""
     try:
+        def safe_json(val):
+            if val is None:
+                return {}
+            if isinstance(val, dict):
+                return val
+            if isinstance(val, str):
+                try:
+                    parsed = json.loads(val)
+                    return parsed if isinstance(parsed, dict) else {}
+                except Exception:
+                    return {}
+            return {}
+
         raw_anomalies = storage.get_anomalies(document_id) or []
 
         anomalies: List[Dict[str, Any]] = []
         for a in raw_anomalies:
             if isinstance(a, dict):
-                metadata = a.get('metadata')
-                if isinstance(metadata, str):
-                    try:
-                        metadata = json.loads(metadata)
-                    except Exception:
-                        metadata = None
-                if metadata is None:
-                    metadata = {}
+                metadata = safe_json(a.get('metadata'))
+                evidence = safe_json(a.get('evidence'))
+                raw_json = safe_json(a.get('raw_json'))
 
-                evidence = a.get('evidence')
-                if isinstance(evidence, str):
-                    try:
-                        evidence = json.loads(evidence)
-                    except Exception:
-                        evidence = None
-
-                raw_json = a.get('raw_json')
-                if isinstance(raw_json, str):
-                    try:
-                        raw_json = json.loads(raw_json)
-                    except Exception:
-                        raw_json = None
+                severity = a.get('severity') or 'low'
+                if isinstance(severity, str):
+                    severity = severity.lower()
+                if severity not in ('low', 'medium', 'high'):
+                    severity = 'low'
 
                 anomalies.append(
                     {
@@ -770,8 +770,8 @@ async def get_document_anomalies(document_id: str):
                         'document_id': a.get('document_id') or document_id,
                         'row_index': a.get('row_index'),
                         'anomaly_type': a.get('anomaly_type'),
-                        'severity': a.get('severity') or 'low',
-                        'description': a.get('description'),
+                        'severity': severity,
+                        'description': a.get('description') or "",
                         'score': a.get('score'),
                         'suggested_action': a.get('suggested_action'),
                         'metadata': metadata,
@@ -795,7 +795,66 @@ async def get_document_anomalies(document_id: str):
 @app.get("/api/anomalies")
 async def get_anomalies_by_query(doc_id: str):
     """Alias endpoint: Get anomalies by document ID via query param"""
-    return await get_document_anomalies(doc_id)
+    try:
+        doc = storage.get_document(doc_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        def safe_json(val):
+            if val is None:
+                return {}
+            if isinstance(val, dict):
+                return val
+            if isinstance(val, str):
+                try:
+                    parsed = json.loads(val)
+                    return parsed if isinstance(parsed, dict) else {}
+                except Exception:
+                    return {}
+            return {}
+
+        raw_anomalies = storage.get_anomalies(doc_id) or []
+        anomalies: List[Dict[str, Any]] = []
+        for a in raw_anomalies:
+            if isinstance(a, dict):
+                metadata = safe_json(a.get('metadata'))
+                evidence = safe_json(a.get('evidence'))
+                raw_json = safe_json(a.get('raw_json'))
+
+                severity = a.get('severity') or 'low'
+                if isinstance(severity, str):
+                    severity = severity.lower()
+                if severity not in ('low', 'medium', 'high'):
+                    severity = 'low'
+
+                anomalies.append(
+                    {
+                        'id': a.get('id'),
+                        'document_id': a.get('document_id') or doc_id,
+                        'row_index': a.get('row_index'),
+                        'anomaly_type': a.get('anomaly_type'),
+                        'severity': severity,
+                        'description': a.get('description') or "",
+                        'score': a.get('score'),
+                        'suggested_action': a.get('suggested_action'),
+                        'metadata': metadata,
+                        'raw_json': raw_json,
+                        'evidence': evidence,
+                        'detected_at': a.get('detected_at'),
+                    }
+                )
+            else:
+                anomalies.append({'row_index': None, 'description': str(a), 'severity': 'low'})
+
+        return {
+            "anomalies": anomalies,
+            "count": len(anomalies)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching anomalies: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/anomalies/run")
