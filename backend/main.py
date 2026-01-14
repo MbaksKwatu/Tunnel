@@ -75,7 +75,7 @@ app.include_router(custom_report.router)
 app.include_router(dashboard_mutation.router)
 app.include_router(llm_actions.router)
 
-# Initialize storage (Supabase or SQLite fallback)
+# Initialize storage
 storage: StorageInterface = get_storage()
 logger.info(f"✅ Storage initialized: {type(storage).__name__}")
 
@@ -165,7 +165,7 @@ def detect_investee_name(rows: List[Dict[str, Any]], filename: str) -> str:
 
 def cleanup_stale_processing_documents(max_age_seconds: int = STALE_PROCESSING_MAX_AGE_SECONDS) -> int:
     try:
-        if isinstance(storage, SQLiteStorage):
+        # Supabase storage
             db_path = storage.db_path
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
@@ -366,13 +366,12 @@ async def health_check():
 async def health_db():
     """Health check for database connectivity"""
     try:
-        if isinstance(storage, SQLiteStorage):
+        # Supabase storage
             conn = sqlite3.connect(storage.db_path)
             cursor = conn.cursor()
             cursor.execute("SELECT 1")
             conn.close()
             return {"status": "ok", "storage": "sqlite", "db_path": storage.db_path}
-        else:
             storage.supabase.table("documents").select("id").limit(1).execute()
             return {"status": "ok", "storage": "supabase"}
     except Exception as e:
@@ -613,8 +612,8 @@ async def get_all_documents(session_id: Optional[str] = None):
     try:
         cleanup_stale_processing_documents()
         # Use storage interface to get documents
-        # For SQLite, query directly
-        if isinstance(storage, SQLiteStorage):
+        
+        # Supabase storage
             import sqlite3
             db_path = storage.db_path
             conn = sqlite3.connect(db_path)
@@ -630,7 +629,6 @@ async def get_all_documents(session_id: Optional[str] = None):
                     WHERE user_id = ?
                     ORDER BY upload_date DESC
                 """, (ensure_uuid(session_id),))
-            else:
                 cursor.execute("""
                     SELECT id, user_id, file_name, file_type, file_url, format_detected,
                            upload_date, status, rows_count, anomalies_count, error_message,
@@ -666,7 +664,6 @@ async def get_all_documents(session_id: Optional[str] = None):
             
             conn.close()
             return documents
-        else:
             supabase_client = getattr(storage, 'supabase', None)
             if not supabase_client:
                 return []
@@ -786,7 +783,6 @@ async def get_document_anomalies(document_id: str):
                         'detected_at': a.get('detected_at'),
                     }
                 )
-            else:
                 anomalies.append({'row_index': None, 'description': str(a), 'severity': 'low'})
         return {
             "document_id": document_id,
@@ -849,7 +845,6 @@ async def get_anomalies_by_query(doc_id: str):
                         'detected_at': a.get('detected_at'),
                     }
                 )
-            else:
                 anomalies.append({'row_index': None, 'description': str(a), 'severity': 'low'})
 
         return {
@@ -1146,7 +1141,7 @@ async def retry_processing(document_id: str):
 async def cleanup_stuck_files(max_age_minutes: int = 30):
     """Cleanup files stuck in processing status"""
     try:
-        if isinstance(storage, SQLiteStorage):
+        # Supabase storage
             import sqlite3
             db_path = storage.db_path
             conn = sqlite3.connect(db_path)
@@ -1172,8 +1167,6 @@ async def cleanup_stuck_files(max_age_minutes: int = 30):
                 "updated_count": updated_count,
                 "message": f"Marked {updated_count} stuck files as failed"
             }
-        else:
-            return {"success": False, "message": "Cleanup only supported for SQLite storage"}
             
     except Exception as e:
         logger.error(f"Error cleaning up stuck files: {e}")
@@ -1624,7 +1617,6 @@ async def create_thesis(
             
             storage.save_thesis(existing_thesis)
             thesis = existing_thesis
-        else:
             # Create new thesis
             thesis = Thesis(
                 fund_id=current_user.id,
