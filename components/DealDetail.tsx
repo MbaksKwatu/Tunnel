@@ -31,11 +31,33 @@ interface Evidence {
 interface Judgment {
   id: string
   deal_id: string
-  score: number
-  recommendation: 'approve' | 'reject' | 'review'
-  confidence: number
-  kill_signals: string[]
+  investment_readiness: string
+  thesis_alignment: string
+  kill_signals: { type: string; reason?: string; detail?: string }
+  confidence_level: string
+  dimension_scores: {
+    financial: number
+    governance: number
+    market: number
+    team: number
+    product: number
+    data_confidence: number
+  }
+  explanations: {
+    investment_readiness: string
+    thesis_alignment: string
+    kill_signals: string
+    confidence_level: string
+  }
+  missing_evidence?: Array<{
+    type: string
+    action: string
+    impact: string
+  }>
   created_at: string
+  score?: number
+  recommendation?: 'approve' | 'reject' | 'review'
+  confidence?: number
 }
 
 export default function DealDetail({ dealId }: { dealId: string }) {
