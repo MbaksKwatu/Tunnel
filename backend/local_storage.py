@@ -7,6 +7,17 @@ import json
 import os
 import logging
 from typing import List, Dict, Any, Optional
+from collections import Counter
+
+from sqlalchemy import func
+
+from models import (
+    Deal,
+    Thesis,
+    Evidence,
+    Judgment,
+    SessionLocal,
+)
 from datetime import datetime
 import uuid
 
@@ -58,6 +69,36 @@ class StorageInterface:
     
     def delete_document(self, document_id: str):
         """Delete a document and all associated data"""
+        raise NotImplementedError
+
+    def save_deal(self, deal: Deal) -> Deal:
+        raise NotImplementedError
+
+    def get_deal(self, deal_id: str) -> Optional[Deal]:
+        raise NotImplementedError
+
+    def get_deals_by_user(self, user_id: str) -> List[Deal]:
+        raise NotImplementedError
+
+    def save_thesis(self, thesis: Thesis) -> Thesis:
+        raise NotImplementedError
+
+    def get_default_thesis(self, fund_id: str) -> Optional[Thesis]:
+        raise NotImplementedError
+
+    def save_evidence(self, evidence: Evidence) -> Evidence:
+        raise NotImplementedError
+
+    def get_evidence_by_deal(self, deal_id: str) -> List[Evidence]:
+        raise NotImplementedError
+
+    def count_evidence_by_deal(self, deal_id: str) -> dict:
+        raise NotImplementedError
+
+    def save_judgment(self, judgment: Judgment) -> Judgment:
+        raise NotImplementedError
+
+    def get_latest_judgment(self, deal_id: str) -> Optional[Judgment]:
         raise NotImplementedError
 
 
@@ -522,6 +563,107 @@ class SQLiteStorage(StorageInterface):
         conn.close()
         
         logger.info(f"✅ Deleted document {document_id} and associated data")
+
+    def save_deal(self, deal: Deal) -> Deal:
+        session = SessionLocal()
+        try:
+            session.add(deal)
+            session.commit()
+            session.refresh(deal)
+            return deal
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error saving deal: {e}")
+            raise e
+        finally:
+            session.close()
+
+    def get_deal(self, deal_id: str) -> Optional[Deal]:
+        session = SessionLocal()
+        try:
+            return session.query(Deal).filter(Deal.id == deal_id).first()
+        finally:
+            session.close()
+
+    def get_deals_by_user(self, user_id: str) -> List[Deal]:
+        session = SessionLocal()
+        try:
+            return session.query(Deal).filter(Deal.created_by == user_id).all()
+        finally:
+            session.close()
+
+    def save_thesis(self, thesis: Thesis) -> Thesis:
+        session = SessionLocal()
+        try:
+            session.add(thesis)
+            session.commit()
+            session.refresh(thesis)
+            return thesis
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error saving thesis: {e}")
+            raise e
+        finally:
+            session.close()
+
+    def get_default_thesis(self, fund_id: str) -> Optional[Thesis]:
+        session = SessionLocal()
+        try:
+            return session.query(Thesis).filter(Thesis.fund_id == fund_id, Thesis.is_default == True).first()
+        finally:
+            session.close()
+
+    def save_evidence(self, evidence: Evidence) -> Evidence:
+        session = SessionLocal()
+        try:
+            session.add(evidence)
+            session.commit()
+            session.refresh(evidence)
+            return evidence
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error saving evidence: {e}")
+            raise e
+        finally:
+            session.close()
+
+    def get_evidence_by_deal(self, deal_id: str) -> List[Evidence]:
+        session = SessionLocal()
+        try:
+            return session.query(Evidence).filter(Evidence.deal_id == deal_id).all()
+        finally:
+            session.close()
+
+    def count_evidence_by_deal(self, deal_id: str) -> dict:
+        session = SessionLocal()
+        try:
+            counts = session.query(Evidence.evidence_type, func.count(Evidence.id)).\
+                filter(Evidence.deal_id == deal_id).\
+                group_by(Evidence.evidence_type).all()
+            return {evidence_type: count for evidence_type, count in counts}
+        finally:
+            session.close()
+
+    def save_judgment(self, judgment: Judgment) -> Judgment:
+        session = SessionLocal()
+        try:
+            session.add(judgment)
+            session.commit()
+            session.refresh(judgment)
+            return judgment
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error saving judgment: {e}")
+            raise e
+        finally:
+            session.close()
+
+    def get_latest_judgment(self, deal_id: str) -> Optional[Judgment]:
+        session = SessionLocal()
+        try:
+            return session.query(Judgment).filter(Judgment.deal_id == deal_id).order_by(Judgment.created_at.desc()).first()
+        finally:
+            session.close()
     
     # ==================== INVESTEE METHODS ====================
     
@@ -862,6 +1004,36 @@ class SupabaseStorage(StorageInterface):
                 safe_update_data['insights_summary'] = insights_summary
             if safe_update_data:
                 self.supabase.table('documents').update(safe_update_data).eq('id', document_id).execute()
+
+    def save_deal(self, deal: Deal) -> Deal:
+        raise NotImplementedError
+
+    def get_deal(self, deal_id: str) -> Optional[Deal]:
+        raise NotImplementedError
+
+    def get_deals_by_user(self, user_id: str) -> List[Deal]:
+        raise NotImplementedError
+
+    def save_thesis(self, thesis: Thesis) -> Thesis:
+        raise NotImplementedError
+
+    def get_default_thesis(self, fund_id: str) -> Optional[Thesis]:
+        raise NotImplementedError
+
+    def save_evidence(self, evidence: Evidence) -> Evidence:
+        raise NotImplementedError
+
+    def get_evidence_by_deal(self, deal_id: str) -> List[Evidence]:
+        raise NotImplementedError
+
+    def count_evidence_by_deal(self, deal_id: str) -> dict:
+        raise NotImplementedError
+
+    def save_judgment(self, judgment: Judgment) -> Judgment:
+        raise NotImplementedError
+
+    def get_latest_judgment(self, deal_id: str) -> Optional[Judgment]:
+        raise NotImplementedError
     
     def store_anomalies(self, document_id: str, anomalies: List[Dict[str, Any]]) -> int:
         """Store anomalies for document"""

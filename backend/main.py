@@ -3,11 +3,11 @@ Parity Backend Parser API
 FastAPI server for parsing PDF, CSV, and XLSX files with anomaly detection
 AI-native financial intelligence for SME investments
 """
-from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 import asyncio
 import logging
 import os
@@ -30,6 +30,9 @@ from debug_logger import debug_logger
 from report_generator import ReportGenerator
 
 from evaluate_engine import Evaluator
+from models import Deal, Thesis, Evidence, Judgment
+from judgment_engine import JudgmentEngine
+from auth import get_current_user, create_access_token
 
 # Import Parity AI Routes
 import custom_report
@@ -91,6 +94,9 @@ report_generator = ReportGenerator()
 
 # Initialize evaluator
 evaluator = Evaluator()
+
+# Initialize judgment engine
+judgment_engine = JudgmentEngine()
 
 
 # ==================== HELPER FUNCTIONS ====================
@@ -1331,6 +1337,399 @@ async def list_reports(investee_name: Optional[str] = None):
     except Exception as e:
         logger.error(f"Error fetching reports: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== DEAL ENDPOINTS ====================
+
+@app.post("/api/deals", status_code=status.HTTP_201_CREATED)
+async def create_deal(
+    company_name: str = Form(...),
+    sector: str = Form(...),
+    geography: str = Form(...),
+    deal_type: str = Form(...),
+    stage: str = Form(...),
+    revenue_usd: Optional[float] = Form(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """Create a new deal"""
+    try:
+        deal = Deal(
+            company_name=company_name,
+            sector=sector,
+            geography=geography,
+            deal_type=deal_type,
+            stage=stage,
+            revenue_usd=revenue_usd,
+            created_by=current_user.id,
+            status="draft"
+        )
+        storage.save_deal(deal)
+        return {"success": True, "data": deal.to_dict()}
+    except Exception as e:
+        logger.error(f"Error creating deal: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/deals")
+async def list_deals(current_user: dict = Depends(get_current_user)):
+    """List all deals for the current user"""
+    try:
+        deals = storage.get_deals_by_user(current_user.id)
+        return {"success": True, "data": [deal.to_dict() for deal in deals]}
+    except Exception as e:
+        logger.error(f"Error listing deals: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/deals/{deal_id}")
+async def get_deal(deal_id: str, current_user: dict = Depends(get_current_user)):
+    """Get a specific deal by ID"""
+    try:
+        deal = storage.get_deal(deal_id)
+        if not deal:
+            raise HTTPException(status_code=404, detail="Deal not found")
+        if deal.created_by != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this deal")
+        return {"success": True, "data": deal.to_dict()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting deal: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/deals/{deal_id}")
+async def delete_deal(deal_id: str, current_user: dict = Depends(get_current_user)):
+    """Delete a deal and all associated evidence and judgments"""
+    try:
+        deal = storage.get_deal(deal_id)
+        if not deal:
+            raise HTTPException(status_code=404, detail="Deal not found")
+        if deal.created_by != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this deal")
+        storage.delete_deal(deal_id)
+        return {"success": True, "message": "Deal deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting deal: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== EVIDENCE ENDPOINTS ====================
+
+@app.post("/api/deals/{deal_id}/evidence")
+async def upload_evidence(
+    deal_id: str,
+    file: UploadFile = File(...),
+    evidence_type: str = Form(...),
+    evidence_subtype: Optional[str] = Form(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """Upload evidence for a deal"""
+    try:
+        # Verify deal exists and user owns it
+        deal = storage.get_deal(deal_id)
+        if not deal:
+            raise HTTPException(status_code=404, detail="Deal not found")
+        if deal.created_by != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to add evidence to this deal")
+
+        # Read file content
+        content = await file.read()
+        
+        # Parse document if possible
+        extracted_data = {}
+        try:
+            parser = get_parser(file.filename)
+            if parser:
+                extracted_data = parser.parse(content)
+        except Exception as e:
+            logger.warning(f"Could not parse evidence document: {e}")
+        
+        # Create evidence record
+        evidence = Evidence(
+            deal_id=deal_id,
+            evidence_type=evidence_type,
+            evidence_subtype=evidence_subtype,
+            file_name=file.filename,
+            file_type=file.content_type,
+            file_size=len(content),
+            extracted_data=extracted_data,
+            uploaded_by=current_user.id
+        )
+        
+        storage.save_evidence(evidence)
+        
+        return {"success": True, "data": evidence.to_dict()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading evidence: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/deals/{deal_id}/evidence")
+async def list_evidence(deal_id: str, current_user: dict = Depends(get_current_user)):
+    """List all evidence for a deal"""
+    try:
+        # Verify deal exists and user owns it
+        deal = storage.get_deal(deal_id)
+        if not deal:
+            raise HTTPException(status_code=404, detail="Deal not found")
+        if deal.created_by != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to view evidence for this deal")
+            
+        evidence = storage.get_evidence_by_deal(deal_id)
+        return {"success": True, "data": [e.to_dict() for e in evidence]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing evidence: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== JUDGMENT ENDPOINTS ====================
+
+@app.post("/api/deals/{deal_id}/judge")
+async def judge_deal(deal_id: str, current_user: dict = Depends(get_current_user)):
+    """Run the judgment engine on a deal"""
+    try:
+        # Get deal and verify ownership
+        deal = storage.get_deal(deal_id)
+        if not deal:
+            raise HTTPException(status_code=404, detail="Deal not found")
+        if deal.created_by != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to judge this deal")
+        
+        # Get evidence
+        evidence = storage.get_evidence_by_deal(deal_id)
+        if not evidence:
+            raise HTTPException(status_code=400, detail="No evidence found for this deal")
+        
+        # Get or create thesis
+        thesis = storage.get_default_thesis(current_user.id)
+        if not thesis:
+            thesis = Thesis(
+                fund_id=current_user.id,
+                investment_focus=deal.deal_type,
+                sector_preferences=[],
+                geography_constraints=[],
+                kill_conditions=[],
+                weights={},
+                is_default=True
+            )
+            storage.save_thesis(thesis)
+        
+        # Run judgment engine
+        result = judgment_engine.judge_deal(deal, evidence, thesis)
+        
+        # Save judgment
+        judgment = Judgment(
+            deal_id=deal_id,
+            investment_readiness=result["judgments"]["investment_readiness"],
+            thesis_alignment=result["judgments"]["thesis_alignment"],
+            kill_signals=result["judgments"]["kill_signals"],
+            confidence_level=result["judgments"]["confidence_level"],
+            dimension_scores=result["dimension_scores"],
+            explanations=result["explanations"],
+            missing_evidence=result.get("missing_evidence", [])
+        )
+        storage.save_judgment(judgment)
+        
+        # Update deal status
+        deal.status = "judged"
+        storage.save_deal(deal)
+        
+        return {"success": True, "data": judgment.to_dict()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error judging deal: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/deals/{deal_id}/judgment")
+async def get_judgment(deal_id: str, current_user: dict = Depends(get_current_user)):
+    """Get the latest judgment for a deal"""
+    try:
+        # Verify deal exists and user owns it
+        deal = storage.get_deal(deal_id)
+        if not deal:
+            raise HTTPException(status_code=404, detail="Deal not found")
+        if deal.created_by != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to view judgments for this deal")
+        
+        judgment = storage.get_latest_judgment(deal_id)
+        if not judgment:
+            raise HTTPException(status_code=404, detail="No judgment found for this deal")
+            
+        return {"success": True, "data": judgment.to_dict()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting judgment: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# AUTHENTICATION ENDPOINTS
+# ============================================================================
+
+@app.post("/token", tags=["Auth"])
+async def login_for_access_token():
+    """Simple login endpoint that returns a mock JWT token"""
+    try:
+        # For MVP, we'll create a simple mock user token
+        # In production, this would validate actual credentials
+        token_data = {"sub": "demo-user"}
+        access_token = create_access_token(data=token_data)
+        
+        return {
+            "access_token": access_token,
+            "token_type": "bearer"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+
+
+# ============================================================================
+# THESIS ENDPOINTS
+# ============================================================================
+
+@app.post("/api/thesis", tags=["Thesis"])
+async def create_thesis(
+    thesis_data: dict,
+    current_user = Depends(get_current_user)
+):
+    """Create or update user's investment thesis"""
+    try:
+        # Check if user already has a thesis
+        existing_thesis = storage.get_default_thesis(current_user.id)
+        
+        if existing_thesis:
+            # Update existing thesis
+            existing_thesis.investment_focus = thesis_data.get('investment_focus')
+            existing_thesis.sector_preferences = thesis_data.get('sector_preferences', [])
+            existing_thesis.geography_constraints = thesis_data.get('geography_constraints', [])
+            existing_thesis.stage_preferences = thesis_data.get('stage_preferences', [])
+            existing_thesis.min_revenue_usd = thesis_data.get('min_revenue_usd')
+            existing_thesis.kill_conditions = thesis_data.get('kill_conditions', [])
+            existing_thesis.governance_requirements = thesis_data.get('governance_requirements', [])
+            existing_thesis.financial_thresholds = thesis_data.get('financial_thresholds', {})
+            existing_thesis.data_confidence_tolerance = thesis_data.get('data_confidence_tolerance', 'medium')
+            existing_thesis.impact_requirements = thesis_data.get('impact_requirements', [])
+            existing_thesis.weights = thesis_data.get('weights', {})
+            existing_thesis.name = thesis_data.get('name', 'Default Thesis')
+            
+            storage.save_thesis(existing_thesis)
+            thesis = existing_thesis
+        else:
+            # Create new thesis
+            thesis = Thesis(
+                fund_id=current_user.id,
+                investment_focus=thesis_data.get('investment_focus'),
+                sector_preferences=thesis_data.get('sector_preferences', []),
+                geography_constraints=thesis_data.get('geography_constraints', []),
+                stage_preferences=thesis_data.get('stage_preferences', []),
+                min_revenue_usd=thesis_data.get('min_revenue_usd'),
+                kill_conditions=thesis_data.get('kill_conditions', []),
+                governance_requirements=thesis_data.get('governance_requirements', []),
+                financial_thresholds=thesis_data.get('financial_thresholds', {}),
+                data_confidence_tolerance=thesis_data.get('data_confidence_tolerance', 'medium'),
+                impact_requirements=thesis_data.get('impact_requirements', []),
+                weights=thesis_data.get('weights', {}),
+                name=thesis_data.get('name', 'Default Thesis'),
+                is_default=True
+            )
+            storage.save_thesis(thesis)
+        
+        return {
+            "success": True,
+            "thesis": thesis.to_dict() if hasattr(thesis, 'to_dict') else {
+                "id": thesis.id,
+                "name": thesis.name,
+                "investment_focus": thesis.investment_focus
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save thesis: {str(e)}")
+
+
+@app.get("/api/thesis", tags=["Thesis"])
+async def get_thesis(current_user = Depends(get_current_user)):
+    """Get user's default thesis"""
+    try:
+        thesis = storage.get_default_thesis(current_user.id)
+        
+        if not thesis:
+            raise HTTPException(status_code=404, detail="No thesis found. Please complete thesis setup.")
+        
+        return {
+            "success": True,
+            "thesis": thesis.to_dict() if hasattr(thesis, 'to_dict') else {
+                "id": thesis.id,
+                "fund_id": thesis.fund_id,
+                "investment_focus": thesis.investment_focus,
+                "sector_preferences": thesis.sector_preferences,
+                "geography_constraints": thesis.geography_constraints,
+                "stage_preferences": thesis.stage_preferences,
+                "min_revenue_usd": thesis.min_revenue_usd,
+                "kill_conditions": thesis.kill_conditions,
+                "governance_requirements": thesis.governance_requirements,
+                "financial_thresholds": thesis.financial_thresholds,
+                "data_confidence_tolerance": thesis.data_confidence_tolerance,
+                "impact_requirements": thesis.impact_requirements,
+                "weights": thesis.weights,
+                "name": thesis.name,
+                "is_default": thesis.is_default
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get thesis: {str(e)}")
+
+
+@app.put("/api/thesis", tags=["Thesis"])
+async def update_thesis(
+    thesis_data: dict,
+    current_user = Depends(get_current_user)
+):
+    """Update user's investment thesis"""
+    try:
+        thesis = storage.get_default_thesis(current_user.id)
+        
+        if not thesis:
+            raise HTTPException(status_code=404, detail="No thesis found. Create one first.")
+        
+        # Update fields
+        thesis.investment_focus = thesis_data.get('investment_focus', thesis.investment_focus)
+        thesis.sector_preferences = thesis_data.get('sector_preferences', thesis.sector_preferences)
+        thesis.geography_constraints = thesis_data.get('geography_constraints', thesis.geography_constraints)
+        thesis.stage_preferences = thesis_data.get('stage_preferences', thesis.stage_preferences)
+        thesis.min_revenue_usd = thesis_data.get('min_revenue_usd', thesis.min_revenue_usd)
+        thesis.kill_conditions = thesis_data.get('kill_conditions', thesis.kill_conditions)
+        thesis.governance_requirements = thesis_data.get('governance_requirements', thesis.governance_requirements)
+        thesis.financial_thresholds = thesis_data.get('financial_thresholds', thesis.financial_thresholds)
+        thesis.data_confidence_tolerance = thesis_data.get('data_confidence_tolerance', thesis.data_confidence_tolerance)
+        thesis.impact_requirements = thesis_data.get('impact_requirements', thesis.impact_requirements)
+        thesis.weights = thesis_data.get('weights', thesis.weights)
+        thesis.name = thesis_data.get('name', thesis.name)
+        
+        storage.save_thesis(thesis)
+        
+        return {
+            "success": True,
+            "thesis": thesis.to_dict() if hasattr(thesis, 'to_dict') else {
+                "id": thesis.id,
+                "name": thesis.name
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update thesis: {str(e)}")
 
 
 if __name__ == "__main__":
