@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 from parsers import get_parser, PasswordRequiredError, PartialParseError, normalize_transaction_rows
 
 # Import new modules
-from local_storage import get_storage, StorageInterface, SQLiteStorage
+from local_storage import get_storage, StorageInterface
 from anomaly_engine import AnomalyDetector
 from unsupervised_engine import UnsupervisedAnomalyDetector
 from notes_manager import NotesManager
