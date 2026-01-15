@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional
 
-from models import Deal, Evidence, Thesis
+# from models import Deal, Evidence, Thesis  # Removed: Supabase-only deployment
 
 
 class JudgmentEngine:

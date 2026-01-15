@@ -29,8 +29,6 @@ interface Evidence {
 }
 
 interface Judgment {
-  id: string
-  deal_id: string
   investment_readiness: string
   thesis_alignment: string
   kill_signals: { type: string; reason?: string; detail?: string }
@@ -55,9 +53,6 @@ interface Judgment {
     impact: string
   }>
   created_at: string
-  score?: number
-  recommendation?: 'approve' | 'reject' | 'review'
-  confidence?: number
 }
 
 // The component with proper export

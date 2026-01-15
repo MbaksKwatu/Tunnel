@@ -30,8 +30,8 @@ from debug_logger import debug_logger
 from report_generator import ReportGenerator
 
 from evaluate_engine import Evaluator
-from models import Deal, Thesis, Evidence, Judgment
-from judgment_engine import JudgmentEngine
+# from models import Deal, Thesis, Evidence, Judgment  # Removed: Supabase-only deployment
+# from judgment_engine import JudgmentEngine  # Removed: depends on SQLAlchemy models
 from auth import get_current_user, create_access_token
 
 # Import Parity AI Routes
@@ -95,8 +95,7 @@ report_generator = ReportGenerator()
 # Initialize evaluator
 evaluator = Evaluator()
 
-# Initialize judgment engine
-judgment_engine = JudgmentEngine()
+# judgment_engine = JudgmentEngine()  # Removed: depends on SQLAlchemy models
 
 
 # ==================== HELPER FUNCTIONS ====================
@@ -165,7 +164,21 @@ def detect_investee_name(rows: List[Dict[str, Any]], filename: str) -> str:
 
 def cleanup_stale_processing_documents(max_age_seconds: int = STALE_PROCESSING_MAX_AGE_SECONDS) -> int:
     try:
-        # Supabase storage
+        # Try Supabase first
+        supabase_client = getattr(storage, 'supabase', None)
+        if supabase_client:
+            cutoff = (datetime.datetime.utcnow() - datetime.timedelta(seconds=max_age_seconds)).isoformat()
+            result = (
+                supabase_client.table('documents')
+                .update({'status': 'failed', 'error_message': 'Parsing timed out'})
+                .eq('status', 'processing')
+                .lt('created_at', cutoff)
+                .execute()
+            )
+            return len(result.data) if getattr(result, 'data', None) else 0
+        
+        # Fallback to SQLite if db_path exists
+        if hasattr(storage, 'db_path') and storage.db_path:
             db_path = storage.db_path
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
@@ -184,18 +197,6 @@ def cleanup_stale_processing_documents(max_age_seconds: int = STALE_PROCESSING_M
             conn.commit()
             conn.close()
             return int(updated_count or 0)
-
-        supabase_client = getattr(storage, 'supabase', None)
-        if supabase_client:
-            cutoff = (datetime.datetime.utcnow() - datetime.timedelta(seconds=max_age_seconds)).isoformat()
-            result = (
-                supabase_client.table('documents')
-                .update({'status': 'failed', 'error_message': 'Parsing timed out'})
-                .eq('status', 'processing')
-                .lt('created_at', cutoff)
-                .execute()
-            )
-            return len(result.data) if getattr(result, 'data', None) else 0
 
         return 0
     except Exception as e:
@@ -366,14 +367,21 @@ async def health_check():
 async def health_db():
     """Health check for database connectivity"""
     try:
-        # Supabase storage
+        # Try Supabase first
+        supabase_client = getattr(storage, 'supabase', None)
+        if supabase_client:
+            supabase_client.table("documents").select("id").limit(1).execute()
+            return {"status": "ok", "storage": "supabase"}
+        
+        # Fallback to SQLite if db_path exists
+        if hasattr(storage, 'db_path') and storage.db_path:
             conn = sqlite3.connect(storage.db_path)
             cursor = conn.cursor()
             cursor.execute("SELECT 1")
             conn.close()
             return {"status": "ok", "storage": "sqlite", "db_path": storage.db_path}
-            storage.supabase.table("documents").select("id").limit(1).execute()
-            return {"status": "ok", "storage": "supabase"}
+        
+        return {"status": "error", "message": "No storage backend configured"}
     except Exception as e:
         logger.error("DB health check failed", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -613,7 +621,17 @@ async def get_all_documents(session_id: Optional[str] = None):
         cleanup_stale_processing_documents()
         # Use storage interface to get documents
         
-        # Supabase storage
+        # Try Supabase first
+        supabase_client = getattr(storage, 'supabase', None)
+        if supabase_client:
+            query = supabase_client.table('documents').select('*').order('upload_date', desc=True)
+            if session_id:
+                query = query.eq('user_id', ensure_uuid(session_id))
+            result = query.execute()
+            return result.data or []
+        
+        # Fallback to SQLite if db_path exists
+        if hasattr(storage, 'db_path') and storage.db_path:
             import sqlite3
             db_path = storage.db_path
             conn = sqlite3.connect(db_path)
@@ -629,6 +647,7 @@ async def get_all_documents(session_id: Optional[str] = None):
                     WHERE user_id = ?
                     ORDER BY upload_date DESC
                 """, (ensure_uuid(session_id),))
+            else:
                 cursor.execute("""
                     SELECT id, user_id, file_name, file_type, file_url, format_detected,
                            upload_date, status, rows_count, anomalies_count, error_message,
@@ -664,15 +683,8 @@ async def get_all_documents(session_id: Optional[str] = None):
             
             conn.close()
             return documents
-            supabase_client = getattr(storage, 'supabase', None)
-            if not supabase_client:
-                return []
 
-            query = supabase_client.table('documents').select('*').order('upload_date', desc=True)
-            if session_id:
-                query = query.eq('user_id', ensure_uuid(session_id))
-            result = query.execute()
-            return result.data or []
+        return []
         
     except Exception as e:
         logger.error(f"Error fetching documents: {e}")
