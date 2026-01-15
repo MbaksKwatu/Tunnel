@@ -2,24 +2,30 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { autoLogin, getToken } from '@/lib/auth'
+import { useAuth } from '@/components/AuthProvider'
 
 export default function DealCreate() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const { user } = useAuth()
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setLoading(true)
     setError('')
     
+    if (!user) {
+      setError('Please sign in to create a deal')
+      setLoading(false)
+      return
+    }
+    
     const formData = new FormData(e.currentTarget)
     
     try {
-      // Ensure we have a token
-      await autoLogin()
-      const token = getToken()
+      const { data: { session } } = await user.getSession()
+      const token = session?.access_token
       
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
       const response = await fetch(`${apiUrl}/api/deals`, {

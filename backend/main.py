@@ -1577,26 +1577,6 @@ async def get_judgment(deal_id: str, current_user: dict = Depends(get_current_us
 
 
 # ============================================================================
-# AUTHENTICATION ENDPOINTS
-# ============================================================================
-
-@app.post("/token", tags=["Auth"])
-async def login_for_access_token():
-    """Simple login endpoint that returns a mock JWT token"""
-    try:
-        # For MVP, we'll create a simple mock user token
-        # In production, this would validate actual credentials
-        token_data = {"sub": "demo-user"}
-        access_token = create_access_token(data=token_data)
-        
-        return {
-            "access_token": access_token,
-            "token_type": "bearer"
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
-
-
 # ============================================================================
 # THESIS ENDPOINTS
 # ============================================================================

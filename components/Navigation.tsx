@@ -1,15 +1,24 @@
 'use client'
 
 import { usePathname, useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useAuth } from '@/components/AuthProvider'
+import Link from 'next/link'
 
 export default function Navigation() {
   const pathname = usePathname()
   const router = useRouter()
   const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const { user, loading, supabase } = useAuth()
 
   const isActive = (path: string) => {
     return pathname.startsWith(path)
+  }
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    setUserMenuOpen(false)
+    router.push('/')
   }
 
   const navItems = [
@@ -24,6 +33,18 @@ export default function Navigation() {
       </svg>
     )}
   ]
+
+  if (loading) {
+    return (
+      <nav className="bg-gray-800 border-b border-gray-700">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <div className="w-8 h-8 bg-gray-700 rounded-lg animate-pulse"></div>
+          </div>
+        </div>
+      </nav>
+    )
+  }
 
   return (
     <nav className="bg-gray-800 border-b border-gray-700">
@@ -62,22 +83,37 @@ export default function Navigation() {
 
           {/* User Menu */}
           <div className="relative">
-            <button
-              onClick={() => setUserMenuOpen(!userMenuOpen)}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-700 transition"
-            >
-              <div className="w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center">
-                <svg className="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            {user ? (
+              <button
+                onClick={() => setUserMenuOpen(!userMenuOpen)}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-700 transition"
+              >
+                <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
+                  <span className="text-white font-bold text-sm">
+                    {user.email?.charAt(0).toUpperCase()}
+                  </span>
+                </div>
+                <span className="text-gray-300 text-sm hidden sm:block max-w-32 truncate">
+                  {user.email}
+                </span>
+                <svg className="w-4 h-4 text-gray-400 hidden sm:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
-              </div>
-              <svg className="w-4 h-4 text-gray-400 hidden sm:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
+              </button>
+            ) : (
+              <Link
+                href="/login"
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+                </svg>
+                <span className="hidden sm:inline">Sign In</span>
+              </Link>
+            )}
 
             {/* Dropdown Menu */}
-            {userMenuOpen && (
+            {user && userMenuOpen && (
               <>
                 {/* Backdrop */}
                 <div
@@ -89,7 +125,7 @@ export default function Navigation() {
                 <div className="absolute right-0 mt-2 w-56 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-20">
                   <div className="p-3 border-b border-gray-700">
                     <p className="text-sm text-gray-400">Signed in as</p>
-                    <p className="text-sm font-medium text-white">user@example.com</p>
+                    <p className="text-sm font-medium text-white truncate">{user.email}</p>
                   </div>
                   
                   <div className="py-2">
@@ -108,11 +144,7 @@ export default function Navigation() {
                     </button>
                     
                     <button
-                      onClick={() => {
-                        // Add logout logic here
-                        alert('Logout functionality')
-                        setUserMenuOpen(false)
-                      }}
+                      onClick={handleLogout}
                       className="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition flex items-center gap-3"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

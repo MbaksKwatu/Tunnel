@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import { Analytics } from "@vercel/analytics/react";
 import "./globals.css";
 import Navigation from "@/components/Navigation";
+import { AuthProvider } from "@/components/AuthProvider";
 
 // Import Inter font
 const inter = Inter({ 
@@ -24,8 +25,10 @@ export default function RootLayout({
   return (
     <html lang="en" className={`dark ${inter.variable}`}>
       <body className="font-body bg-base-950 text-gray-200 antialiased">
-        <Navigation />
-        {children}
+        <AuthProvider>
+          <Navigation />
+          {children}
+        </AuthProvider>
         <Analytics />
       </body>
     </html>

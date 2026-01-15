@@ -1,12 +1,15 @@
-import { createClient } from '@supabase/supabase-js';
- import { API_URL } from '@/lib/api';
+import { createBrowserClient } from '@supabase/ssr'
+import { API_URL } from '@/lib/api';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
+// Create client-side Supabase client
+export const createClientComponentClient = () => createBrowserClient(supabaseUrl!, supabaseAnonKey!)
+
 // Make Supabase optional - use backend API if not available
 export const supabase = (supabaseUrl && supabaseAnonKey)
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? createClientComponentClient()
   : null;
 
 // Backend API base URL (local-first mode)
