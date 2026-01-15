@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { autoLogin, getToken } from '@/lib/auth'
 
 export default function DealCreate() {
   const router = useRouter()
@@ -16,9 +17,16 @@ export default function DealCreate() {
     const formData = new FormData(e.currentTarget)
     
     try {
+      // Ensure we have a token
+      await autoLogin()
+      const token = getToken()
+      
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
       const response = await fetch(`${apiUrl}/api/deals`, {
         method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`
+        },
         body: formData
       })
       
