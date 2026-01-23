@@ -48,6 +48,10 @@ class StorageInterface:
         """Get a document by ID"""
         pass
     
+    def get_document_status(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """Get document status and basic metadata from Supabase"""
+        pass
+    
     def store_document(self, document_data: Dict[str, Any]) -> Dict[str, Any]:
         """Store a new document"""
         pass
