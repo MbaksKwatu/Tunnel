@@ -18,18 +18,13 @@ def seed_data():
     demo_doc_id = "demo-doc-123"
     
     try:
-        # Attempt to clean up previous demo data if exists (requires implementing delete in storage or raw SQL)
-        # Since delete_document is in interface but might not be implemented fully or we want a quick fix:
-        import sqlite3
-        if isinstance(storage, sqlite3.Connection) or hasattr(storage, 'db_path'):
-             conn = sqlite3.connect(storage.db_path)
-             cursor = conn.cursor()
-             cursor.execute("DELETE FROM documents WHERE id = ?", (demo_doc_id,))
-             cursor.execute("DELETE FROM extracted_rows WHERE document_id = ?", (demo_doc_id,))
-             cursor.execute("DELETE FROM anomalies WHERE document_id = ?", (demo_doc_id,))
-             conn.commit()
-             conn.close()
-             print("🧹 Cleaned up old demo data")
+        # Attempt to clean up previous demo data if exists
+        # Use storage interface methods instead of direct SQLite
+        try:
+            storage.delete_document(demo_doc_id)
+        except:
+            pass  # Document might not exist
+        print("🧹 Cleaned up old demo data")
     except Exception as e:
         print(f"⚠️ Cleanup warning: {e}")
 

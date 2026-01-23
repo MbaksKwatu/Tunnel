@@ -190,12 +190,35 @@ class SupabaseStorage(StorageInterface):
 
     # Document-related methods
     def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
-        """Get a document by ID"""
+        """Get document metadata from Supabase by ID"""
         try:
-            result = self.supabase.table('documents').select('*').eq('id', document_id).execute()
-            return result.data[0] if result.data else None
+            result = self.supabase.table('documents')\
+                .select('*')\
+                .eq('id', document_id)\
+                .single()\
+                .execute()
+            
+            if hasattr(result, 'data') and result.data:
+                return result.data
+            return None
         except Exception as e:
             logger.error(f"Error getting document {document_id}: {e}")
+            return None
+    
+    def get_document_status(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """Get document status and basic metadata from Supabase"""
+        try:
+            result = self.supabase.table('documents')\
+                .select('id, status, rows_count, error_message, error_code, created_at, updated_at')\
+                .eq('id', document_id)\
+                .single()\
+                .execute()
+            
+            if hasattr(result, 'data') and result.data:
+                return result.data
+            return None
+        except Exception as e:
+            logger.error(f"Error getting status for document {document_id}: {e}")
             return None
     
     def store_document(self, document_data: Dict[str, Any]) -> Dict[str, Any]:

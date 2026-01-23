@@ -16,7 +16,6 @@ import uuid
 from uuid import uuid4, UUID
 import json
 import datetime
-import sqlite3
 from dotenv import load_dotenv
 from parsers import get_parser, PasswordRequiredError, PartialParseError, normalize_transaction_rows
 
@@ -32,7 +31,7 @@ from report_generator import ReportGenerator
 from evaluate_engine import Evaluator
 # from models import Deal, Thesis, Evidence, Judgment  # Removed: Supabase-only deployment
 # from judgment_engine import JudgmentEngine  # Removed: depends on SQLAlchemy models
-from auth import get_current_user
+from auth import get_current_user, create_access_token
 
 # Import Parity AI Routes
 import custom_report
@@ -176,27 +175,6 @@ def cleanup_stale_processing_documents(max_age_seconds: int = STALE_PROCESSING_M
                 .execute()
             )
             return len(result.data) if getattr(result, 'data', None) else 0
-        
-        # Fallback to SQLite if db_path exists
-        if hasattr(storage, 'db_path') and storage.db_path:
-            db_path = storage.db_path
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                UPDATE documents
-                SET status = 'failed',
-                    error_message = 'Parsing timed out',
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE status = 'processing'
-                  AND datetime(created_at, '+' || ? || ' seconds') < datetime('now')
-                """,
-                (max_age_seconds,),
-            )
-            updated_count = cursor.rowcount
-            conn.commit()
-            conn.close()
-            return int(updated_count or 0)
 
         return 0
     except Exception as e:
@@ -372,14 +350,6 @@ async def health_db():
         if supabase_client:
             supabase_client.table("documents").select("id").limit(1).execute()
             return {"status": "ok", "storage": "supabase"}
-        
-        # Fallback to SQLite if db_path exists
-        if hasattr(storage, 'db_path') and storage.db_path:
-            conn = sqlite3.connect(storage.db_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1")
-            conn.close()
-            return {"status": "ok", "storage": "sqlite", "db_path": storage.db_path}
         
         return {"status": "error", "message": "No storage backend configured"}
     except Exception as e:
@@ -629,60 +599,6 @@ async def get_all_documents(session_id: Optional[str] = None):
                 query = query.eq('user_id', ensure_uuid(session_id))
             result = query.execute()
             return result.data or []
-        
-        # Fallback to SQLite if db_path exists
-        if hasattr(storage, 'db_path') and storage.db_path:
-            import sqlite3
-            db_path = storage.db_path
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            
-            if session_id:
-                cursor.execute("""
-                    SELECT id, user_id, file_name, file_type, file_url, format_detected,
-                           upload_date, status, rows_count, anomalies_count, error_message,
-                           error_code, next_action, rows_parsed, rows_expected,
-                           insights_summary, created_at, updated_at
-                    FROM documents
-                    WHERE user_id = ?
-                    ORDER BY upload_date DESC
-                """, (ensure_uuid(session_id),))
-            else:
-                cursor.execute("""
-                    SELECT id, user_id, file_name, file_type, file_url, format_detected,
-                           upload_date, status, rows_count, anomalies_count, error_message,
-                           error_code, next_action, rows_parsed, rows_expected,
-                           insights_summary, created_at, updated_at
-                    FROM documents
-                    ORDER BY upload_date DESC
-                """)
-            
-            documents = []
-            for row in cursor.fetchall():
-                doc = {
-                    'id': row[0],
-                    'user_id': row[1],
-                    'file_name': row[2],
-                    'file_type': row[3],
-                    'file_url': row[4],
-                    'format_detected': row[5],
-                    'upload_date': row[6] or '',
-                    'status': row[7],
-                    'rows_count': row[8] or 0,
-                    'anomalies_count': row[9] or 0,
-                    'error_message': row[10],
-                    'error_code': row[11],
-                    'next_action': row[12],
-                    'rows_parsed': row[13],
-                    'rows_expected': row[14],
-                    'insights_summary': json.loads(row[15]) if row[15] else None,
-                    'created_at': row[16] or '',
-                    'updated_at': row[17] or ''
-                }
-                documents.append(doc)
-            
-            conn.close()
-            return documents
 
         return []
         
@@ -1154,31 +1070,29 @@ async def cleanup_stuck_files(max_age_minutes: int = 30):
     """Cleanup files stuck in processing status"""
     try:
         # Supabase storage
-            import sqlite3
-            db_path = storage.db_path
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
+        supabase_client = getattr(storage, 'supabase', None)
+        if supabase_client:
+            cutoff = (datetime.datetime.utcnow() - datetime.timedelta(minutes=max_age_minutes)).isoformat()
+            result = (
+                supabase_client.table('documents')
+                .update({
+                    'status': 'failed',
+                    'error_message': 'Processing timeout - file may have been corrupted or too large'
+                })
+                .eq('status', 'processing')
+                .lt('created_at', cutoff)
+                .execute()
+            )
             
-            # Find documents stuck in processing for more than max_age_minutes
-            cursor.execute("""
-                UPDATE documents 
-                SET status = 'failed', 
-                    error_message = 'Processing timeout - file may have been corrupted or too large',
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE status = 'processing' 
-                  AND datetime(created_at, '+' || ? || ' minutes') < datetime('now')
-            """, (max_age_minutes,))
-            
-            updated_count = cursor.rowcount
-            conn.commit()
-            conn.close()
-            
+            updated_count = len(result.data) if result.data else 0
             logger.info(f"✅ Cleaned up {updated_count} stuck files")
             return {
                 "success": True,
                 "updated_count": updated_count,
                 "message": f"Marked {updated_count} stuck files as failed"
             }
+        
+        return {"success": False, "message": "No storage backend configured"}
             
     except Exception as e:
         logger.error(f"Error cleaning up stuck files: {e}")
