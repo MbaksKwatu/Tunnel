@@ -42,6 +42,43 @@ class StorageInterface:
     
     def save_judgment(self, deal_id: str, judgment_data: Dict[str, Any]) -> Dict[str, Any]:
         pass
+    
+    # Document-related methods
+    def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """Get a document by ID"""
+        pass
+    
+    def store_document(self, document_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Store a new document"""
+        pass
+    
+    def update_document_status(self, document_id: str, status: str, rows_count: Optional[int] = None, error_message: Optional[str] = None) -> bool:
+        """Update document processing status"""
+        pass
+    
+    def store_rows(self, document_id: str, rows: List[Dict[str, Any]]) -> int:
+        """Store extracted rows for a document"""
+        pass
+    
+    def get_rows(self, document_id: str, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Get extracted rows for a document"""
+        pass
+    
+    def store_anomalies(self, document_id: str, anomalies: List[Dict[str, Any]]) -> int:
+        """Store detected anomalies for a document"""
+        pass
+    
+    def get_anomalies(self, document_id: str) -> List[Dict[str, Any]]:
+        """Get anomalies for a document"""
+        pass
+    
+    def store_insights(self, document_id: str, insights: Dict[str, Any]) -> bool:
+        """Store insights for a document"""
+        pass
+    
+    def get_insights(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """Get insights for a document"""
+        pass
 
 class SupabaseStorage(StorageInterface):
     def __init__(self, supabase_client):
@@ -150,6 +187,108 @@ class SupabaseStorage(StorageInterface):
         except Exception as e:
             logger.error(f"Error saving judgment for deal {deal_id}: {e}")
             raise
+
+    # Document-related methods
+    def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """Get a document by ID"""
+        try:
+            result = self.supabase.table('documents').select('*').eq('id', document_id).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Error getting document {document_id}: {e}")
+            return None
+    
+    def store_document(self, document_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Store a new document"""
+        try:
+            result = self.supabase.table('documents').insert(document_data).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Error storing document: {e}")
+            raise
+    
+    def update_document_status(self, document_id: str, status: str, rows_count: Optional[int] = None, error_message: Optional[str] = None) -> bool:
+        """Update document processing status"""
+        try:
+            update_data = {'status': status}
+            if rows_count is not None:
+                update_data['rows_count'] = rows_count
+            if error_message is not None:
+                update_data['error_message'] = error_message
+            
+            result = self.supabase.table('documents').update(update_data).eq('id', document_id).execute()
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"Error updating document status {document_id}: {e}")
+            return False
+    
+    def store_rows(self, document_id: str, rows: List[Dict[str, Any]]) -> int:
+        """Store extracted rows for a document"""
+        try:
+            # Clear existing rows for this document
+            self.supabase.table('extracted_rows').delete().eq('document_id', document_id).execute()
+            
+            # Insert new rows
+            rows_with_doc_id = [{'document_id': document_id, **row} for row in rows]
+            result = self.supabase.table('extracted_rows').insert(rows_with_doc_id).execute()
+            return len(result.data) if result.data else 0
+        except Exception as e:
+            logger.error(f"Error storing rows for document {document_id}: {e}")
+            return 0
+    
+    def get_rows(self, document_id: str, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Get extracted rows for a document"""
+        try:
+            result = self.supabase.table('extracted_rows').select('*').eq('document_id', document_id).range(offset, offset + limit - 1).execute()
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Error getting rows for document {document_id}: {e}")
+            return []
+    
+    def store_anomalies(self, document_id: str, anomalies: List[Dict[str, Any]]) -> int:
+        """Store detected anomalies for a document"""
+        try:
+            # Clear existing anomalies for this document
+            self.supabase.table('anomalies').delete().eq('document_id', document_id).execute()
+            
+            # Insert new anomalies
+            anomalies_with_doc_id = [{'document_id': document_id, **anomaly} for anomaly in anomalies]
+            result = self.supabase.table('anomalies').insert(anomalies_with_doc_id).execute()
+            return len(result.data) if result.data else 0
+        except Exception as e:
+            logger.error(f"Error storing anomalies for document {document_id}: {e}")
+            return 0
+    
+    def get_anomalies(self, document_id: str) -> List[Dict[str, Any]]:
+        """Get anomalies for a document"""
+        try:
+            result = self.supabase.table('anomalies').select('*').eq('document_id', document_id).execute()
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Error getting anomalies for document {document_id}: {e}")
+            return []
+    
+    def store_insights(self, document_id: str, insights: Dict[str, Any]) -> bool:
+        """Store insights for a document"""
+        try:
+            result = self.supabase.table('insights').upsert({
+                'document_id': document_id,
+                'insights': insights,
+                'updated_at': datetime.utcnow().isoformat()
+            }).execute()
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"Error storing insights for document {document_id}: {e}")
+            return False
+    
+    def get_insights(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """Get insights for a document"""
+        try:
+            result = self.supabase.table('insights').select('*').eq('document_id', document_id).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Error getting insights for document {document_id}: {e}")
+            return None
 
 def get_storage() -> StorageInterface:
     """Get storage instance with Supabase"""
