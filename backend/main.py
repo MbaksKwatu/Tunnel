@@ -32,7 +32,7 @@ from report_generator import ReportGenerator
 from evaluate_engine import Evaluator
 # from models import Deal, Thesis, Evidence, Judgment  # Removed: Supabase-only deployment
 # from judgment_engine import JudgmentEngine  # Removed: depends on SQLAlchemy models
-from auth import get_current_user, create_access_token
+from auth import get_current_user
 
 # Import Parity AI Routes
 import custom_report
