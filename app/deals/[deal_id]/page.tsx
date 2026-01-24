@@ -1,4 +1,5 @@
 import DealDetail from '@/components/DealDetail'
+import ProtectedRoute from '@/components/ProtectedRoute'
 
 interface Props {
   params: {
@@ -7,5 +8,9 @@ interface Props {
 }
 
 export default function DealPage({ params }: Props) {
-  return <DealDetail dealId={params.deal_id} />
+  return (
+    <ProtectedRoute>
+      <DealDetail dealId={params.deal_id} />
+    </ProtectedRoute>
+  )
 }

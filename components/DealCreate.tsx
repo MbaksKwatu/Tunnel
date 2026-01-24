@@ -3,12 +3,13 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/components/AuthProvider'
+import { fetchApi } from '@/lib/api'
 
 export default function DealCreate() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const { user } = useAuth()
+  const { user, session } = useAuth()
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -24,15 +25,8 @@ export default function DealCreate() {
     const formData = new FormData(e.currentTarget)
     
     try {
-      const { data: { session } } = await user.getSession()
-      const token = session?.access_token
-      
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const response = await fetch(`${apiUrl}/api/deals`, {
+      const response = await fetchApi('/api/deals', {
         method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`
-        },
         body: formData
       })
       

@@ -1,14 +1,15 @@
-import { getToken } from './auth'
+import { createBrowserClient } from './supabase'
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 export const fetchApi = async (endpoint: string, options?: RequestInit) => {
   const url = `${API_URL}${endpoint}`
-  const token = getToken()
+  const supabase = createBrowserClient()
+  const { data: { session } } = await supabase.auth.getSession()
   
   const defaultHeaders = {
     'Content-Type': 'application/json',
-    ...(token && { 'Authorization': `Bearer ${token}` })
+    ...(session && { 'Authorization': `Bearer ${session.access_token}` })
   }
   
   const mergedOptions = {
@@ -20,4 +21,8 @@ export const fetchApi = async (endpoint: string, options?: RequestInit) => {
   }
   
   return fetch(url, mergedOptions)
+}
+
+export async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
+  return fetchApi(endpoint, options)
 }

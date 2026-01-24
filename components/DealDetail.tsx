@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Upload, FileText, CheckCircle, Clock, AlertCircle, Play, ArrowLeft, Trash2, Eye } from 'lucide-react'
 import JudgmentCards from './JudgmentCards'
+import { fetchApi } from '@/lib/api'
 
 interface Deal {
   id: string
@@ -76,19 +77,18 @@ export default function DealDetail({ dealId }: { dealId: string }) {
     setError('')
     
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const dealResponse = await fetch(`${apiUrl}/api/deals/${dealId}`)
+      const dealResponse = await fetchApi(`/api/deals/${dealId}`)
       if (!dealResponse.ok) throw new Error('Failed to load deal')
       const dealData = await dealResponse.json()
       setDeal(dealData.deal || dealData)
 
-      const evidenceResponse = await fetch(`${apiUrl}/api/deals/${dealId}/evidence`)
+      const evidenceResponse = await fetchApi(`/api/deals/${dealId}/evidence`)
       if (evidenceResponse.ok) {
         const evidenceData = await evidenceResponse.json()
         setEvidence(evidenceData.evidence || evidenceData || [])
       }
 
-      const judgmentResponse = await fetch(`${apiUrl}/api/deals/${dealId}/judgment`)
+      const judgmentResponse = await fetchApi(`/api/deals/${dealId}/judgment`)
       if (judgmentResponse.ok) {
         const judgmentData = await judgmentResponse.json()
         setJudgment(judgmentData.judgment || judgmentData)
@@ -109,13 +109,12 @@ export default function DealDetail({ dealId }: { dealId: string }) {
     setSuccess('')
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
       for (const file of Array.from(files)) {
         const formData = new FormData()
         formData.append('file', file)
         formData.append('deal_id', dealId)
 
-        const response = await fetch(`${apiUrl}/api/deals/${dealId}/evidence`, {
+        const response = await fetchApi(`/api/deals/${dealId}/evidence`, {
           method: 'POST',
           body: formData
         })
@@ -142,8 +141,7 @@ export default function DealDetail({ dealId }: { dealId: string }) {
     setSuccess('')
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const response = await fetch(`${apiUrl}/api/deals/${dealId}/judge`, {
+      const response = await fetchApi(`/api/deals/${dealId}/judge`, {
         method: 'POST'
       })
 

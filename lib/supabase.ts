@@ -1,11 +1,42 @@
-import { createBrowserClient } from '@supabase/ssr'
+import { createBrowserClient as createBrowserClientHelper } from '@supabase/auth-helpers-nextjs'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { API_URL } from '@/lib/api';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-// Create client-side Supabase client
-export const createClientComponentClient = () => createBrowserClient(supabaseUrl!, supabaseAnonKey!)
+// For client components (browser)
+export const createBrowserClient = (): SupabaseClient => {
+  return createBrowserClientHelper(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
+}
+
+// For server components
+export const createServerClient = (): SupabaseClient => {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  
+  return createClient(supabaseUrl, supabaseAnonKey)
+}
+
+// Get current session
+export const getSession = async () => {
+  const supabase = createBrowserClient()
+  const { data: { session } } = await supabase.auth.getSession()
+  return session
+}
+
+// Get current user
+export const getUser = async () => {
+  const supabase = createBrowserClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  return user
+}
+
+// Legacy export for backward compatibility
+export const createClientComponentClient = createBrowserClient
 
 // Make Supabase optional - use backend API if not available
 export const supabase = (supabaseUrl && supabaseAnonKey)

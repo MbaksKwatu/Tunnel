@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { autoLogin, getToken } from '@/lib/auth'
+import { fetchApi } from '@/lib/api'
 import ThesisBuilder from './ThesisBuilder'
 
 export default function ThesisSettings() {
@@ -14,7 +14,6 @@ export default function ThesisSettings() {
   const [thesisData, setThesisData] = useState<any>(null)
 
   useEffect(() => {
-    autoLogin()
     fetchThesis()
   }, [])
 
@@ -23,13 +22,7 @@ export default function ThesisSettings() {
     setError('')
     
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const token = getToken()
-      const response = await fetch(`${apiUrl}/api/thesis`, {
-        headers: { 
-          'Authorization': `Bearer ${token}`
-        }
-      })
+      const response = await fetchApi('/api/thesis')
       
       if (!response.ok) {
         throw new Error('Failed to load thesis')
@@ -50,13 +43,10 @@ export default function ThesisSettings() {
     setSuccess(false)
     
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const token = getToken()
-      const response = await fetch(`${apiUrl}/api/thesis`, {
+      const response = await fetchApi('/api/thesis', {
         method: 'PUT',
         headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(updatedThesis)
       })

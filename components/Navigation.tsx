@@ -9,14 +9,14 @@ export default function Navigation() {
   const pathname = usePathname()
   const router = useRouter()
   const [userMenuOpen, setUserMenuOpen] = useState(false)
-  const { user, loading, supabase } = useAuth()
+  const { user, loading, signOut } = useAuth()
 
   const isActive = (path: string) => {
     return pathname.startsWith(path)
   }
 
   const handleLogout = async () => {
-    await supabase.auth.signOut()
+    await signOut()
     setUserMenuOpen(false)
     router.push('/')
   }

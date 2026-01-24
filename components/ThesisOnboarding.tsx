@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { autoLogin, getToken } from '@/lib/auth'
+import { fetchApi } from '@/lib/api'
 import ThesisBuilder from './ThesisBuilder'
 
 export default function ThesisOnboarding() {
@@ -11,22 +11,15 @@ export default function ThesisOnboarding() {
   const [error, setError] = useState('')
   const [step, setStep] = useState<'intro' | 'builder' | 'success'>('intro')
 
-  useEffect(() => {
-    autoLogin()
-  }, [])
-
   const handleSubmit = async (thesisData: any) => {
     setLoading(true)
     setError('')
     
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const token = getToken()
-      const response = await fetch(`${apiUrl}/api/thesis`, {
+      const response = await fetchApi('/api/thesis', {
         method: 'POST',
         headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(thesisData)
       })

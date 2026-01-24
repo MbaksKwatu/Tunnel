@@ -1,5 +1,10 @@
 import DealList from '@/components/DealList'
+import ProtectedRoute from '@/components/ProtectedRoute'
 
 export default function DealsPage() {
-  return <DealList />
+  return (
+    <ProtectedRoute>
+      <DealList />
+    </ProtectedRoute>
+  )
 }

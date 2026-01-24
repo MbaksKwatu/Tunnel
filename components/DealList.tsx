@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { fetchApi } from '@/lib/api'
 
 interface Deal {
   id: string
@@ -29,8 +30,7 @@ export default function DealList() {
     setError('')
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const response = await fetch(`${apiUrl}/api/deals`)
+      const response = await fetchApi('/api/deals')
       
       if (!response.ok) {
         throw new Error('Failed to load deals')

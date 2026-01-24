@@ -1,5 +1,10 @@
 import DealCreate from '@/components/DealCreate'
+import ProtectedRoute from '@/components/ProtectedRoute'
 
 export default function NewDealPage() {
-  return <DealCreate />
+  return (
+    <ProtectedRoute>
+      <DealCreate />
+    </ProtectedRoute>
+  )
 }
