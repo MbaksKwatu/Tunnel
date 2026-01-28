@@ -84,6 +84,14 @@ class StorageInterface:
         """Get insights for a document"""
         pass
 
+    def save_conversation_message(self, deal_id: str, role: str, content: str) -> Dict[str, Any]:
+        """Save a user or assistant message for Ask Parity (deal-scoped)."""
+        pass
+
+    def get_conversation_messages(self, deal_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get last N messages for a deal, oldest first (chronological). Max 8–10 in prompt context."""
+        pass
+
 class SupabaseStorage(StorageInterface):
     def __init__(self, supabase_client):
         self.supabase = supabase_client
@@ -316,6 +324,38 @@ class SupabaseStorage(StorageInterface):
         except Exception as e:
             logger.error(f"Error getting insights for document {document_id}: {e}")
             return None
+
+    def save_conversation_message(self, deal_id: str, role: str, content: str) -> Dict[str, Any]:
+        """Save a user or assistant message for Ask Parity (deal-scoped)."""
+        try:
+            row = {
+                'deal_id': deal_id,
+                'role': role,
+                'content': content,
+            }
+            result = self.supabase.table('deal_conversations').insert(row).execute()
+            return result.data[0] if result.data else {}
+        except Exception as e:
+            logger.error(f"Error saving conversation message for deal {deal_id}: {e}")
+            raise
+
+    def get_conversation_messages(self, deal_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get last N messages for a deal, oldest first (chronological). Max 8–10 in prompt context."""
+        try:
+            result = (
+                self.supabase.table('deal_conversations')
+                .select('*')
+                .eq('deal_id', deal_id)
+                .order('created_at', desc=True)
+                .limit(limit)
+                .execute()
+            )
+            rows = result.data or []
+            rows.reverse()
+            return rows
+        except Exception as e:
+            logger.error(f"Error getting conversation messages for deal {deal_id}: {e}")
+            return []
 
 def get_storage() -> StorageInterface:
     """Get storage instance with Supabase"""

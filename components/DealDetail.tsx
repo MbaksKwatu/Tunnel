@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Upload, FileText, CheckCircle, Clock, AlertCircle, Play, ArrowLeft, Trash2, Eye } from 'lucide-react'
 import JudgmentCards from './JudgmentCards'
+import AskParityChat from './AskParityChat'
 import { fetchApi } from '@/lib/api'
 
 interface Deal {
@@ -343,6 +344,8 @@ export default function DealDetail({ dealId }: { dealId: string }) {
           </div>
 
           <div className="space-y-6">
+            <AskParityChat dealId={dealId} />
+
             <div className="bg-gray-800 rounded-lg p-6">
               <h2 className="text-xl font-semibold text-white mb-4">Actions</h2>
               
