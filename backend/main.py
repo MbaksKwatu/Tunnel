@@ -72,8 +72,19 @@ app.include_router(llm_actions.router)
 app.include_router(deals.router, prefix="/api", tags=["deals"])
 
 # Initialize storage (Supabase only)
-storage: StorageInterface = get_storage()  # Always returns SupabaseStorage (raises if not configured)
-logger.info(f"✅ Storage initialized: {type(storage).__name__}")
+# Wrap in try-except so app can start even if env vars are missing
+# Endpoints will return 503 if storage is not available
+try:
+    storage: StorageInterface = get_storage()
+    logger.info(f"✅ Storage initialized: {type(storage).__name__}")
+except Exception as e:
+    logger.error(f"❌ Failed to initialize storage: {e}")
+    logger.error("⚠️  Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables")
+    # Create a dummy storage that raises on use
+    class DummyStorage:
+        def __getattr__(self, name):
+            raise HTTPException(status_code=503, detail="Storage not configured. Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.")
+    storage = DummyStorage()
 
 # Initialize anomaly detector
 anomaly_detector = AnomalyDetector()
