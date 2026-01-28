@@ -1,24 +1,12 @@
 // Simple authentication utility for MVP
+// NOTE: This file is legacy. The app now uses Supabase auth via AuthProvider.
+// Keeping these functions for backward compatibility but they're not actively used.
 
 export const login = async () => {
-  try {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-    const response = await fetch(`${apiUrl}/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    })
-    
-    if (!response.ok) {
-      throw new Error('Login failed')
-    }
-    
-    const data = await response.json()
-    localStorage.setItem('access_token', data.access_token)
-    return data.access_token
-  } catch (error) {
-    console.error('Login error:', error)
-    throw error
-  }
+  // Legacy function - app now uses Supabase auth
+  // This endpoint doesn't exist on the backend
+  console.warn('Legacy login() called - app uses Supabase auth via AuthProvider')
+  return null
 }
 
 export const getToken = () => {
@@ -39,8 +27,9 @@ export const isAuthenticated = () => {
 }
 
 // Auto-login for MVP
+// NOTE: Legacy function - app now uses Supabase auth via AuthProvider
 export const autoLogin = async () => {
-  if (!isAuthenticated()) {
-    await login()
-  }
+  // Legacy function - app now uses Supabase auth
+  // No-op to prevent errors
+  console.warn('Legacy autoLogin() called - app uses Supabase auth via AuthProvider')
 }
