@@ -1,22 +1,32 @@
-import { createBrowserClient as createBrowserClientHelper } from '@supabase/auth-helpers-nextjs'
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { API_URL } from '@/lib/api';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-// For client components (browser)
-export const createBrowserClient = (): SupabaseClient => {
-  return createBrowserClientHelper(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
+// For client components (browser) - use standard createClient
+// This works during build and runtime, and handles missing env vars gracefully
+export const createBrowserClient = (): SupabaseClient | null => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  
+  if (!url || !key) {
+    // During build or when env vars are missing, return null
+    // This prevents build failures. The app will handle missing Supabase at runtime.
+    return null
+  }
+  
+  return createClient(url, key)
 }
 
 // For server components
-export const createServerClient = (): SupabaseClient => {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+export const createServerClient = (): SupabaseClient | null => {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return null
+  }
   
   return createClient(supabaseUrl, supabaseAnonKey)
 }
@@ -24,24 +34,32 @@ export const createServerClient = (): SupabaseClient => {
 // Get current session
 export const getSession = async () => {
   const supabase = createBrowserClient()
-  const { data: { session } } = await supabase.auth.getSession()
-  return session
+  if (!supabase) return null
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    return session
+  } catch {
+    return null
+  }
 }
 
 // Get current user
 export const getUser = async () => {
   const supabase = createBrowserClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  return user
+  if (!supabase) return null
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    return user
+  } catch {
+    return null
+  }
 }
 
 // Legacy export for backward compatibility
 export const createClientComponentClient = createBrowserClient
 
 // Make Supabase optional - use backend API if not available
-export const supabase = (supabaseUrl && supabaseAnonKey)
-  ? createClientComponentClient()
-  : null;
+export const supabase = createClientComponentClient();
 
 // Backend API base URL (local-first mode)
 const API_BASE = API_URL;

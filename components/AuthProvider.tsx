@@ -21,15 +21,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
   const router = useRouter()
-  const supabase = createBrowserClient()
+  
+  // Lazy client creation - only create when actually needed (client-side)
+  const getSupabaseClient = () => {
+    return createBrowserClient()
+  }
 
   useEffect(() => {
+    const supabase = getSupabaseClient()
+    if (!supabase) {
+      setLoading(false)
+      return
+    }
+
     // Get initial session
     const getInitialSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      setSession(session)
-      setUser(session?.user ?? null)
-      setLoading(false)
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        setSession(session)
+        setUser(session?.user ?? null)
+      } catch (error) {
+        console.warn('Failed to get session:', error)
+      } finally {
+        setLoading(false)
+      }
     }
 
     getInitialSession()
@@ -65,9 +80,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       subscription.unsubscribe()
     }
-  }, [router, supabase])
+  }, [router])
 
   const signIn = async (email: string, password: string) => {
+    const supabase = getSupabaseClient()
+    if (!supabase) {
+      return { error: { message: 'Supabase not configured' } }
+    }
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -76,6 +95,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const signUp = async (email: string, password: string) => {
+    const supabase = getSupabaseClient()
+    if (!supabase) {
+      return { error: { message: 'Supabase not configured' } }
+    }
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -87,7 +110,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const signOut = async () => {
-    await supabase.auth.signOut()
+    const supabase = getSupabaseClient()
+    if (supabase) {
+      await supabase.auth.signOut()
+    }
     router.push('/login')
   }
 
