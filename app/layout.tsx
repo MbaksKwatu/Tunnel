@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
-import { Analytics } from "@vercel/analytics/react";
 import "./globals.css";
 import Navigation from "@/components/Navigation";
 import { AuthProvider } from "@/components/AuthProvider";
@@ -29,7 +28,6 @@ export default function RootLayout({
           <Navigation />
           {children}
         </AuthProvider>
-        <Analytics />
       </body>
     </html>
   );
