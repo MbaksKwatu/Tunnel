@@ -1,11 +1,13 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
-import { Upload, File, CheckCircle, XCircle, Loader2, Lock, Unlock, RotateCcw, X, AlertTriangle } from 'lucide-react';
-import { isLocalMode } from '@/lib/supabase';
+import { Upload, File, CheckCircle, XCircle, Loader2, Lock, Unlock, RotateCcw, X, Eye, Bot } from 'lucide-react';
+import { uploadFile, createDocument, updateDocumentStatus, isLocalMode } from '@/lib/supabase';
 import { FileType, UploadProgress } from '@/lib/types';
-import { API_URL } from '@/lib/api';
+import axios from 'axios';
+import InvesteeConfirmModal from './InvesteeConfirmModal';
 
 interface FileUploadProps {
   userId: string;
@@ -17,26 +19,31 @@ interface ExtendedUploadProgress extends UploadProgress {
   documentId?: string;
   investeeNameSuggested?: string;
   investeeConfirmed?: boolean;
-  rowsParsed?: number;
-  rowsExpected?: number | null;
-  errorCode?: string;
-  nextAction?: string;
 }
 
 export default function FileUpload({ userId, onUploadComplete }: FileUploadProps) {
+  const router = useRouter();
   const [uploads, setUploads] = useState<ExtendedUploadProgress[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [dropError, setDropError] = useState<string | null>(null);
 
   // Password handling state
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [fileToRetry, setFileToRetry] = useState<File | null>(null);
 
+  // Investee confirmation state
+  const [showInvesteeModal, setShowInvesteeModal] = useState(false);
+  const [pendingInvesteeConfirm, setPendingInvesteeConfirm] = useState<{
+    documentId: string;
+    suggestedName: string;
+    fileName: string;
+  } | null>(null);
+
   const getFileType = (file: File): FileType | null => {
     const extension = file.name.split('.').pop()?.toLowerCase();
     if (extension === 'pdf') return 'pdf';
     if (extension === 'csv') return 'csv';
+    if (extension === 'xlsx' || extension === 'xls') return 'xlsx';
     return null;
   };
 
@@ -44,10 +51,12 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
     const fileType = getFileType(file);
 
     if (!fileType) {
-      throw new Error('Unsupported file type. Please upload PDF or CSV files.');
+      throw new Error('Unsupported file type. Please upload PDF, CSV, or XLSX files.');
     }
 
-    // Local-first mode: upload to backend and process asynchronously
+    const parserUrl = process.env.NEXT_PUBLIC_API_URL;
+
+    // Local-first mode: upload directly to backend
     if (isLocalMode) {
       // Update progress: uploading
       setUploads(prev => prev.map(u =>
@@ -56,109 +65,138 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
 
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('session_id', userId);
       if (password) {
         formData.append('password', password);
       }
 
       try {
+        // Upload and parse in one step
         setUploads(prev => prev.map(u =>
-          u.fileName === file.name ? { ...u, status: 'processing', progress: 40 } : u
+          u.fileName === file.name ? { ...u, status: 'processing', progress: 50 } : u
         ));
 
-        const uploadRes = await fetch(`${API_URL}/documents/upload`, {
-          method: 'POST',
-          body: formData
+        const response = await axios.post(`${parserUrl}/parse`, formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          },
+          timeout: 300000 // 5 minutes timeout for large files
         });
 
-        const uploadJson = await uploadRes.json().catch(() => ({}));
-        if (!uploadRes.ok) {
-          const msg = String(uploadJson?.detail || uploadJson?.error || 'Upload failed');
-          throw new Error(msg);
-        }
+        if (response.data.success) {
+          const docId = response.data.document_id;
+          const investeeSuggested = response.data.investee_name_suggested;
 
-        const docId = String(uploadJson.document_id || '');
-        if (!docId) {
-          throw new Error('Upload failed: missing document_id');
-        }
-
-        setUploads(prev => prev.map(u =>
-          u.fileName === file.name ? { ...u, status: 'processing', progress: 60, documentId: docId } : u
-        ));
-
-        const start = Date.now();
-        const maxMs = 120_000;
-        const pollEveryMs = 3_000;
-
-        while (Date.now() - start < maxMs) {
-          await new Promise(r => setTimeout(r, pollEveryMs));
-
-          const statusRes = await fetch(`${API_URL}/documents/${docId}/status`);
-          const statusJson = await statusRes.json().catch(() => ({}));
-          const status = String(statusJson.status || '').toLowerCase();
-          const errMsg = String(statusJson.error_message || '');
-          const errCode = String(statusJson.error_code || '');
-          const nextAction = String(statusJson.next_action || '');
-          const rowsParsed = typeof statusJson.rows_parsed === 'number' ? statusJson.rows_parsed : undefined;
-          const rowsExpected = typeof statusJson.rows_expected === 'number' ? statusJson.rows_expected : null;
-
-          if (status === 'completed') {
-            setUploads(prev => prev.map(u =>
-              u.fileName === file.name ? { ...u, status: 'completed', progress: 100, documentId: docId, rowsParsed, rowsExpected, errorCode: errCode || undefined, nextAction: nextAction || undefined } : u
-            ));
-            if (onUploadComplete) onUploadComplete();
-            return;
-          }
-
-          if (status === 'failed') {
-            const token = errCode || errMsg;
-            const normalized = token === 'PASSWORD_REQUIRED' ? 'PASSWORD_REQUIRED' : (token || 'Processing failed');
-            setUploads(prev => prev.map(u =>
-              u.fileName === file.name ? { ...u, status: 'error', error: normalized, progress: 0, documentId: docId, rowsParsed, rowsExpected, errorCode: errCode || undefined, nextAction: nextAction || undefined } : u
-            ));
-            return;
-          }
-
-          if (status === 'partial') {
-            const token = errCode || errMsg;
-            if (token === 'PASSWORD_REQUIRED') {
-              setUploads(prev => prev.map(u =>
-                u.fileName === file.name ? { ...u, status: 'error', error: 'PASSWORD_REQUIRED', progress: 0, documentId: docId, rowsParsed, rowsExpected, errorCode: errCode || undefined, nextAction: nextAction || undefined } : u
-              ));
-              return;
-            }
-
-            const normalized = token || nextAction || 'Partial success';
-            setUploads(prev => prev.map(u =>
-              u.fileName === file.name ? { ...u, status: 'partial', error: normalized, progress: 100, documentId: docId, rowsParsed, rowsExpected, errorCode: errCode || undefined, nextAction: nextAction || undefined } : u
-            ));
-            if (onUploadComplete) onUploadComplete();
-            return;
-          }
-
+          // Update progress: completed with document info
           setUploads(prev => prev.map(u =>
-            u.fileName === file.name ? { ...u, status: 'processing', progress: 75, documentId: docId } : u
+            u.fileName === file.name ? {
+              ...u,
+              status: 'completed',
+              progress: 100,
+              documentId: docId,
+              investeeNameSuggested: investeeSuggested
+            } : u
           ));
-        }
 
-        setUploads(prev => prev.map(u =>
-          u.fileName === file.name ? { ...u, status: 'error', error: 'Processing timed out. Please retry.', progress: 0, documentId: docId } : u
-        ));
+          // Show investee confirmation modal
+          if (docId && investeeSuggested) {
+            setPendingInvesteeConfirm({
+              documentId: docId,
+              suggestedName: investeeSuggested,
+              fileName: file.name
+            });
+            setShowInvesteeModal(true);
+          }
+        } else {
+          // Check for password requirement
+          if (response.data.error === 'PASSWORD_REQUIRED') {
+            throw new Error('PASSWORD_REQUIRED');
+          }
+          throw new Error(response.data.error || 'Parsing failed');
+        }
       } catch (error: any) {
-        const errorMessage = (error.message || 'Unknown error');
+        const errorMessage = error.message === 'PASSWORD_REQUIRED'
+          ? 'PASSWORD_REQUIRED'
+          : (error.response?.data?.detail || error.message || 'Unknown error');
 
         setUploads(prev => prev.map(u =>
           u.fileName === file.name ? { ...u, status: 'error', error: errorMessage, progress: 0 } : u
         ));
+        if (errorMessage !== 'PASSWORD_REQUIRED') {
+          throw new Error(`Parsing failed: ${errorMessage}`);
+        }
       }
       return;
     }
 
-    throw new Error('Upload is only supported via the backend API.');
+    // Supabase mode: use existing flow
+    // Update progress: uploading
+    setUploads(prev => prev.map(u =>
+      u.fileName === file.name ? { ...u, status: 'uploading', progress: 30, error: undefined } : u
+    ));
+
+    // Upload to Supabase Storage
+    const { url } = await uploadFile(file, userId);
+
+    // Update progress: creating record
+    setUploads(prev => prev.map(u =>
+      u.fileName === file.name ? { ...u, progress: 50 } : u
+    ));
+
+    // Create document record
+    const document = await createDocument(userId, file.name, fileType, url);
+
+    // Update progress: processing
+    setUploads(prev => prev.map(u =>
+      u.fileName === file.name ? { ...u, status: 'processing', progress: 70 } : u
+    ));
+
+    // Update document status to processing
+    await updateDocumentStatus(document.id, 'processing');
+
+    // Call parser API
+    try {
+      const response = await axios.post(`${parserUrl}/parse`, {
+        document_id: document.id,
+        file_url: url,
+        file_type: fileType,
+        password: password
+      }, {
+        timeout: 300000 // 5 minutes timeout for large files
+      });
+
+      if (response.data.success) {
+        // Update document status to completed
+        await updateDocumentStatus(document.id, 'completed', response.data.rows_extracted);
+
+        // Update progress: completed
+        setUploads(prev => prev.map(u =>
+          u.fileName === file.name ? { ...u, status: 'completed', progress: 100 } : u
+        ));
+      } else {
+        if (response.data.error === 'PASSWORD_REQUIRED') {
+          throw new Error('PASSWORD_REQUIRED');
+        }
+        throw new Error(response.data.error || 'Parsing failed');
+      }
+    } catch (error: any) {
+      // Update document status to failed
+      const errorMessage = error.message === 'PASSWORD_REQUIRED'
+        ? 'PASSWORD_REQUIRED'
+        : (error.response?.data?.detail || error.message || 'Unknown error');
+
+      await updateDocumentStatus(document.id, 'failed', 0, errorMessage);
+
+      setUploads(prev => prev.map(u =>
+        u.fileName === file.name ? { ...u, status: 'error', error: errorMessage, progress: 0 } : u
+      ));
+
+      if (errorMessage !== 'PASSWORD_REQUIRED') {
+        throw new Error(`Parsing failed: ${errorMessage}`);
+      }
+    }
   };
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    setDropError(null);
     setIsUploading(true);
 
     // Initialize upload progress for all files
@@ -182,11 +220,8 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
       // Let's just process.
       try {
         await processFile(file);
-      } catch (e: any) {
-        const message = e?.message || 'Upload failed';
-        setUploads(prev => prev.map(u =>
-          u.fileName === file.name ? { ...u, status: 'error', error: message, progress: 0 } : u
-        ));
+      } catch (error: any) {
+        console.error(`Error processing ${file.name}:`, error);
       }
     }
 
@@ -194,25 +229,9 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
 
     // Clear completed uploads after 5 seconds (keep errors for retry)
     setTimeout(() => {
-      setUploads(prev => prev.filter(u => u.status === 'uploading' || u.status === 'processing' || u.status === 'error' || u.status === 'partial'));
+      setUploads(prev => prev.filter(u => u.status === 'uploading' || u.status === 'processing' || u.status === 'error'));
     }, 5000);
   }, [userId, onUploadComplete]);
-
-  const onDropRejected = useCallback((fileRejections: any[]) => {
-    setDropError('Unsupported file type. Please upload PDF or CSV files.');
-    if (Array.isArray(fileRejections) && fileRejections.length > 0) {
-      const rejectedUploads: UploadProgress[] = fileRejections.map((r: any) => {
-        const name = String(r?.file?.name || 'Unknown file');
-        return {
-          fileName: name,
-          progress: 0,
-          status: 'error',
-          error: 'Unsupported file type. Please upload PDF or CSV files.',
-        };
-      });
-      setUploads(prev => [...prev, ...rejectedUploads]);
-    }
-  }, []);
 
   // Need to keep track of files for retry
   const [filesMap, setFilesMap] = useState<Map<string, File>>(new Map());
@@ -239,17 +258,7 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
   const handleRetry = (fileName: string) => {
     const file = filesMap.get(fileName);
     if (file) {
-      if (confirm(`Re-upload and retry processing for "${file.name}"?`)) {
-        processFile(file);
-      }
-    }
-  };
-
-  const scrollToUpload = () => {
-    try {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch {
-      window.scrollTo(0, 0);
+      processFile(file);
     }
   };
 
@@ -274,10 +283,11 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop: onDropWithStorage,
-    onDropRejected,
     accept: {
       'application/pdf': ['.pdf'],
-      'text/csv': ['.csv']
+      'text/csv': ['.csv'],
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+      'application/vnd.ms-excel': ['.xls']
     },
     disabled: isUploading
   });
@@ -302,22 +312,15 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
           <p className="text-lg text-accent-cyan">Drop the files here...</p>
         ) : (
           <>
-            <p className="text-lg text-gray-700 mb-2">
+            <p className="text-lg text-gray-200 mb-2">
               Drag & drop files here, or click to select
             </p>
-            <p className="text-sm text-gray-500">
-              Supports: PDF, CSV
+            <p className="text-sm text-gray-400">
+              Supports: PDF, CSV, XLSX (Max 50MB per file)
             </p>
           </>
         )}
       </div>
-
-      {dropError && (
-        <p className="mt-2 text-xs text-red-400 flex items-center">
-          <XCircle className="h-3 w-3 mr-1" />
-          {dropError}
-        </p>
-      )}
 
       {/* Upload Progress */}
       {uploads.length > 0 && (
@@ -343,32 +346,15 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
                     </button>
                   ) : null}
 
-                  {(upload.status === 'error' || upload.status === 'partial') && upload.error !== 'PASSWORD_REQUIRED' ? (
+                  {upload.status === 'error' && upload.error !== 'PASSWORD_REQUIRED' ? (
                     <div className="flex items-center space-x-2">
-                      {(upload.nextAction === 'retry_upload' || upload.status === 'error') && (
-                        <button
-                          onClick={() => handleRetry(upload.fileName)}
-                          className="flex items-center space-x-1 px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors text-xs font-medium border border-gray-600"
-                          title="Re-upload"
-                        >
-                          <RotateCcw className="h-3 w-3" />
-                          <span>Re-upload</span>
-                        </button>
-                      )}
-
-                      {upload.nextAction === 'upload_new_file' && (
-                        <button
-                          onClick={() => {
-                            scrollToUpload();
-                          }}
-                          className="flex items-center space-x-1 px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-200 transition-colors text-xs font-medium border border-gray-700"
-                          title="Fix formatting and re-upload"
-                        >
-                          <AlertTriangle className="h-3 w-3" />
-                          <span>Fix formatting</span>
-                        </button>
-                      )}
-
+                      <button
+                        onClick={() => handleRetry(upload.fileName)}
+                        className="p-1.5 rounded-full bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white transition-colors"
+                        title="Retry"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                      </button>
                       <button
                         onClick={() => handleDismiss(upload.fileName)}
                         className="p-1.5 rounded-full hover:bg-gray-700 text-gray-500 hover:text-red-400 transition-colors"
@@ -412,51 +398,32 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
                 {upload.status === 'completed' && (
                   <div className="space-y-2">
                     <p className="text-xs text-green-400">
-                      Completed successfully!
+                      {upload.investeeConfirmed
+                        ? `Ready to review: ${upload.investeeNameSuggested}`
+                        : 'Completed successfully!'}
                     </p>
-                    {typeof upload.rowsParsed === 'number' ? (
-                      <p className="text-xs text-gray-400">Parsed: {upload.rowsParsed} rows</p>
-                    ) : null}
-                  </div>
-                )}
-                {upload.status === 'partial' && (
-                  <div className="space-y-2">
-                    <p className="text-xs text-yellow-400 font-medium">
-                      Partial success
-                    </p>
-                    <div className="text-xs text-gray-300">
-                      <div>Parsed: {typeof upload.rowsParsed === 'number' ? upload.rowsParsed : 'N/A'} rows</div>
-                      {typeof upload.rowsExpected === 'number' ? (
-                        <div>Expected: {upload.rowsExpected} rows</div>
-                      ) : null}
-                      {typeof upload.rowsParsed === 'number' && typeof upload.rowsExpected === 'number' && upload.rowsExpected > upload.rowsParsed ? (
-                        <div>Missing: {upload.rowsExpected - upload.rowsParsed} rows</div>
-                      ) : null}
-                    </div>
-                    {upload.error && upload.error !== 'PASSWORD_REQUIRED' ? (
-                      <p className="text-xs text-yellow-300">{upload.error}</p>
-                    ) : null}
-                    {upload.nextAction ? (
-                      <p className="text-xs text-gray-400">Next action: {upload.nextAction}</p>
-                    ) : null}
+                    {upload.investeeConfirmed && upload.documentId && (
+                      <div className="flex gap-2 mt-2">
+                        <button
+                          onClick={() => router.push(`/actions/evaluate?doc=${upload.documentId}&investee=${encodeURIComponent(upload.investeeNameSuggested || '')}`)}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-blue-500 hover:bg-blue-600 
+                                     text-white text-xs rounded-lg transition-colors"
+                        >
+                          <Bot className="w-3 h-3" />
+                          AI Analyst
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
                 {upload.status === 'error' && (
                   upload.error === 'PASSWORD_REQUIRED' ? (
                     <p className="text-xs text-yellow-400 font-medium">Password required to decrypt file.</p>
                   ) : (
-                    <div className="space-y-1">
-                      <p className="text-xs text-red-400 flex items-center">
-                        <XCircle className="h-3 w-3 mr-1" />
-                        {upload.error}
-                      </p>
-                      {upload.errorCode ? (
-                        <p className="text-xs text-gray-400">Error code: {upload.errorCode}</p>
-                      ) : null}
-                      {upload.nextAction ? (
-                        <p className="text-xs text-gray-400">Next action: {upload.nextAction}</p>
-                      ) : null}
-                    </div>
+                    <p className="text-xs text-red-400 flex items-center">
+                      <XCircle className="h-3 w-3 mr-1" />
+                      {upload.error}
+                    </p>
                   )
                 )}
               </div>
@@ -518,6 +485,38 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
         </div>
       )}
 
+      {/* Investee Confirmation Modal */}
+      {showInvesteeModal && pendingInvesteeConfirm && (
+        <InvesteeConfirmModal
+          suggestedName={pendingInvesteeConfirm.suggestedName}
+          documentId={pendingInvesteeConfirm.documentId}
+          onConfirm={(confirmedName) => {
+            // Update the upload state to mark as confirmed
+            setUploads(prev => prev.map(u =>
+              u.fileName === pendingInvesteeConfirm.fileName
+                ? { ...u, investeeConfirmed: true, investeeNameSuggested: confirmedName }
+                : u
+            ));
+            setShowInvesteeModal(false);
+            setPendingInvesteeConfirm(null);
+
+            // Trigger refresh callback
+            if (onUploadComplete) {
+              onUploadComplete();
+            }
+          }}
+          onCancel={() => {
+            // Still mark as confirmed with original name
+            setUploads(prev => prev.map(u =>
+              u.fileName === pendingInvesteeConfirm.fileName
+                ? { ...u, investeeConfirmed: true }
+                : u
+            ));
+            setShowInvesteeModal(false);
+            setPendingInvesteeConfirm(null);
+          }}
+        />
+      )}
     </div>
   );
 }

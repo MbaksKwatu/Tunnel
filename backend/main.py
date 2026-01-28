@@ -3,12 +3,11 @@ Parity Backend Parser API
 FastAPI server for parsing PDF, CSV, and XLSX files with anomaly detection
 AI-native financial intelligence for SME investments
 """
-from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form, Depends, status
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any, Union
-import asyncio
+from typing import Optional, List, Dict, Any
 import logging
 import os
 import time
@@ -17,10 +16,10 @@ from uuid import uuid4, UUID
 import json
 import datetime
 from dotenv import load_dotenv
-from parsers import get_parser, PasswordRequiredError, PartialParseError, normalize_transaction_rows
+from parsers import get_parser, PasswordRequiredError
 
 # Import new modules
-from local_storage import get_storage, StorageInterface
+from local_storage import get_storage, StorageInterface, SupabaseStorage
 from anomaly_engine import AnomalyDetector
 from unsupervised_engine import UnsupervisedAnomalyDetector
 from notes_manager import NotesManager
@@ -29,13 +28,10 @@ from debug_logger import debug_logger
 from report_generator import ReportGenerator
 
 from evaluate_engine import Evaluator
-# from models import Deal, Thesis, Evidence, Judgment  # Removed: Supabase-only deployment
-# from judgment_engine import JudgmentEngine  # Removed: depends on SQLAlchemy models
-from auth import get_current_user
 
 # Import Parity AI Routes
 import custom_report
-from routes import dashboard_mutation, llm_actions
+from routes import dashboard_mutation, llm_actions, deals
 
 # Load environment variables
 load_dotenv()
@@ -73,9 +69,10 @@ app.add_middleware(
 app.include_router(custom_report.router)
 app.include_router(dashboard_mutation.router)
 app.include_router(llm_actions.router)
+app.include_router(deals.router, prefix="/api", tags=["deals"])
 
-# Initialize storage
-storage: StorageInterface = get_storage()
+# Initialize storage (Supabase only)
+storage: StorageInterface = get_storage()  # Always returns SupabaseStorage (raises if not configured)
 logger.info(f"✅ Storage initialized: {type(storage).__name__}")
 
 # Initialize anomaly detector
@@ -94,14 +91,8 @@ report_generator = ReportGenerator()
 # Initialize evaluator
 evaluator = Evaluator()
 
-# judgment_engine = JudgmentEngine()  # Removed: depends on SQLAlchemy models
-
 
 # ==================== HELPER FUNCTIONS ====================
-
-SYNC_PARSE_TIMEOUT_SECONDS = 25
-ASYNC_PARSE_TIMEOUT_SECONDS = 90
-STALE_PROCESSING_MAX_AGE_SECONDS = 120
 
 def ensure_uuid(user_id: Optional[str]) -> str:
     """
@@ -161,27 +152,6 @@ def detect_investee_name(rows: List[Dict[str, Any]], filename: str) -> str:
     return name.title() if name else "Unknown Company"
 
 
-def cleanup_stale_processing_documents(max_age_seconds: int = STALE_PROCESSING_MAX_AGE_SECONDS) -> int:
-    try:
-        # Try Supabase first
-        supabase_client = getattr(storage, 'supabase', None)
-        if supabase_client:
-            cutoff = (datetime.datetime.utcnow() - datetime.timedelta(seconds=max_age_seconds)).isoformat()
-            result = (
-                supabase_client.table('documents')
-                .update({'status': 'failed', 'error_message': 'Parsing timed out'})
-                .eq('status', 'processing')
-                .lt('created_at', cutoff)
-                .execute()
-            )
-            return len(result.data) if getattr(result, 'data', None) else 0
-
-        return 0
-    except Exception as e:
-        logger.warning(f"Cleanup stale processing failed: {e}")
-        return 0
-
-
 # Pydantic models
 class ParseRequest(BaseModel):
     document_id: str = Field(..., description="Document ID from database")
@@ -225,7 +195,6 @@ async def process_document(document_id: str, file_url: str, file_type: str, pass
     parse_start_time = time.time()
     
     try:
-        cleanup_stale_processing_documents()
         debug_logger.log_parse_start(document_id, file_type)
         logger.info(f"Processing document {document_id} ({file_type})")
         
@@ -236,12 +205,7 @@ async def process_document(document_id: str, file_url: str, file_type: str, pass
         parser = get_parser(file_type)
         
         # Parse the file
-        rows = await asyncio.wait_for(
-            parser.parse(file_url, password=password),
-            timeout=SYNC_PARSE_TIMEOUT_SECONDS,
-        )
-
-        rows = normalize_transaction_rows(rows)
+        rows = await parser.parse(file_url, password=password)
         
         if not rows:
             logger.warning(f"No data extracted from document {document_id}")
@@ -262,9 +226,6 @@ async def process_document(document_id: str, file_url: str, file_type: str, pass
         detection_start_time = time.time()
         anomalies = anomaly_detector.detect_all(rows)
         detection_time = time.time() - detection_start_time
-
-        if (time.time() - parse_start_time) > SYNC_PARSE_TIMEOUT_SECONDS:
-            raise asyncio.TimeoutError()
         
         # Log individual anomalies
         for anomaly in anomalies:
@@ -305,7 +266,7 @@ async def process_document(document_id: str, file_url: str, file_type: str, pass
         storage.update_document_status(
             document_id,
             'failed',
-            error_message='Parsing timed out' if isinstance(e, asyncio.TimeoutError) else str(e)
+            error_message=str(e)
         )
         raise
 
@@ -315,7 +276,7 @@ async def process_document(document_id: str, file_url: str, file_type: str, pass
 async def root():
     """Health check endpoint"""
     return {
-        "service": "Parity Parser API",
+        "service": "FundIQ Parser API",
         "status": "running",
         "version": "2.0.0",
         "storage": type(storage).__name__
@@ -343,15 +304,12 @@ async def health_check():
 
 @app.get("/health/db")
 async def health_db():
-    """Health check for database connectivity"""
+    """Health check for database connectivity (Supabase only)"""
     try:
-        # Try Supabase first
-        supabase_client = getattr(storage, 'supabase', None)
-        if supabase_client:
-            supabase_client.table("documents").select("id").limit(1).execute()
-            return {"status": "ok", "storage": "supabase"}
-        
-        return {"status": "error", "message": "No storage backend configured"}
+        if not isinstance(storage, SupabaseStorage):
+            raise HTTPException(status_code=500, detail="Supabase storage required")
+        storage.supabase.table("documents").select("id").limit(1).execute()
+        return {"status": "ok", "storage": "supabase"}
     except Exception as e:
         logger.error("DB health check failed", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -364,178 +322,162 @@ async def parse_document(
     password: Optional[str] = Form(None),
     user_id: Optional[str] = Form(None)
 ):
-    raise HTTPException(
-        status_code=410,
-        detail={
-            "status": "failed",
-            "error_code": "SYNC_PARSE_DISABLED",
-            "error_message": "Synchronous parse is disabled. Use /documents/upload + polling.",
-            "next_action": "use_async_upload",
-        },
-    )
-
-async def _process_uploaded_file_bytes(
-    *,
-    document_id: str,
-    user_id: str,
-    filename: str,
-    file_type: str,
-    file_content: bytes,
-    password: Optional[str] = None
-):
+    """
+    Parse a document and extract structured data with anomaly detection
+    
+    This endpoint supports two modes:
+    1. Direct file upload (local-first): POST with multipart/form-data file
+    2. Supabase mode: POST with JSON containing document_id, file_url, file_type
+    """
+    document_id = None  # Track document ID for error handling
     try:
-        cleanup_stale_processing_documents()
-        storage.update_document_status(
-            document_id,
-            'processing',
-            rows_parsed=0,
-            error_code=None,
-            error_message=None,
-            next_action=None,
-        )
-        parser = get_parser(file_type)
-        try:
-            rows = await parser.parse(
-                file_url=None,
-                file_content=file_content,
-                password=password,
-                max_seconds=ASYNC_PARSE_TIMEOUT_SECONDS,
-            )
-        except PartialParseError as pe:
-            rows = pe.rows
-            rows = normalize_transaction_rows(rows)
-            if rows:
-                rows_inserted = storage.store_rows(document_id, rows)
-                storage.update_document_status(
-                    document_id,
-                    'partial',
-                    rows_count=rows_inserted,
-                    rows_parsed=rows_inserted,
-                    rows_expected=pe.rows_expected,
-                    error_code=pe.error_code,
-                    error_message=pe.error_message,
-                    next_action=pe.next_action,
+        # Check if direct file upload (local-first mode)
+        if file:
+            logger.info(f"📨 Direct file upload: {file.filename}")
+            debug_logger.log_upload(file.filename, file.filename.split('.')[-1], file.size, "new")
+            
+            # Read file content
+            file_content = await file.read()
+            file_type = file.filename.split('.')[-1].lower()
+            
+            if file_type not in ['pdf', 'csv', 'xlsx']:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unsupported file type: {file_type}"
                 )
-                return
-
-            storage.update_document_status(
-                document_id,
-                'failed',
-                rows_count=0,
-                rows_parsed=0,
-                rows_expected=pe.rows_expected,
-                error_code=pe.error_code,
-                error_message=pe.error_message,
-                next_action=pe.next_action,
-            )
-            return
-
-        rows = normalize_transaction_rows(rows)
-
-        if not rows:
+            
+            # Create document record
+            document_id = str(uuid.uuid4())
+            resolved_user_id = ensure_uuid(user_id)
+            logger.info(f"Resolved user_id for upload: {resolved_user_id}")
+            document_data = {
+                'id': document_id,
+                'user_id': resolved_user_id,
+                'file_name': file.filename,
+                'file_type': file_type,
+                'file_url': None,
+                'status': 'processing'
+            }
+            storage.store_document(document_data)
+            
+            # Save file temporarily (or process directly)
+            parser = get_parser(file_type)
+            try:
+                rows = await parser.parse(file_url=None, file_content=file_content, password=password)
+            except PasswordRequiredError:
+                raise # Re-raise to be caught by outer block
+            except Exception as e:
+                logger.error(f"Parser error: {e}")
+                raise ValueError(f"Failed to parse file: {str(e)}")
+            
+            if not rows:
+                storage.update_document_status(document_id, 'completed', rows_count=0, error_message='No data found')
+                investee_suggested = detect_investee_name([], file.filename)
+                return ParseResponse(
+                    success=True, 
+                    rows_extracted=0, 
+                    anomalies_count=0,
+                    document_id=document_id,
+                    investee_name_suggested=investee_suggested
+                )
+            
+            # Detect investee name from parsed data
+            investee_suggested = detect_investee_name(rows, file.filename)
+            logger.info(f"📋 Detected investee name: {investee_suggested}")
+            
+            # Store rows
+            rows_inserted = storage.store_rows(document_id, rows)
+            
+            # Run anomaly detection
+            anomalies = anomaly_detector.detect_all(rows)
+            anomalies_count = 0
+            if anomalies:
+                anomalies_count = storage.store_anomalies(document_id, anomalies)
+            
+            # Generate insights
+            insights = insight_generator.generate_insights(anomalies)
+            
+            # Update document with suggested investee name
             storage.update_document_status(
                 document_id,
                 'completed',
-                rows_count=0,
-                rows_parsed=0,
-                error_code='NO_DATA',
-                error_message='No data found',
-                next_action='upload_new_file',
+                rows_count=rows_inserted,
+                anomalies_count=anomalies_count,
+                insights_summary=insights
             )
-            return
-
-        rows_inserted = storage.store_rows(document_id, rows)
-
-        anomalies = anomaly_detector.detect_all(rows)
-        anomalies_count = 0
-        if anomalies:
-            anomalies_count = storage.store_anomalies(document_id, anomalies)
-
-        insights = insight_generator.generate_insights(anomalies)
-
-        storage.update_document_status(
-            document_id,
-            'completed',
-            rows_count=rows_inserted,
-            rows_parsed=rows_inserted,
-            anomalies_count=anomalies_count,
+            
+            # Also set the suggested investee name on the document
+            storage.set_investee_name(document_id, investee_suggested)
+            
+            return ParseResponse(
+                success=True,
+                rows_extracted=rows_inserted,
+                anomalies_count=anomalies_count,
+                insights_summary=insights,
+                error=None,
+                document_id=document_id,
+                investee_name_suggested=investee_suggested
+            )
+        
+        # Supabase mode: existing flow
+        if not request:
+            raise HTTPException(status_code=400, detail="Either file upload or parse request required")
+        
+        logger.info(f"📨 Parse request received for document {request.document_id}")
+        
+        # Validate file type
+        if request.file_type not in ['pdf', 'csv', 'xlsx']:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {request.file_type}"
+            )
+        
+        # Process the document
+        rows_extracted, anomalies, insights = await process_document(
+            request.document_id,
+            request.file_url,
+            request.file_type,
+            request.password
+        )
+        
+        return ParseResponse(
+            success=True,
+            rows_extracted=rows_extracted,
+            anomalies_count=len(anomalies) if anomalies else 0,
             insights_summary=insights
         )
+        
     except PasswordRequiredError:
-        storage.update_document_status(
-            document_id,
-            'partial',
-            rows_count=0,
-            rows_parsed=0,
-            error_code='PASSWORD_REQUIRED',
-            error_message='PASSWORD_REQUIRED',
-            next_action='provide_password',
+        logger.warning(f"Password required for document {request.document_id if request else document_id}")
+        return ParseResponse(
+            success=False,
+            rows_extracted=0,
+            anomalies_count=0,
+            error="PASSWORD_REQUIRED"
         )
+        
     except Exception as e:
-        logger.error(f"Background processing failed for {document_id}: {e}", exc_info=True)
-        storage.update_document_status(
-            document_id,
-            'failed',
-            error_code='PROCESSING_FAILED',
-            error_message=str(e),
-            next_action='retry_upload',
+        logger.error(f"Error in parse endpoint: {e}", exc_info=True)
+        debug_logger.log_error("PARSE", e, {"filename": file.filename if file else None})
+        
+        # Update document status to 'failed' if document was created
+        if document_id:
+            try:
+                storage.update_document_status(
+                    document_id,
+                    'failed',
+                    error_message=str(e)
+                )
+                logger.info(f"✅ Updated document {document_id} status to 'failed'")
+            except Exception as update_error:
+                logger.error(f"Failed to update document status: {update_error}")
+        
+        return ParseResponse(
+            success=False,
+            rows_extracted=0,
+            anomalies_count=0,
+            error=str(e)
         )
-
-
-def _run_background_process_uploaded_file_bytes(**kwargs):
-    asyncio.run(_process_uploaded_file_bytes(**kwargs))
-
-
-@app.post("/documents/upload")
-async def upload_document(background_tasks: BackgroundTasks, file: UploadFile = File(...), password: Optional[str] = Form(None), session_id: Optional[str] = Form(None)):
-    file_type = file.filename.split('.')[-1].lower()
-    if file_type not in ['pdf', 'csv', 'xlsx']:
-        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_type}")
-
-    document_id = str(uuid.uuid4())
-    resolved_user_id = ensure_uuid(session_id)
-
-    cleanup_stale_processing_documents()
-
-    storage.store_document({
-        'id': document_id,
-        'user_id': resolved_user_id,
-        'file_name': file.filename,
-        'file_type': file_type,
-        'file_url': None,
-        'status': 'uploaded'
-    })
-
-    file_content = await file.read()
-    background_tasks.add_task(
-        _run_background_process_uploaded_file_bytes,
-        document_id=document_id,
-        user_id=resolved_user_id,
-        filename=file.filename,
-        file_type=file_type,
-        file_content=file_content,
-        password=password
-    )
-
-    return {"document_id": document_id}
-
-
-@app.get("/documents/{document_id}/status")
-async def get_document_status(document_id: str):
-    cleanup_stale_processing_documents()
-    doc = storage.get_document(document_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-
-    return {
-        "document_id": document_id,
-        "status": doc.get('status'),
-        "rows_parsed": doc.get('rows_parsed'),
-        "rows_expected": doc.get('rows_expected'),
-        "error_code": doc.get('error_code'),
-        "error_message": doc.get('error_message'),
-        "next_action": doc.get('next_action'),
-    }
 
 
 @app.post("/analyze")
@@ -548,7 +490,7 @@ async def analyze_document(request: AnalyzeRequest):
             raise HTTPException(status_code=404, detail="Document not found or has no rows")
         
         # Extract raw_json from rows
-        rows = normalize_transaction_rows([row['raw_json'] for row in rows_data])
+        rows = [row['raw_json'] for row in rows_data]
         
         # Run anomaly detection
         detection_start_time = time.time()
@@ -585,22 +527,40 @@ async def analyze_document(request: AnalyzeRequest):
 
 
 @app.get("/documents")
-async def get_all_documents(session_id: Optional[str] = None):
-    """Get all documents (for local mode)"""
+async def get_all_documents():
+    """Get all documents (Supabase only)"""
     try:
-        cleanup_stale_processing_documents()
-        # Use storage interface to get documents
+        if not isinstance(storage, SupabaseStorage):
+            raise HTTPException(status_code=500, detail="Supabase storage required")
         
-        # Try Supabase first
-        supabase_client = getattr(storage, 'supabase', None)
-        if supabase_client:
-            query = supabase_client.table('documents').select('*').order('upload_date', desc=True)
-            if session_id:
-                query = query.eq('user_id', ensure_uuid(session_id))
-            result = query.execute()
-            return result.data or []
-
-        return []
+        # Query Supabase for all documents
+        result = storage.supabase.table("documents")\
+            .select("*")\
+            .order("created_at", desc=True)\
+            .execute()
+        
+        documents = []
+        for doc in result.data:
+            # Ensure consistent format
+            formatted_doc = {
+                'id': doc.get('id'),
+                'user_id': doc.get('user_id'),
+                'file_name': doc.get('file_name'),
+                'file_type': doc.get('file_type'),
+                'file_url': doc.get('file_url'),
+                'format_detected': doc.get('format_detected'),
+                'upload_date': doc.get('upload_date') or doc.get('created_at') or '',
+                'status': doc.get('status'),
+                'rows_count': doc.get('rows_count') or 0,
+                'anomalies_count': doc.get('anomalies_count') or 0,
+                'error_message': doc.get('error_message'),
+                'insights_summary': doc.get('insights_summary'),
+                'created_at': doc.get('created_at') or '',
+                'updated_at': doc.get('updated_at') or ''
+            }
+            documents.append(formatted_doc)
+        
+        return documents
         
     except Exception as e:
         logger.error(f"Error fetching documents: {e}")
@@ -667,51 +627,7 @@ async def get_document_rows(document_id: str, limit: int = 100, offset: int = 0)
 async def get_document_anomalies(document_id: str):
     """Get all anomalies for a document"""
     try:
-        def safe_json(val):
-            if val is None:
-                return {}
-            if isinstance(val, dict):
-                return val
-            if isinstance(val, str):
-                try:
-                    parsed = json.loads(val)
-                    return parsed if isinstance(parsed, dict) else {}
-                except Exception:
-                    return {}
-            return {}
-
-        raw_anomalies = storage.get_anomalies(document_id) or []
-
-        anomalies: List[Dict[str, Any]] = []
-        for a in raw_anomalies:
-            if isinstance(a, dict):
-                metadata = safe_json(a.get('metadata'))
-                evidence = safe_json(a.get('evidence'))
-                raw_json = safe_json(a.get('raw_json'))
-
-                severity = a.get('severity') or 'low'
-                if isinstance(severity, str):
-                    severity = severity.lower()
-                if severity not in ('low', 'medium', 'high'):
-                    severity = 'low'
-
-                anomalies.append(
-                    {
-                        'id': a.get('id'),
-                        'document_id': a.get('document_id') or document_id,
-                        'row_index': a.get('row_index'),
-                        'anomaly_type': a.get('anomaly_type'),
-                        'severity': severity,
-                        'description': a.get('description') or "",
-                        'score': a.get('score'),
-                        'suggested_action': a.get('suggested_action'),
-                        'metadata': metadata,
-                        'raw_json': raw_json,
-                        'evidence': evidence,
-                        'detected_at': a.get('detected_at'),
-                    }
-                )
-                anomalies.append({'row_index': None, 'description': str(a), 'severity': 'low'})
+        anomalies = storage.get_anomalies(document_id)
         return {
             "document_id": document_id,
             "anomalies": anomalies,
@@ -725,65 +641,7 @@ async def get_document_anomalies(document_id: str):
 @app.get("/api/anomalies")
 async def get_anomalies_by_query(doc_id: str):
     """Alias endpoint: Get anomalies by document ID via query param"""
-    try:
-        doc = storage.get_document(doc_id)
-        if not doc:
-            raise HTTPException(status_code=404, detail="Document not found")
-
-        def safe_json(val):
-            if val is None:
-                return {}
-            if isinstance(val, dict):
-                return val
-            if isinstance(val, str):
-                try:
-                    parsed = json.loads(val)
-                    return parsed if isinstance(parsed, dict) else {}
-                except Exception:
-                    return {}
-            return {}
-
-        raw_anomalies = storage.get_anomalies(doc_id) or []
-        anomalies: List[Dict[str, Any]] = []
-        for a in raw_anomalies:
-            if isinstance(a, dict):
-                metadata = safe_json(a.get('metadata'))
-                evidence = safe_json(a.get('evidence'))
-                raw_json = safe_json(a.get('raw_json'))
-
-                severity = a.get('severity') or 'low'
-                if isinstance(severity, str):
-                    severity = severity.lower()
-                if severity not in ('low', 'medium', 'high'):
-                    severity = 'low'
-
-                anomalies.append(
-                    {
-                        'id': a.get('id'),
-                        'document_id': a.get('document_id') or doc_id,
-                        'row_index': a.get('row_index'),
-                        'anomaly_type': a.get('anomaly_type'),
-                        'severity': severity,
-                        'description': a.get('description') or "",
-                        'score': a.get('score'),
-                        'suggested_action': a.get('suggested_action'),
-                        'metadata': metadata,
-                        'raw_json': raw_json,
-                        'evidence': evidence,
-                        'detected_at': a.get('detected_at'),
-                    }
-                )
-                anomalies.append({'row_index': None, 'description': str(a), 'severity': 'low'})
-
-        return {
-            "anomalies": anomalies,
-            "count": len(anomalies)
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching anomalies: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return await get_document_anomalies(doc_id)
 
 
 @app.post("/api/anomalies/run")
@@ -839,7 +697,7 @@ async def evaluate_document(document_id: str):
         if not rows_data:
              return {"metrics": []}
              
-        rows = normalize_transaction_rows([row['raw_json'] for row in rows_data])
+        rows = [row['raw_json'] for row in rows_data]
         return evaluator.evaluate(rows)
     except Exception as e:
         logger.error(f"Error evaluating document: {e}")
@@ -850,15 +708,13 @@ async def evaluate_document(document_id: str):
 async def generate_ic_report(document_id: str):
     """Generate and download IC Report PDF"""
     try:
-        if os.getenv("DISABLE_PDF") == "true":
-            return {"status": "analysis_complete"}
         # Fetch all data
         doc = storage.get_document(document_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
             
         rows_data = storage.get_rows(document_id, limit=100000)
-        rows = normalize_transaction_rows([row['raw_json'] for row in rows_data])
+        rows = [row['raw_json'] for row in rows_data]
         
         anomalies = storage.get_anomalies(document_id)
         notes = notes_manager.get_all_notes(document_id)
@@ -1067,32 +923,53 @@ async def retry_processing(document_id: str):
 
 @app.post("/cleanup/stuck-files")
 async def cleanup_stuck_files(max_age_minutes: int = 30):
-    """Cleanup files stuck in processing status"""
+    """Cleanup files stuck in processing status (Supabase only)"""
     try:
-        # Supabase storage
-        supabase_client = getattr(storage, 'supabase', None)
-        if supabase_client:
-            cutoff = (datetime.datetime.utcnow() - datetime.timedelta(minutes=max_age_minutes)).isoformat()
-            result = (
-                supabase_client.table('documents')
-                .update({
-                    'status': 'failed',
-                    'error_message': 'Processing timeout - file may have been corrupted or too large'
-                })
-                .eq('status', 'processing')
-                .lt('created_at', cutoff)
-                .execute()
-            )
-            
-            updated_count = len(result.data) if result.data else 0
-            logger.info(f"✅ Cleaned up {updated_count} stuck files")
+        if not isinstance(storage, SupabaseStorage):
+            raise HTTPException(status_code=500, detail="Supabase storage required")
+        
+        # Calculate cutoff time
+        from datetime import timedelta
+        cutoff_time = (datetime.datetime.utcnow() - timedelta(minutes=max_age_minutes)).isoformat()
+        
+        # Find documents stuck in processing
+        stuck_docs = storage.supabase.table("documents")\
+            .select("id")\
+            .eq("status", "processing")\
+            .lt("created_at", cutoff_time)\
+            .execute()
+        
+        if not stuck_docs.data:
             return {
                 "success": True,
-                "updated_count": updated_count,
-                "message": f"Marked {updated_count} stuck files as failed"
+                "updated_count": 0,
+                "message": "No stuck files found"
             }
         
-        return {"success": False, "message": "No storage backend configured"}
+        # Update stuck documents to failed status
+        stuck_ids = [doc['id'] for doc in stuck_docs.data]
+        updated_count = 0
+        
+        for doc_id in stuck_ids:
+            try:
+                storage.supabase.table("documents")\
+                    .update({
+                        'status': 'failed',
+                        'error_message': 'Processing timeout - file may have been corrupted or too large',
+                        'updated_at': datetime.datetime.utcnow().isoformat()
+                    })\
+                    .eq('id', doc_id)\
+                    .execute()
+                updated_count += 1
+            except Exception as e:
+                logger.error(f"Error updating stuck document {doc_id}: {e}")
+        
+        logger.info(f"✅ Cleaned up {updated_count} stuck files")
+        return {
+            "success": True,
+            "updated_count": updated_count,
+            "message": f"Marked {updated_count} stuck files as failed"
+        }
             
     except Exception as e:
         logger.error(f"Error cleaning up stuck files: {e}")
@@ -1103,8 +980,6 @@ async def cleanup_stuck_files(max_age_minutes: int = 30):
 async def generate_ic_report_endpoint(doc_id: str):
     """Generate Investment Committee PDF report"""
     try:
-        if os.getenv("DISABLE_PDF") == "true":
-            return {"status": "analysis_complete"}
         logger.info(f"Generating IC report for document {doc_id}")
         
         # Fetch document data
@@ -1256,377 +1131,6 @@ async def list_reports(investee_name: Optional[str] = None):
     except Exception as e:
         logger.error(f"Error fetching reports: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# ==================== DEAL ENDPOINTS ====================
-
-@app.post("/api/deals", status_code=status.HTTP_201_CREATED)
-async def create_deal(
-    company_name: str = Form(...),
-    sector: str = Form(...),
-    geography: str = Form(...),
-    deal_type: str = Form(...),
-    stage: str = Form(...),
-    revenue_usd: Optional[float] = Form(None),
-    current_user: dict = Depends(get_current_user)
-):
-    """Create a new deal"""
-    try:
-        import uuid
-        deal_data = {
-            'id': str(uuid.uuid4()),
-            'company_name': company_name,
-            'sector': sector,
-            'geography': geography,
-            'deal_type': deal_type,
-            'stage': stage,
-            'revenue_usd': revenue_usd,
-            'created_by': current_user.id,
-            'status': 'draft',
-            'created_at': datetime.datetime.utcnow().isoformat()
-        }
-        deal = storage.create_deal(deal_data)
-        return {"success": True, "data": deal}
-    except Exception as e:
-        logger.error(f"Error creating deal: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/deals")
-async def list_deals(current_user: dict = Depends(get_current_user)):
-    """List all deals for the current user"""
-    try:
-        deals = storage.get_deals_by_user(current_user.id)
-        return {"success": True, "data": deals}
-    except Exception as e:
-        logger.error(f"Error listing deals: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/deals/{deal_id}")
-async def get_deal(deal_id: str, current_user: dict = Depends(get_current_user)):
-    """Get a specific deal by ID"""
-    try:
-        deal = storage.get_deal(deal_id)
-        if not deal:
-            raise HTTPException(status_code=404, detail="Deal not found")
-        if deal.get('created_by') != current_user.id:
-            raise HTTPException(status_code=403, detail="Not authorized to access this deal")
-        return {"success": True, "data": deal}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting deal: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.delete("/api/deals/{deal_id}")
-async def delete_deal(deal_id: str, current_user: dict = Depends(get_current_user)):
-    """Delete a deal and all associated evidence and judgments"""
-    try:
-        deal = storage.get_deal(deal_id)
-        if not deal:
-            raise HTTPException(status_code=404, detail="Deal not found")
-        if deal.get('created_by') != current_user.id:
-            raise HTTPException(status_code=403, detail="Not authorized to delete this deal")
-        storage.delete_deal(deal_id)
-        return {"success": True, "message": "Deal deleted successfully"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting deal: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ==================== EVIDENCE ENDPOINTS ====================
-
-@app.post("/api/deals/{deal_id}/evidence")
-async def upload_evidence(
-    deal_id: str,
-    file: UploadFile = File(...),
-    evidence_type: str = Form(...),
-    evidence_subtype: Optional[str] = Form(None),
-    current_user: dict = Depends(get_current_user)
-):
-    """Upload evidence for a deal"""
-    try:
-        # Verify deal exists and user owns it
-        deal = storage.get_deal(deal_id)
-        if not deal:
-            raise HTTPException(status_code=404, detail="Deal not found")
-        if deal.get('created_by') != current_user.id:
-            raise HTTPException(status_code=403, detail="Not authorized to add evidence to this deal")
-
-        # Read file content
-        content = await file.read()
-        
-        # Parse document if possible
-        extracted_data = {}
-        try:
-            parser = get_parser(file.filename)
-            if parser:
-                extracted_data = parser.parse(content)
-        except Exception as e:
-            logger.warning(f"Could not parse evidence document: {e}")
-        
-        # Create evidence record
-        import uuid
-        evidence_data = {
-            'id': str(uuid.uuid4()),
-            'deal_id': deal_id,
-            'evidence_type': evidence_type,
-            'evidence_subtype': evidence_subtype,
-            'file_name': file.filename,
-            'file_type': file.content_type,
-            'file_size': len(content),
-            'extracted_data': extracted_data,
-            'uploaded_by': current_user.id,
-            'upload_date': datetime.datetime.utcnow().isoformat()
-        }
-        
-        evidence = storage.add_evidence(deal_id, evidence_data)
-        
-        return {"success": True, "data": evidence}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error uploading evidence: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/deals/{deal_id}/evidence")
-async def list_evidence(deal_id: str, current_user: dict = Depends(get_current_user)):
-    """List all evidence for a deal"""
-    try:
-        # Verify deal exists and user owns it
-        deal = storage.get_deal(deal_id)
-        if not deal:
-            raise HTTPException(status_code=404, detail="Deal not found")
-        if deal.get('created_by') != current_user.id:
-            raise HTTPException(status_code=403, detail="Not authorized to view evidence for this deal")
-            
-        evidence = storage.get_evidence_by_deal(deal_id)
-        return {"success": True, "data": evidence}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error listing evidence: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ==================== JUDGMENT ENDPOINTS ====================
-
-@app.post("/api/deals/{deal_id}/judge")
-async def judge_deal(deal_id: str, current_user: dict = Depends(get_current_user)):
-    """Run the judgment engine on a deal"""
-    try:
-        # Get deal and verify ownership
-        deal = storage.get_deal(deal_id)
-        if not deal:
-            raise HTTPException(status_code=404, detail="Deal not found")
-        if deal.get('created_by') != current_user.id:
-            raise HTTPException(status_code=403, detail="Not authorized to judge this deal")
-        
-        # Get evidence
-        evidence = storage.get_evidence_by_deal(deal_id)
-        if not evidence:
-            raise HTTPException(status_code=400, detail="No evidence found for this deal")
-        
-        # For now, return a mock judgment since judgment_engine depends on SQLAlchemy models
-        judgment_data = {
-            'id': str(uuid.uuid4()),
-            'deal_id': deal_id,
-            'investment_readiness': 'medium',
-            'thesis_alignment': 'medium',
-            'confidence_level': 'medium',
-            'kill_signals': {'type': 'NONE'},
-            'dimension_scores': {
-                'financial': 60.0,
-                'governance': 60.0,
-                'market': 60.0,
-                'team': 60.0,
-                'product': 60.0,
-                'data_confidence': 60.0
-            },
-            'explanations': {
-                'investment_readiness': 'Basic financial data present',
-                'thesis_alignment': 'Partial alignment with investment criteria',
-                'kill_signals': 'No critical kill signals detected',
-                'confidence_level': 'Moderate confidence due to limited data'
-            },
-            'missing_evidence': [],
-            'created_at': datetime.datetime.utcnow().isoformat()
-        }
-        
-        judgment = storage.save_judgment(deal_id, judgment_data)
-        return {"success": True, "data": judgment}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error judging deal: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/deals/{deal_id}/judgment")
-async def get_judgment(deal_id: str, current_user: dict = Depends(get_current_user)):
-    """Get the latest judgment for a deal"""
-    try:
-        # Verify deal exists and user owns it
-        deal = storage.get_deal(deal_id)
-        if not deal:
-            raise HTTPException(status_code=404, detail="Deal not found")
-        if deal.get('created_by') != current_user.id:
-            raise HTTPException(status_code=403, detail="Not authorized to view judgments for this deal")
-        
-        judgment = storage.get_judgment(deal_id)
-        if not judgment:
-            raise HTTPException(status_code=404, detail="Judgment not found")
-        
-        return {"success": True, "data": judgment}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting judgment: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ============================================================================
-# ============================================================================
-# THESIS ENDPOINTS
-# ============================================================================
-
-@app.post("/api/thesis", tags=["Thesis"])
-async def create_thesis(
-    thesis_data: dict,
-    current_user = Depends(get_current_user)
-):
-    """Create or update user's investment thesis"""
-    try:
-        # Check if user already has a thesis
-        existing_thesis = storage.get_default_thesis(current_user.id)
-        
-        if existing_thesis:
-            # Update existing thesis
-            existing_thesis.investment_focus = thesis_data.get('investment_focus')
-            existing_thesis.sector_preferences = thesis_data.get('sector_preferences', [])
-            existing_thesis.geography_constraints = thesis_data.get('geography_constraints', [])
-            existing_thesis.stage_preferences = thesis_data.get('stage_preferences', [])
-            existing_thesis.min_revenue_usd = thesis_data.get('min_revenue_usd')
-            existing_thesis.kill_conditions = thesis_data.get('kill_conditions', [])
-            existing_thesis.governance_requirements = thesis_data.get('governance_requirements', [])
-            existing_thesis.financial_thresholds = thesis_data.get('financial_thresholds', {})
-            existing_thesis.data_confidence_tolerance = thesis_data.get('data_confidence_tolerance', 'medium')
-            existing_thesis.impact_requirements = thesis_data.get('impact_requirements', [])
-            existing_thesis.weights = thesis_data.get('weights', {})
-            existing_thesis.name = thesis_data.get('name', 'Default Thesis')
-            
-            storage.save_thesis(existing_thesis)
-            thesis = existing_thesis
-            # Create new thesis
-            thesis = Thesis(
-                fund_id=current_user.id,
-                investment_focus=thesis_data.get('investment_focus'),
-                sector_preferences=thesis_data.get('sector_preferences', []),
-                geography_constraints=thesis_data.get('geography_constraints', []),
-                stage_preferences=thesis_data.get('stage_preferences', []),
-                min_revenue_usd=thesis_data.get('min_revenue_usd'),
-                kill_conditions=thesis_data.get('kill_conditions', []),
-                governance_requirements=thesis_data.get('governance_requirements', []),
-                financial_thresholds=thesis_data.get('financial_thresholds', {}),
-                data_confidence_tolerance=thesis_data.get('data_confidence_tolerance', 'medium'),
-                impact_requirements=thesis_data.get('impact_requirements', []),
-                weights=thesis_data.get('weights', {}),
-                name=thesis_data.get('name', 'Default Thesis'),
-                is_default=True
-            )
-            storage.save_thesis(thesis)
-        
-        return {
-            "success": True,
-            "thesis": thesis.to_dict() if hasattr(thesis, 'to_dict') else {
-                "id": thesis.id,
-                "name": thesis.name,
-                "investment_focus": thesis.investment_focus
-            }
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save thesis: {str(e)}")
-
-
-@app.get("/api/thesis", tags=["Thesis"])
-async def get_thesis(current_user = Depends(get_current_user)):
-    """Get user's default thesis"""
-    try:
-        thesis = storage.get_default_thesis(current_user.id)
-        
-        if not thesis:
-            raise HTTPException(status_code=404, detail="No thesis found. Please complete thesis setup.")
-        
-        return {
-            "success": True,
-            "thesis": thesis.to_dict() if hasattr(thesis, 'to_dict') else {
-                "id": thesis.id,
-                "fund_id": thesis.fund_id,
-                "investment_focus": thesis.investment_focus,
-                "sector_preferences": thesis.sector_preferences,
-                "geography_constraints": thesis.geography_constraints,
-                "stage_preferences": thesis.stage_preferences,
-                "min_revenue_usd": thesis.min_revenue_usd,
-                "kill_conditions": thesis.kill_conditions,
-                "governance_requirements": thesis.governance_requirements,
-                "financial_thresholds": thesis.financial_thresholds,
-                "data_confidence_tolerance": thesis.data_confidence_tolerance,
-                "impact_requirements": thesis.impact_requirements,
-                "weights": thesis.weights,
-                "name": thesis.name,
-                "is_default": thesis.is_default
-            }
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get thesis: {str(e)}")
-
-
-@app.put("/api/thesis", tags=["Thesis"])
-async def update_thesis(
-    thesis_data: dict,
-    current_user = Depends(get_current_user)
-):
-    """Update user's investment thesis"""
-    try:
-        thesis = storage.get_default_thesis(current_user.id)
-        
-        if not thesis:
-            raise HTTPException(status_code=404, detail="No thesis found. Create one first.")
-        
-        # Update fields
-        thesis.investment_focus = thesis_data.get('investment_focus', thesis.investment_focus)
-        thesis.sector_preferences = thesis_data.get('sector_preferences', thesis.sector_preferences)
-        thesis.geography_constraints = thesis_data.get('geography_constraints', thesis.geography_constraints)
-        thesis.stage_preferences = thesis_data.get('stage_preferences', thesis.stage_preferences)
-        thesis.min_revenue_usd = thesis_data.get('min_revenue_usd', thesis.min_revenue_usd)
-        thesis.kill_conditions = thesis_data.get('kill_conditions', thesis.kill_conditions)
-        thesis.governance_requirements = thesis_data.get('governance_requirements', thesis.governance_requirements)
-        thesis.financial_thresholds = thesis_data.get('financial_thresholds', thesis.financial_thresholds)
-        thesis.data_confidence_tolerance = thesis_data.get('data_confidence_tolerance', thesis.data_confidence_tolerance)
-        thesis.impact_requirements = thesis_data.get('impact_requirements', thesis.impact_requirements)
-        thesis.weights = thesis_data.get('weights', thesis.weights)
-        thesis.name = thesis_data.get('name', thesis.name)
-        
-        storage.save_thesis(thesis)
-        
-        return {
-            "success": True,
-            "thesis": thesis.to_dict() if hasattr(thesis, 'to_dict') else {
-                "id": thesis.id,
-                "name": thesis.name
-            }
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update thesis: {str(e)}")
 
 
 if __name__ == "__main__":

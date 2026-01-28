@@ -5,8 +5,16 @@ import { useDropzone } from 'react-dropzone';
 import { Upload, File, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import { uploadFile, createDocument, parseDocument } from '@/lib/simple_supabase';
 import { FileType, UploadProgress } from '@/lib/types';
-import { getOrCreateParityUserId } from '@/lib/session';
-import { API_URL } from '@/lib/api';
+import { v4 as uuidv4 } from 'uuid';
+
+const getDemoUserId = (): string | null => {
+  if (typeof window === 'undefined') return null;
+  const existing = localStorage.getItem('parity_user_id');
+  if (existing) return existing;
+  const generated = uuidv4();
+  localStorage.setItem('parity_user_id', generated);
+  return generated;
+};
 
 interface SimpleFileUploadProps {
   userId: string;
@@ -16,16 +24,19 @@ interface SimpleFileUploadProps {
 export default function SimpleFileUpload({ userId, onUploadComplete }: SimpleFileUploadProps) {
   const [uploads, setUploads] = useState<UploadProgress[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [resolvedUserId, setResolvedUserId] = useState<string | null>(null);
+  const [demoUserId, setDemoUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    setResolvedUserId(getOrCreateParityUserId());
+    setDemoUserId(getDemoUserId());
   }, []);
+
+  const resolvedUserId = userId && userId !== 'demo-user' ? userId : demoUserId || undefined;
 
   const getFileType = (file: File): FileType | null => {
     const extension = file.name.split('.').pop()?.toLowerCase();
     if (extension === 'pdf') return 'pdf';
     if (extension === 'csv') return 'csv';
+    if (extension === 'xlsx' || extension === 'xls') return 'xlsx';
     return null;
   };
 
@@ -33,7 +44,7 @@ export default function SimpleFileUpload({ userId, onUploadComplete }: SimpleFil
     const fileType = getFileType(file);
 
     if (!fileType) {
-      throw new Error('Unsupported file type. Please upload PDF or CSV files.');
+      throw new Error('Unsupported file type. Please upload PDF, CSV, or XLSX files.');
     }
 
     // Update progress: uploading
@@ -50,11 +61,13 @@ export default function SimpleFileUpload({ userId, onUploadComplete }: SimpleFil
       // Create FormData for file upload
       const formData = new FormData();
       formData.append('file', file);
-      if (!resolvedUserId) throw new Error('Missing parity_user_id');
-      formData.append('user_id', resolvedUserId);
+      if (resolvedUserId) {
+        formData.append('user_id', resolvedUserId);
+      }
 
       // Parse the file using local backend
-      const response = await fetch(`${API_URL}/parse`, {
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL;
+      const response = await fetch(`${API_BASE}/parse`, {
         method: 'POST',
         body: formData,
       });
@@ -116,9 +129,11 @@ export default function SimpleFileUpload({ userId, onUploadComplete }: SimpleFil
     onDrop,
     accept: {
       'application/pdf': ['.pdf'],
-      'text/csv': ['.csv']
+      'text/csv': ['.csv'],
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+      'application/vnd.ms-excel': ['.xls']
     },
-    disabled: isUploading || !resolvedUserId
+    disabled: isUploading
   });
 
   return (
@@ -145,7 +160,7 @@ export default function SimpleFileUpload({ userId, onUploadComplete }: SimpleFil
               Drag & drop files here, or click to select
             </p>
             <p className="text-sm text-gray-500">
-              Supports: PDF, CSV (Excel coming soon)
+              Supports: PDF, CSV, XLSX (Max 50MB per file)
             </p>
           </>
         )}

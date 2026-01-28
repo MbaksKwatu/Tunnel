@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { FileText, Trash2, Eye, AlertCircle, CheckCircle, Clock, Loader2, KeyRound, UploadCloud } from 'lucide-react';
+import { FileText, Trash2, Download, Eye, AlertCircle, CheckCircle, Clock, Loader2, X, RefreshCw } from 'lucide-react';
 import { getDocuments, deleteDocument, Document } from '@/lib/supabase';
 import { format } from 'date-fns';
 
@@ -14,29 +14,19 @@ interface DocumentListProps {
 export default function DocumentList({ userId, onViewDocument, refreshTrigger }: DocumentListProps) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const scrollToUpload = () => {
-    try {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch {
-      window.scrollTo(0, 0);
-    }
-  };
+  const [error, setError] = useState<string | null>(null);
 
   const loadDocuments = async () => {
     try {
       setLoading(true);
-      if (!userId) {
-        setDocuments([]);
-        return;
-      }
+      setError(null);
       console.log('Loading documents for user:', userId);
       const docs = await getDocuments(userId);
-      console.log('Documents loaded:', docs.length);
+      console.log('Documents loaded:', docs);
       setDocuments(docs);
-    } catch (err) {
-      console.log('Documents load failed (showing empty state)');
-      setDocuments([]);
+    } catch (err: any) {
+      console.error('Error loading documents:', err);
+      setError(err.message || 'Failed to load documents');
     } finally {
       setLoading(false);
     }
@@ -44,6 +34,17 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
 
   useEffect(() => {
     loadDocuments();
+
+    // Add timeout to prevent infinite loading
+    const timeout = setTimeout(() => {
+      if (loading) {
+        console.warn('Document loading timeout - setting error');
+        setError('Loading timeout - please check your connection');
+        setLoading(false);
+      }
+    }, 60000); // 60 second timeout for Render cold starts
+
+    return () => clearTimeout(timeout);
   }, []);
 
   useEffect(() => {
@@ -76,8 +77,6 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
         return <Clock className="h-4 w-4 text-gray-500" />;
       case 'processing':
         return <Loader2 className="h-4 w-4 text-yellow-500 animate-spin" />;
-      case 'partial':
-        return <AlertCircle className="h-4 w-4 text-yellow-500" />;
       case 'completed':
         return <CheckCircle className="h-4 w-4 text-green-500" />;
       case 'failed':
@@ -91,8 +90,6 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
         return 'Uploaded';
       case 'processing':
         return 'Processing...';
-      case 'partial':
-        return 'Partial';
       case 'completed':
         return 'Completed';
       case 'failed':
@@ -106,8 +103,6 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
         return 'text-gray-400 bg-gray-800';
       case 'processing':
         return 'text-yellow-400 bg-yellow-900/20';
-      case 'partial':
-        return 'text-yellow-400 bg-yellow-900/20';
       case 'completed':
         return 'text-green-400 bg-green-900/20';
       case 'failed':
@@ -119,6 +114,14 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 text-cyan-400 animate-spin" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-900/20 border border-red-800 rounded-lg p-4">
+        <p className="text-red-400">{error}</p>
       </div>
     );
   }
@@ -174,64 +177,9 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
                   )}
                 </div>
 
-                {(document.status === 'failed' || document.status === 'partial') && (
-                  <div className={`mt-2 text-xs ${document.status === 'failed' ? 'text-red-400 bg-red-900/20 border-red-800' : 'text-yellow-400 bg-yellow-900/20 border-yellow-800'} border p-2 rounded space-y-1`}>
-                    <div className="text-gray-200">
-                      Succeeded: {typeof document.rows_parsed === 'number' ? document.rows_parsed : document.rows_count} rows parsed
-                    </div>
-                    {typeof document.rows_expected === 'number' ? (
-                      <div className="text-gray-200">Expected: {document.rows_expected} rows</div>
-                    ) : null}
-                    {typeof document.rows_parsed === 'number' && typeof document.rows_expected === 'number' && document.rows_expected > document.rows_parsed ? (
-                      <div className="text-gray-200">Failed: {document.rows_expected - document.rows_parsed} rows not parsed</div>
-                    ) : null}
-                    {document.error_code ? <div>{document.error_code}</div> : null}
-                    {document.error_message ? <div>{document.error_message}</div> : null}
-                    {document.next_action ? <div>Next action: {document.next_action}</div> : null}
-
-                    <div className="pt-2 flex flex-wrap gap-2">
-                      {(document.error_code === 'PASSWORD_REQUIRED' || document.next_action === 'provide_password') && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            scrollToUpload();
-                          }}
-                          className="inline-flex items-center gap-2 px-3 py-1.5 rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 hover:bg-yellow-500/30"
-                          title="Re-upload and enter password"
-                        >
-                          <KeyRound className="h-4 w-4" />
-                          Enter password
-                        </button>
-                      )}
-
-                      {document.next_action === 'upload_new_file' && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            scrollToUpload();
-                          }}
-                          className="inline-flex items-center gap-2 px-3 py-1.5 rounded bg-gray-800 text-gray-200 border border-gray-700 hover:bg-[#23272E]"
-                          title="Fix formatting and re-upload"
-                        >
-                          <UploadCloud className="h-4 w-4" />
-                          Fix formatting
-                        </button>
-                      )}
-
-                      {(document.next_action === 'retry_upload' || document.next_action === 'upload_new_file' || document.status === 'failed') && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            scrollToUpload();
-                          }}
-                          className="inline-flex items-center gap-2 px-3 py-1.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-500/20"
-                          title="Re-upload this document"
-                        >
-                          <UploadCloud className="h-4 w-4" />
-                          Re-upload
-                        </button>
-                      )}
-                    </div>
+                {document.status === 'failed' && document.error_message && (
+                  <div className="mt-2 text-xs text-red-400 bg-red-900/20 border border-red-800 p-2 rounded">
+                    {document.error_message}
                   </div>
                 )}
               </div>
@@ -247,6 +195,64 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
                   title="View Data"
                 >
                   <Eye className="h-5 w-5" />
+                </button>
+              )}
+
+              {/* Cancel button - show for processing files */}
+              {document.status === 'processing' && (
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (confirm(`Cancel processing for "${document.file_name}"?`)) {
+                      try {
+                        const API_BASE = process.env.NEXT_PUBLIC_API_URL;
+                        const response = await fetch(`${API_BASE}/document/${document.id}/cancel`, {
+                          method: 'POST'
+                        });
+                        if (response.ok) {
+                          loadDocuments(); // Refresh list
+                        } else {
+                          alert('Failed to cancel processing');
+                        }
+                      } catch (err: any) {
+                        console.error('Failed to cancel:', err);
+                        alert(`Failed to cancel: ${err.message}`);
+                      }
+                    }
+                  }}
+                  className="p-2 text-orange-400 hover:bg-orange-400/10 rounded-lg transition-colors"
+                  title="Cancel Processing"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              )}
+
+              {/* Retry button - show for failed files */}
+              {document.status === 'failed' && (
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (confirm(`Retry processing for "${document.file_name}"?`)) {
+                      try {
+                        const API_BASE = process.env.NEXT_PUBLIC_API_URL;
+                        const response = await fetch(`${API_BASE}/document/${document.id}/retry`, {
+                          method: 'POST'
+                        });
+                        if (response.ok) {
+                          loadDocuments(); // Refresh list
+                        } else {
+                          alert('Failed to retry processing');
+                        }
+                      } catch (err: any) {
+                        console.error('Failed to retry:', err);
+                        alert(`Failed to retry: ${err.message}`);
+                      }
+                    }
+                  }}
+                  className="p-2 text-blue-400 hover:bg-blue-400/10 rounded-lg transition-colors"
+                  title="Retry Processing"
+                >
+                  <RefreshCw className="h-5 w-5" />
                 </button>
               )}
 
