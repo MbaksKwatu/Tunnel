@@ -1,6 +1,6 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
-# from models import Deal, Evidence, Thesis  # Removed: Supabase-only deployment
+# Models removed for Supabase-only deployment - using Dict[str, Any] instead
 
 
 class JudgmentEngine:
@@ -38,7 +38,7 @@ class JudgmentEngine:
         "manufacturing": {"typical_margin": 0.18, "license_critical": False, "data_quality_required": "medium"},
     }
 
-    def judge_deal(self, deal: Deal, evidence: List[Evidence], thesis: Thesis) -> Dict:
+    def judge_deal(self, deal: Dict[str, Any], evidence: List[Dict[str, Any]], thesis: Dict[str, Any]) -> Dict:
         stage = (deal.stage or "").lower().strip()
         geography = (deal.geography or "").lower().replace(" ", "_")
         sector = (deal.sector or "").lower().strip()
@@ -70,7 +70,7 @@ class JudgmentEngine:
             "suggested_missing": missing,
         }
 
-    def _score_financial(self, evidence: List[Evidence], deal: Deal, thesis: Thesis) -> float:
+    def _score_financial(self, evidence: List[Dict[str, Any]], deal: Dict[str, Any], thesis: Dict[str, Any]) -> float:
         base_score = 30.0
         stage = (deal.stage or "").lower().strip() or "early_revenue"
 
@@ -95,7 +95,7 @@ class JudgmentEngine:
 
         return max(0.0, min(base_score, 100.0))
 
-    def _score_governance(self, evidence: List[Evidence], deal: Deal, thesis: Thesis) -> float:
+    def _score_governance(self, evidence: List[Dict[str, Any]], deal: Dict[str, Any], thesis: Dict[str, Any]) -> float:
         base_score = 40.0
         stage = (deal.stage or "").lower().strip() or "early_revenue"
 
@@ -121,7 +121,7 @@ class JudgmentEngine:
 
         return max(0.0, min(base_score, 100.0))
 
-    def _score_market(self, evidence: List[Evidence], deal: Deal) -> float:
+    def _score_market(self, evidence: List[Dict[str, Any]], deal: Dict[str, Any]) -> float:
         base_score = 50.0
         geo = (deal.geography or "").lower().replace(" ", "_")
         geo_risks = self.GEOGRAPHY_RISK_FACTORS.get(geo, {"fx_risk": 0.2, "infrastructure_risk": 0.2})
@@ -150,7 +150,7 @@ class JudgmentEngine:
 
         return max(0.0, min(base_score, 100.0))
 
-    def _score_team(self, evidence: List[Evidence], deal: Deal) -> float:
+    def _score_team(self, evidence: List[Dict[str, Any]], deal: Dict[str, Any]) -> float:
         base_score = 50.0
 
         if self._survived_crisis(evidence):
@@ -169,7 +169,7 @@ class JudgmentEngine:
 
         return max(0.0, min(base_score, 100.0))
 
-    def _score_product(self, evidence: List[Evidence], deal: Deal, stage: str) -> float:
+    def _score_product(self, evidence: List[Dict[str, Any]], deal: Dict[str, Any], stage: str) -> float:
         base_score = 50.0
         has_pmf = any(
             (e.evidence_type == "market" and (e.extracted_data or {}).get("pmf") is True)
@@ -197,7 +197,7 @@ class JudgmentEngine:
 
         return max(0.0, min(base_score, 100.0))
 
-    def _score_data_confidence(self, evidence: List[Evidence], deal: Deal) -> float:
+    def _score_data_confidence(self, evidence: List[Dict[str, Any]], deal: Dict[str, Any]) -> float:
         evidence_types = set(e.evidence_type for e in evidence)
         completeness = min(len(evidence_types) / 5.0, 1.0)
         consistency_score = self._check_data_consistency(evidence)
@@ -206,7 +206,7 @@ class JudgmentEngine:
             confidence = min(confidence + 0.15, 1.0)
         return max(0.0, min(confidence * 100.0, 100.0))
 
-    def _detect_kill_signals(self, evidence: List[Evidence], thesis: Thesis, dimension_scores: Dict, deal: Deal) -> Dict:
+    def _detect_kill_signals(self, evidence: List[Dict[str, Any]], thesis: Dict[str, Any], dimension_scores: Dict, deal: Dict[str, Any]) -> Dict:
         if self._detect_fraud_patterns(evidence):
             return {"type": "HARD_KILL", "reason": "fraud_indicators", "detail": "Inconsistent financial records across documents"}
 
@@ -233,14 +233,14 @@ class JudgmentEngine:
 
         return {"type": "NONE"}
 
-    def calculate_readiness(self, dimension_scores: Dict[str, float], thesis: Thesis) -> float:
+    def calculate_readiness(self, dimension_scores: Dict[str, float], thesis: Dict[str, Any]) -> float:
         weights = self.default_weights()
         total = 0.0
         for k, w in weights.items():
             total += (dimension_scores.get(k, 0.0) / 100.0) * float(w)
         return max(0.0, min(total * 100.0, 100.0))
 
-    def calculate_alignment(self, dimension_scores: Dict[str, float], thesis: Thesis) -> float:
+    def calculate_alignment(self, dimension_scores: Dict[str, float], thesis: Dict[str, Any]) -> float:
         weights = thesis.weights if isinstance(thesis.weights, dict) else self.default_weights()
         s = sum(float(v) for v in weights.values()) or 1.0
         weights = {k: float(v) / s for k, v in weights.items()}
@@ -256,7 +256,7 @@ class JudgmentEngine:
             return "medium"
         return "low"
 
-    def generate_explanations(self, deal: Deal, evidence: List[Evidence], dimension_scores: Dict, kill: Dict) -> List[str]:
+    def generate_explanations(self, deal: Dict[str, Any], evidence: List[Dict[str, Any]], dimension_scores: Dict, kill: Dict) -> List[str]:
         notes: List[str] = []
         if self._has_audited_financials(evidence):
             notes.append("Audited or management accounts present")
@@ -270,7 +270,7 @@ class JudgmentEngine:
             notes.append(f"Kill signal: {kill.get('reason')}")
         return notes
 
-    def suggest_missing_evidence(self, deal: Deal, evidence: List[Evidence]) -> List[str]:
+    def suggest_missing_evidence(self, deal: Dict[str, Any], evidence: List[Dict[str, Any]]) -> List[str]:
         stage = (deal.stage or "").lower().strip() or "early_revenue"
         required = list(self.STAGE_FINANCIAL_REQUIREMENTS.get(stage, []))
         available = set()
@@ -294,7 +294,7 @@ class JudgmentEngine:
             "data_confidence": 0.05,
         }
 
-    def _check_financial_requirements(self, evidence: List[Evidence], stage: str) -> bool:
+    def _check_financial_requirements(self, evidence: List[Dict[str, Any]], stage: str) -> bool:
         required = self.STAGE_FINANCIAL_REQUIREMENTS.get(stage, [])
         if "audited_financials_required" in required:
             return self._has_audited_financials(evidence)
@@ -302,7 +302,7 @@ class JudgmentEngine:
             return self._has_audited_financials(evidence) or self._has_management_accounts(evidence)
         return any(e.evidence_type == "financial" for e in evidence)
 
-    def _assess_informality(self, evidence: List[Evidence]) -> float:
+    def _assess_informality(self, evidence: List[Dict[str, Any]]) -> float:
         informality_score = 50.0
         if self._has_audited_financials(evidence):
             informality_score -= 30
@@ -312,7 +312,7 @@ class JudgmentEngine:
             informality_score -= 20
         return max(informality_score, 0.0)
 
-    def _check_formalization_efforts(self, evidence: List[Evidence]) -> bool:
+    def _check_formalization_efforts(self, evidence: List[Dict[str, Any]]) -> bool:
         recent = {"business_registration", "accountant_hired", "license_application", "tax_registration"}
         for e in evidence:
             data = e.extracted_data or {}
@@ -321,7 +321,7 @@ class JudgmentEngine:
                 return True
         return False
 
-    def _survived_crisis(self, evidence: List[Evidence]) -> bool:
+    def _survived_crisis(self, evidence: List[Dict[str, Any]]) -> bool:
         crisis_indicators = {"covid_survival", "fx_crisis_survival", "customer_loss_survival"}
         for e in evidence:
             data = e.extracted_data or {}
@@ -329,20 +329,20 @@ class JudgmentEngine:
                 return True
         return False
 
-    def _has_fx_death_spiral(self, evidence: List[Evidence], deal: Deal) -> bool:
+    def _has_fx_death_spiral(self, evidence: List[Dict[str, Any]], deal: Dict[str, Any]) -> bool:
         has_local_revenue = any((e.extracted_data or {}).get("revenue_currency") in {"NGN", "KES", "ZAR", "GHS"} for e in evidence)
         has_hard_currency_debt = any((e.extracted_data or {}).get("debt_currency") in {"USD", "EUR", "GBP"} for e in evidence)
         has_hedge = any((e.extracted_data or {}).get("fx_hedge") is True for e in evidence)
         return bool(has_local_revenue and has_hard_currency_debt and not has_hedge)
 
-    def _calculate_customer_concentration(self, evidence: List[Evidence]) -> Optional[float]:
+    def _calculate_customer_concentration(self, evidence: List[Dict[str, Any]]) -> Optional[float]:
         for e in evidence:
             data = e.extracted_data or {}
             if "customer_concentration" in data and isinstance(data["customer_concentration"], (int, float)):
                 return float(data["customer_concentration"])
         return None
 
-    def _has_anchor_customer_quality(self, evidence: List[Evidence]) -> bool:
+    def _has_anchor_customer_quality(self, evidence: List[Dict[str, Any]]) -> bool:
         indicators = {"multinational_customer", "tier1_corporate", "government_with_escrow"}
         for e in evidence:
             data = e.extracted_data or {}
@@ -350,7 +350,7 @@ class JudgmentEngine:
                 return True
         return False
 
-    def _check_data_consistency(self, evidence: List[Evidence]) -> float:
+    def _check_data_consistency(self, evidence: List[Dict[str, Any]]) -> float:
         revenues: List[float] = []
         for e in evidence:
             if e.evidence_type == "financial":
@@ -370,7 +370,7 @@ class JudgmentEngine:
             return 0.7
         return 0.4
 
-    def _detect_fraud_patterns(self, evidence: List[Evidence]) -> bool:
+    def _detect_fraud_patterns(self, evidence: List[Dict[str, Any]]) -> bool:
         fraud_signals = 0
         if self._check_data_consistency(evidence) < 0.4:
             fraud_signals += 1
@@ -379,21 +379,21 @@ class JudgmentEngine:
             fraud_signals += 1
         return fraud_signals >= 2
 
-    def _has_audited_financials(self, evidence: List[Evidence]) -> bool:
+    def _has_audited_financials(self, evidence: List[Dict[str, Any]]) -> bool:
         for e in evidence:
             data = e.extracted_data or {}
             if data.get("subtype") == "audited_financials" or data.get("audited_financials") is True:
                 return True
         return False
 
-    def _has_management_accounts(self, evidence: List[Evidence]) -> bool:
+    def _has_management_accounts(self, evidence: List[Dict[str, Any]]) -> bool:
         for e in evidence:
             data = e.extracted_data or {}
             if data.get("subtype") == "management_accounts" or data.get("management_accounts") is True:
                 return True
         return False
 
-    def _has_revenue_data(self, evidence: List[Evidence]) -> bool:
+    def _has_revenue_data(self, evidence: List[Dict[str, Any]]) -> bool:
         for e in evidence:
             if e.evidence_type == "financial":
                 data = e.extracted_data or {}
@@ -401,7 +401,7 @@ class JudgmentEngine:
                     return True
         return False
 
-    def _extract_gross_margin(self, evidence: List[Evidence]) -> Optional[float]:
+    def _extract_gross_margin(self, evidence: List[Dict[str, Any]]) -> Optional[float]:
         for e in evidence:
             if e.evidence_type == "financial":
                 data = e.extracted_data or {}
@@ -412,35 +412,35 @@ class JudgmentEngine:
                     return max(0.0, min(gm, 1.0))
         return None
 
-    def _has_shareholder_agreement(self, evidence: List[Evidence]) -> bool:
+    def _has_shareholder_agreement(self, evidence: List[Dict[str, Any]]) -> bool:
         for e in evidence:
             data = e.extracted_data or {}
             if e.evidence_type == "governance" and (data.get("shareholder_agreement") is True or data.get("subtype") == "shareholder_agreement"):
                 return True
         return False
 
-    def _has_board_structure(self, evidence: List[Evidence]) -> bool:
+    def _has_board_structure(self, evidence: List[Dict[str, Any]]) -> bool:
         for e in evidence:
             data = e.extracted_data or {}
             if e.evidence_type == "governance" and (data.get("board_structure") is True or data.get("subtype") == "board_structure"):
                 return True
         return False
 
-    def _has_business_registration(self, evidence: List[Evidence]) -> bool:
+    def _has_business_registration(self, evidence: List[Dict[str, Any]]) -> bool:
         for e in evidence:
             data = e.extracted_data or {}
             if (data.get("business_registration") is True) or data.get("subtype") == "business_registration":
                 return True
         return False
 
-    def _has_tax_compliance(self, evidence: List[Evidence]) -> bool:
+    def _has_tax_compliance(self, evidence: List[Dict[str, Any]]) -> bool:
         for e in evidence:
             data = e.extracted_data or {}
             if (data.get("tax_compliance") is True) or data.get("subtype") == "tax_clearance":
                 return True
         return False
 
-    def _has_risk_mitigation(self, evidence: List[Evidence], geo_risks: Dict) -> bool:
+    def _has_risk_mitigation(self, evidence: List[Dict[str, Any]], geo_risks: Dict) -> bool:
         for e in evidence:
             data = e.extracted_data or {}
             if data.get("fx_hedge") is True:
@@ -453,7 +453,7 @@ class JudgmentEngine:
                 return True
         return False
 
-    def _has_market_analysis(self, evidence: List[Evidence]) -> bool:
+    def _has_market_analysis(self, evidence: List[Dict[str, Any]]) -> bool:
         for e in evidence:
             if e.evidence_type == "market":
                 data = e.extracted_data or {}
@@ -461,7 +461,7 @@ class JudgmentEngine:
                     return True
         return False
 
-    def _has_customer_contracts(self, evidence: List[Evidence]) -> bool:
+    def _has_customer_contracts(self, evidence: List[Dict[str, Any]]) -> bool:
         for e in evidence:
             if e.evidence_type in ("market", "operations"):
                 data = e.extracted_data or {}
@@ -469,21 +469,21 @@ class JudgmentEngine:
                     return True
         return False
 
-    def _has_local_market_expertise(self, evidence: List[Evidence], geography: str) -> bool:
+    def _has_local_market_expertise(self, evidence: List[Dict[str, Any]], geography: str) -> bool:
         for e in evidence:
             data = e.extracted_data or {}
             if data.get("local_expertise") is True or geography and data.get("country_experience") == geography:
                 return True
         return False
 
-    def _has_diaspora_background(self, evidence: List[Evidence]) -> bool:
+    def _has_diaspora_background(self, evidence: List[Dict[str, Any]]) -> bool:
         for e in evidence:
             data = e.extracted_data or {}
             if data.get("diaspora_background") is True:
                 return True
         return False
 
-    def _check_family_ownership(self, evidence: List[Evidence]) -> bool:
+    def _check_family_ownership(self, evidence: List[Dict[str, Any]]) -> bool:
         for e in evidence:
             if e.evidence_type == "governance":
                 data = e.extracted_data or {}
@@ -491,7 +491,7 @@ class JudgmentEngine:
                     return True
         return False
 
-    def _check_governance_conflicts(self, evidence: List[Evidence]) -> bool:
+    def _check_governance_conflicts(self, evidence: List[Dict[str, Any]]) -> bool:
         for e in evidence:
             if e.evidence_type == "governance":
                 data = e.extracted_data or {}

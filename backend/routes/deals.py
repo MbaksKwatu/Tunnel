@@ -14,12 +14,19 @@ from datetime import datetime
 from auth import get_current_user
 from local_storage import get_storage  # Returns SupabaseStorage only
 from judgment_engine import JudgmentEngine
+from parsers import get_parser, PasswordRequiredError
+from anomaly_engine import AnomalyDetector
+from insight_generator import InsightGenerator
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Initialize judgment engine
 judgment_engine = JudgmentEngine()
+
+# Initialize document processing components
+anomaly_detector = AnomalyDetector()
+insight_generator = InsightGenerator()
 
 # ==================== PYDANTIC MODELS ====================
 
@@ -83,7 +90,7 @@ class DictWrapper:
     def __getattr__(self, name):
         return self._data.get(name)
 
-def dict_to_deal(deal_dict: Dict[str, Any]) -> Deal:
+def dict_to_deal(deal_dict: Dict[str, Any]) -> Any:
     """Convert storage dict to Deal-like object for judgment engine"""
     # Create a wrapper that allows attribute access
     class DealWrapper:
@@ -101,7 +108,7 @@ def dict_to_deal(deal_dict: Dict[str, Any]) -> Deal:
     
     return DealWrapper(deal_dict)
 
-def dict_to_evidence(evidence_dict: Dict[str, Any]) -> Evidence:
+def dict_to_evidence(evidence_dict: Dict[str, Any]) -> DictWrapper:
     """Convert storage dict to Evidence-like object for judgment engine"""
     class EvidenceWrapper:
         def __init__(self, data):
@@ -116,7 +123,7 @@ def dict_to_evidence(evidence_dict: Dict[str, Any]) -> Evidence:
     
     return EvidenceWrapper(evidence_dict)
 
-def dict_to_thesis(thesis_dict: Dict[str, Any]) -> Thesis:
+def dict_to_thesis(thesis_dict: Dict[str, Any]) -> Any:
     """Convert storage dict to Thesis-like object for judgment engine"""
     class ThesisWrapper:
         def __init__(self, data):
@@ -343,9 +350,19 @@ async def delete_deal(
 async def upload_evidence(
     deal_id: str,
     file: UploadFile = File(...),
+    password: Optional[str] = Form(None),
     current_user: Any = Depends(get_current_user)
 ):
-    """Upload evidence document for a deal"""
+    """
+    Upload evidence document for a deal
+    
+    This endpoint:
+    1. Processes the document (parses, extracts data)
+    2. Runs anomaly detection
+    3. Generates insights
+    4. Creates document record
+    5. Links document to deal via evidence record
+    """
     try:
         storage = get_storage()
         user_id = current_user.id
@@ -358,36 +375,146 @@ async def upload_evidence(
         file_content = await file.read()
         file_type = file.filename.split('.')[-1].lower() if '.' in file.filename else ''
         
+        # Validate file type
+        if file_type not in ['pdf', 'csv', 'xlsx', 'xls']:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {file_type}. Supported: PDF, CSV, XLSX"
+            )
+        
         # Determine evidence type from filename or file type
         evidence_type = 'document'
         if 'financial' in file.filename.lower() or 'statement' in file.filename.lower():
             evidence_type = 'financial_statements'
         elif 'bank' in file.filename.lower():
             evidence_type = 'bank_statements'
-        elif file_type in ['pdf', 'csv', 'xlsx']:
+        elif file_type in ['pdf', 'csv', 'xlsx', 'xls']:
             evidence_type = 'financial_data'
         
-        # For now, store evidence metadata
-        # In future, could process file via /parse endpoint and link to document
-        evidence_data = {
-            'id': str(uuid.uuid4()),
-            'deal_id': deal_id,
-            'evidence_type': evidence_type,
-            'extracted_data': {
-                'filename': file.filename,
-                'file_type': file_type,
-                'file_size': len(file_content)
-            },
-            'confidence_score': 0.7,
-            'uploaded_at': datetime.utcnow().isoformat()
+        # Create document record
+        document_id = str(uuid.uuid4())
+        document_data = {
+            'id': document_id,
+            'user_id': user_id,
+            'file_name': file.filename,
+            'file_type': file_type,
+            'file_url': None,  # Direct upload, no URL
+            'status': 'processing',
+            'upload_date': datetime.utcnow().isoformat()
         }
+        storage.store_document(document_data)
         
-        evidence = storage.add_evidence(deal_id, evidence_data)
-        
-        if not evidence:
-            raise HTTPException(status_code=500, detail="Failed to upload evidence")
-        
-        return {"evidence": evidence}
+        try:
+            # Parse the file
+            parser = get_parser(file_type)
+            rows = await parser.parse(file_url=None, file_content=file_content, password=password)
+            
+            if not rows:
+                storage.update_document_status(
+                    document_id,
+                    'completed',
+                    rows_count=0,
+                    error_message='No data found in document'
+                )
+                # Still create evidence record, but with no data
+                evidence_data = {
+                    'id': str(uuid.uuid4()),
+                    'deal_id': deal_id,
+                    'document_id': document_id,  # ✅ LINKED!
+                    'evidence_type': evidence_type,
+                    'extracted_data': {
+                        'filename': file.filename,
+                        'file_type': file_type,
+                        'rows_count': 0,
+                        'anomalies_count': 0
+                    },
+                    'confidence_score': 0.0,
+                    'uploaded_at': datetime.utcnow().isoformat()
+                }
+                evidence = storage.add_evidence(deal_id, evidence_data)
+                return {
+                    "evidence": evidence,
+                    "document_id": document_id,
+                    "message": "Document uploaded but no data extracted"
+                }
+            
+            # Store extracted rows
+            rows_inserted = storage.store_rows(document_id, rows)
+            
+            # Run anomaly detection
+            anomalies = anomaly_detector.detect_all(rows)
+            anomalies_count = 0
+            if anomalies:
+                anomalies_count = storage.store_anomalies(document_id, anomalies)
+            
+            # Generate insights
+            insights = insight_generator.generate_insights(anomalies)
+            
+            # Update document status
+            storage.update_document_status(
+                document_id,
+                'completed',
+                rows_count=rows_inserted,
+                anomalies_count=anomalies_count,
+                insights_summary=insights
+            )
+            
+            # Create evidence record WITH document_id linked
+            evidence_data = {
+                'id': str(uuid.uuid4()),
+                'deal_id': deal_id,
+                'document_id': document_id,  # ✅ LINKED!
+                'evidence_type': evidence_type,
+                'extracted_data': {
+                    'filename': file.filename,
+                    'file_type': file_type,
+                    'rows_count': rows_inserted,
+                    'anomalies_count': anomalies_count,
+                    'has_insights': bool(insights)
+                },
+                'confidence_score': 0.9 if rows_inserted > 0 else 0.5,
+                'uploaded_at': datetime.utcnow().isoformat()
+            }
+            
+            evidence = storage.add_evidence(deal_id, evidence_data)
+            
+            if not evidence:
+                raise HTTPException(status_code=500, detail="Failed to create evidence record")
+            
+            logger.info(f"✅ Evidence uploaded for deal {deal_id}: document {document_id}, {rows_inserted} rows, {anomalies_count} anomalies")
+            
+            return {
+                "evidence": evidence,
+                "document_id": document_id,
+                "rows_extracted": rows_inserted,
+                "anomalies_count": anomalies_count,
+                "message": "Document processed and linked to deal"
+            }
+            
+        except PasswordRequiredError:
+            # Update document status
+            storage.update_document_status(
+                document_id,
+                'failed',
+                error_message='Password required'
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="PASSWORD_REQUIRED"
+            )
+        except Exception as parse_error:
+            # Update document status
+            storage.update_document_status(
+                document_id,
+                'failed',
+                error_message=str(parse_error)
+            )
+            logger.error(f"Error processing evidence document: {parse_error}", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to process document: {str(parse_error)}"
+            )
+            
     except HTTPException:
         raise
     except Exception as e:
@@ -603,11 +730,23 @@ async def ask_parity(
     judgment = storage.get_judgment(deal_id)
     if judgment:
         investment_readiness = judgment.get("investment_readiness") or "Not set"
+        thesis_alignment = judgment.get("thesis_alignment") or "Not set"
+        confidence_level = judgment.get("confidence_level") or "Not set"
         dims = judgment.get("dimension_scores") or {}
         fin_score = dims.get("financial")
         gov_score = dims.get("governance")
+        market_score = dims.get("market")
+        team_score = dims.get("team")
+        product_score = dims.get("product")
+        data_conf_score = dims.get("data_confidence")
+        
         financial_score = str(fin_score) if fin_score is not None else "—"
         governance_score = str(gov_score) if gov_score is not None else "—"
+        market_score_str = str(market_score) if market_score is not None else "—"
+        team_score_str = str(team_score) if team_score is not None else "—"
+        product_score_str = str(product_score) if product_score is not None else "—"
+        data_conf_score_str = str(data_conf_score) if data_conf_score is not None else "—"
+        
         kill = judgment.get("kill_signals") or {}
         if isinstance(kill, dict):
             ktype = kill.get("type") or "NONE"
@@ -615,11 +754,29 @@ async def ask_parity(
             kill_summary = f"{ktype}: {kdetail}" if ktype != "NONE" and kdetail else (kdetail or "None")
         else:
             kill_summary = str(kill)
+        
+        explanations = judgment.get("explanations") or {}
+        readiness_explanation = explanations.get("investment_readiness") or ""
+        alignment_explanation = explanations.get("thesis_alignment") or ""
+        kill_explanation = explanations.get("kill_signals") or ""
+        
+        missing_evidence = judgment.get("suggested_missing") or []
+        missing_list = "\n".join([f"- {m.get('type', 'Unknown')}: {m.get('action', '')}" for m in missing_evidence]) if missing_evidence else "None"
     else:
         investment_readiness = "Not yet run"
+        thesis_alignment = "Not yet run"
+        confidence_level = "Not yet run"
         financial_score = "—"
         governance_score = "—"
+        market_score_str = "—"
+        team_score_str = "—"
+        product_score_str = "—"
+        data_conf_score_str = "—"
         kill_summary = "—"
+        readiness_explanation = ""
+        alignment_explanation = ""
+        kill_explanation = ""
+        missing_list = "—"
 
     # 4. Thesis (or "Not set")
     thesis_rows = storage.supabase.table("thesis").select("*").eq("fund_id", user_id).order("created_at", desc=True).limit(1).execute()
@@ -666,9 +823,21 @@ EVIDENCE AVAILABLE:
 
 JUDGMENT SUMMARY:
 - Investment Readiness: {investment_readiness}
-- Financial Score: {financial_score}
-- Governance Score: {governance_score}
+- Thesis Alignment: {thesis_alignment}
+- Confidence Level: {confidence_level}
+- Dimension Scores:
+  * Financial: {financial_score}/100
+  * Governance: {governance_score}/100
+  * Market: {market_score_str}/100
+  * Team: {team_score_str}/100
+  * Product: {product_score_str}/100
+  * Data Confidence: {data_conf_score_str}/100
 - Kill Signals: {kill_summary}
+{f"- Readiness Explanation: {readiness_explanation}" if readiness_explanation else ""}
+{f"- Alignment Explanation: {alignment_explanation}" if alignment_explanation else ""}
+{f"- Kill Signals Explanation: {kill_explanation}" if kill_explanation else ""}
+- Missing Evidence Suggestions:
+{missing_list}
 
 INVESTMENT THESIS:
 - Focus: {investment_focus}
@@ -683,15 +852,21 @@ Below is the prior conversation in block format (USER: then ASSISTANT (Parity):)
 {history_section}
 
 RULES:
-- Answer concisely (3–6 sentences max).
-- Reference the deal or evidence explicitly.
+- Answer concisely (3–6 sentences max, unless user asks for detailed analysis).
+- Reference the deal, evidence, or judgment results explicitly when relevant.
+- If judgment has been run, you can explain what the scores mean, what the explanations indicate, and what missing evidence might help.
 - If data is missing, say what is missing; do not invent.
-- Do NOT make investment decisions.
+- Do NOT make investment decisions or recommendations.
 - Do NOT invent data.
-- Do NOT speak generally about finance.
+- Do NOT speak generally about finance unless directly relevant to this deal.
 - **Judgment-not-run (CRITICAL):** If judgment has not been run, Parity MUST say: "Judgment has not yet been run for this deal, so I cannot explain scores." Then focus only on evidence availability and open questions; do NOT speculate about scores or readiness. No exceptions.
-- **Deal summary (STRICT):** When asked to summarise the deal, Parity may ONLY include: company, sector, stage, evidence present (yes/no), judgment status (run / not run). Parity must NOT: give opinions, imply readiness, suggest decisions, add conclusions.
-- **Follow-up suggestions (allowed but constrained):** Parity may suggest 1–2 follow-up checks only, using soft analytical language. Allowed: "It may be useful to clarify…", "The analyst may want to check…", "A remaining open question is…". Disallowed: "You should…", "Proceed with…", "Approve / reject", "I recommend…"."""
+- **Judgment-available (ENHANCED):** When judgment IS available, Parity can:
+  * Explain what the dimension scores indicate (e.g., "Financial score of 65/100 suggests moderate financial strength with room for improvement")
+  * Reference the explanations provided (readiness, alignment, kill signals)
+  * Discuss what missing evidence might improve the scores
+  * Help the user understand the judgment results in context
+- **Deal summary (STRICT):** When asked to summarise the deal, Parity may include: company, sector, stage, evidence present (yes/no), judgment status (run / not run), and if run: readiness level, alignment, key scores. Parity must NOT: give opinions, imply readiness beyond what judgment states, suggest decisions, add conclusions.
+- **Follow-up suggestions (allowed but constrained):** Parity may suggest 1–2 follow-up checks only, using soft analytical language. Allowed: "It may be useful to clarify…", "The analyst may want to check…", "A remaining open question is…", "The judgment suggests that [missing evidence type] could improve the [dimension] score". Disallowed: "You should…", "Proceed with…", "Approve / reject", "I recommend…"."""
 
     if not os.getenv("OPENAI_API_KEY"):
         raise HTTPException(status_code=503, detail="Ask Parity is unavailable (OPENAI_API_KEY not set).")
