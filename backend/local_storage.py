@@ -84,6 +84,38 @@ class StorageInterface:
         """Get insights for a document"""
         pass
 
+    def delete_document(self, document_id: str) -> bool:
+        """Delete a document and all associated data (rows, anomalies, notes)."""
+        pass
+
+    def set_investee_name(self, document_id: str, investee_name: str) -> bool:
+        """Set or update investee_name for a document."""
+        pass
+
+    def get_unique_investees(self) -> List[Dict[str, Any]]:
+        """Get list of unique investees with last upload date."""
+        pass
+
+    def get_investee_full_context(self, investee_name: str) -> Dict[str, Any]:
+        """Get full context for an investee (documents, rows, anomalies)."""
+        pass
+
+    def save_dashboard(self, investee_name: str, dashboard_name: str, spec: Dict[str, Any]) -> str:
+        """Save a dashboard configuration. Returns dashboard_id."""
+        pass
+
+    def get_dashboards(self, investee_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get all dashboards, optionally filtered by investee."""
+        pass
+
+    def get_dashboard(self, dashboard_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single dashboard by ID."""
+        pass
+
+    def get_reports(self, investee_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get all reports, optionally filtered by investee."""
+        pass
+
     def save_conversation_message(self, deal_id: str, role: str, content: str) -> Dict[str, Any]:
         """Save a user or assistant message for Ask Parity (deal-scoped)."""
         pass
@@ -106,10 +138,22 @@ class SupabaseStorage(StorageInterface):
 
     def create_deal(self, deal_data: Dict[str, Any]) -> Dict[str, Any]:
         try:
+            logger.info(f"Inserting deal into Supabase: {deal_data.get('id')}")
+            logger.info(f"Deal created_by: {deal_data.get('created_by')}")
+            
             result = self.supabase.table('deals').insert(deal_data).execute()
-            return result.data[0] if result.data else None
+            
+            logger.info(f"Supabase insert result: {len(result.data) if result.data else 0} rows returned")
+            
+            if result.data and len(result.data) > 0:
+                logger.info(f"Deal created successfully: {result.data[0].get('id')}")
+                return result.data[0]
+            else:
+                logger.error("Supabase insert returned no data")
+                return None
         except Exception as e:
-            logger.error(f"Error creating deal: {e}")
+            logger.error(f"Error creating deal: {e}", exc_info=True)
+            logger.error(f"Deal data: {deal_data}")
             raise
 
     def update_deal(self, deal_id: str, update_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -123,10 +167,12 @@ class SupabaseStorage(StorageInterface):
     def get_deals_by_user(self, user_id: str) -> List[Dict[str, Any]]:
         """Get all deals for a user"""
         try:
+            logger.info(f"Querying deals table for user_id: {user_id}")
             result = self.supabase.table('deals').select('*').eq('created_by', user_id).execute()
+            logger.info(f"Query returned {len(result.data) if result.data else 0} deals")
             return result.data or []
         except Exception as e:
-            logger.error(f"Error getting deals for user {user_id}: {e}")
+            logger.error(f"Error getting deals for user {user_id}: {e}", exc_info=True)
             return []
     
     def get_evidence_by_deal(self, deal_id: str) -> List[Dict[str, Any]]:
@@ -157,11 +203,10 @@ class SupabaseStorage(StorageInterface):
 
     def add_evidence(self, deal_id: str, file_data: Dict[str, Any]) -> Dict[str, Any]:
         try:
-            result = self.supabase.table('evidence').insert({
-                'deal_id': deal_id,
-                **file_data,
-                'upload_date': datetime.utcnow().isoformat()
-            }).execute()
+            payload = {'deal_id': deal_id, **file_data}
+            if 'upload_date' not in payload and 'uploaded_at' not in payload:
+                payload['uploaded_at'] = datetime.utcnow().isoformat()
+            result = self.supabase.table('evidence').insert(payload).execute()
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error(f"Error adding evidence for deal {deal_id}: {e}")
@@ -182,10 +227,7 @@ class SupabaseStorage(StorageInterface):
             
             if existing:
                 # Update existing judgment
-                result = self.supabase.table('judgments').update({
-                    **judgment_data,
-                    'updated_at': datetime.utcnow().isoformat()
-                }).eq('id', existing['id']).execute()
+                result = self.supabase.table('judgments').update(judgment_data).eq('id', existing['id']).execute()
             else:
                 # Create new judgment
                 result = self.supabase.table('judgments').insert({
@@ -242,15 +284,31 @@ class SupabaseStorage(StorageInterface):
             logger.error(f"Error storing document: {e}")
             raise
     
-    def update_document_status(self, document_id: str, status: str, rows_count: Optional[int] = None, error_message: Optional[str] = None) -> bool:
-        """Update document processing status"""
+    def update_document_status(
+        self,
+        document_id: str,
+        status: Optional[str] = None,
+        rows_count: Optional[int] = None,
+        error_message: Optional[str] = None,
+        anomalies_count: Optional[int] = None,
+        insights_summary: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Update document processing status and optional fields."""
         try:
-            update_data = {'status': status}
+            update_data = {}
+            if status is not None:
+                update_data['status'] = status
             if rows_count is not None:
                 update_data['rows_count'] = rows_count
             if error_message is not None:
                 update_data['error_message'] = error_message
-            
+            if anomalies_count is not None:
+                update_data['anomalies_count'] = anomalies_count
+            if insights_summary is not None:
+                update_data['insights_summary'] = insights_summary
+            if not update_data:
+                return True
+            update_data['updated_at'] = datetime.utcnow().isoformat()
             result = self.supabase.table('documents').update(update_data).eq('id', document_id).execute()
             return len(result.data) > 0
         except Exception as e:
@@ -258,14 +316,19 @@ class SupabaseStorage(StorageInterface):
             return False
     
     def store_rows(self, document_id: str, rows: List[Dict[str, Any]]) -> int:
-        """Store extracted rows for a document"""
+        """Store extracted rows for a document. Accepts list of dicts (parser output) or list of {row_index, raw_json}."""
         try:
-            # Clear existing rows for this document
             self.supabase.table('extracted_rows').delete().eq('document_id', document_id).execute()
-            
-            # Insert new rows
-            rows_with_doc_id = [{'document_id': document_id, **row} for row in rows]
-            result = self.supabase.table('extracted_rows').insert(rows_with_doc_id).execute()
+            # Normalize: parser returns list of dicts; DB expects row_index and raw_json
+            normalized = []
+            for i, row in enumerate(rows):
+                if 'raw_json' in row and 'row_index' in row:
+                    normalized.append({'document_id': document_id, 'row_index': row['row_index'], 'raw_json': row['raw_json']})
+                else:
+                    normalized.append({'document_id': document_id, 'row_index': i, 'raw_json': row})
+            if not normalized:
+                return 0
+            result = self.supabase.table('extracted_rows').insert(normalized).execute()
             return len(result.data) if result.data else 0
         except Exception as e:
             logger.error(f"Error storing rows for document {document_id}: {e}")
@@ -317,13 +380,133 @@ class SupabaseStorage(StorageInterface):
             return False
     
     def get_insights(self, document_id: str) -> Optional[Dict[str, Any]]:
-        """Get insights for a document"""
+        """Get insights for a document (from document.insights_summary if no insights table)."""
         try:
-            result = self.supabase.table('insights').select('*').eq('document_id', document_id).execute()
-            return result.data[0] if result.data else None
+            doc = self.get_document(document_id)
+            if doc and doc.get('insights_summary'):
+                return doc['insights_summary']
+            try:
+                result = self.supabase.table('insights').select('*').eq('document_id', document_id).execute()
+                return result.data[0].get('insights') if result.data else None
+            except Exception:
+                return None
         except Exception as e:
             logger.error(f"Error getting insights for document {document_id}: {e}")
             return None
+
+    def delete_document(self, document_id: str) -> bool:
+        """Delete a document and all associated data (rows, anomalies)."""
+        try:
+            self.supabase.table('extracted_rows').delete().eq('document_id', document_id).execute()
+            self.supabase.table('anomalies').delete().eq('document_id', document_id).execute()
+            try:
+                self.supabase.table('notes').delete().eq('document_id', document_id).execute()
+            except Exception:
+                pass
+            self.supabase.table('documents').delete().eq('id', document_id).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting document {document_id}: {e}")
+            raise
+
+    def set_investee_name(self, document_id: str, investee_name: str) -> bool:
+        """Set or update investee_name for a document."""
+        try:
+            result = self.supabase.table('documents').update({
+                'investee_name': investee_name,
+                'updated_at': datetime.utcnow().isoformat()
+            }).eq('id', document_id).execute()
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"Error setting investee name for document {document_id}: {e}")
+            return False
+
+    def get_unique_investees(self) -> List[Dict[str, Any]]:
+        """Get list of unique investees with last upload date from documents."""
+        try:
+            result = self.supabase.table('documents').select('investee_name, upload_date, id').not_.is_('investee_name', 'null').execute()
+            by_name: Dict[str, Dict[str, Any]] = {}
+            for row in (result.data or []):
+                name = (row.get('investee_name') or '').strip()
+                if not name:
+                    continue
+                if name not in by_name or (row.get('upload_date') or '') > (by_name[name].get('upload_date') or ''):
+                    by_name[name] = {'investee_name': name, 'last_upload': row.get('upload_date'), 'document_id': row.get('id')}
+            return list(by_name.values())
+        except Exception as e:
+            logger.error(f"Error getting unique investees: {e}")
+            return []
+
+    def get_investee_full_context(self, investee_name: str) -> Dict[str, Any]:
+        """Get full context for an investee (documents, rows count, anomalies count)."""
+        try:
+            result = self.supabase.table('documents').select('*').eq('investee_name', investee_name).order('upload_date', desc=True).execute()
+            docs = result.data or []
+            doc_ids = [d['id'] for d in docs]
+            total_rows = 0
+            total_anomalies = 0
+            for d in docs:
+                total_rows += d.get('rows_count') or 0
+                total_anomalies += d.get('anomalies_count') or 0
+            return {
+                'investee_name': investee_name,
+                'documents': docs,
+                'documents_count': len(docs),
+                'total_rows': total_rows,
+                'total_anomalies': total_anomalies,
+            }
+        except Exception as e:
+            logger.error(f"Error getting investee context for {investee_name}: {e}")
+            raise
+
+    def save_dashboard(self, investee_name: str, dashboard_name: str, spec: Dict[str, Any]) -> str:
+        """Save a dashboard configuration. Returns dashboard_id."""
+        try:
+            dashboard_id = str(uuid.uuid4())
+            self.supabase.table('dashboards').insert({
+                'id': dashboard_id,
+                'investee_name': investee_name,
+                'dashboard_name': dashboard_name,
+                'spec': spec,
+                'updated_at': datetime.utcnow().isoformat(),
+            }).execute()
+            return dashboard_id
+        except Exception as e:
+            logger.error(f"Error saving dashboard: {e}")
+            raise
+
+    def get_dashboards(self, investee_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get all dashboards, optionally filtered by investee."""
+        try:
+            q = self.supabase.table('dashboards').select('*')
+            if investee_name:
+                q = q.eq('investee_name', investee_name)
+            result = q.order('updated_at', desc=True).execute()
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Error getting dashboards: {e}")
+            return []
+
+    def get_dashboard(self, dashboard_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single dashboard by ID."""
+        try:
+            result = self.supabase.table('dashboards').select('*').eq('id', dashboard_id).single().execute()
+            return result.data if result.data else None
+        except Exception as e:
+            logger.error(f"Error getting dashboard {dashboard_id}: {e}")
+            return None
+
+    def get_reports(self, investee_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get all reports, optionally filtered by investee."""
+        try:
+            q = self.supabase.table('reports').select('*')
+            if investee_name:
+                q = q.eq('investee_name', investee_name)
+            result = q.order('created_at', desc=True).execute()
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Error getting reports: {e}")
+            return []
 
     def save_conversation_message(self, deal_id: str, role: str, content: str) -> Dict[str, Any]:
         """Save a user or assistant message for Ask Parity (deal-scoped)."""

@@ -168,18 +168,41 @@ async def create_thesis(
         result = storage.supabase.table('thesis').select('*').eq('fund_id', user_id).execute()
         existing_thesis = result.data[0] if result.data else None
         
+        # Convert to dict and only include fields that exist in the database
         thesis_dict = thesis_data.dict(exclude_none=True)
         thesis_dict['fund_id'] = user_id
         
+        # Remove fields that might not exist in database schema
+        # Keep only fields that are safe to insert/update
+        safe_fields = {
+            'fund_id': thesis_dict['fund_id'],
+            'investment_focus': thesis_dict.get('investment_focus'),
+            'sector_preferences': thesis_dict.get('sector_preferences'),
+            'geography_constraints': thesis_dict.get('geography_constraints'),
+            'stage_preferences': thesis_dict.get('stage_preferences'),
+            'min_revenue_usd': thesis_dict.get('min_revenue_usd'),
+            'kill_conditions': thesis_dict.get('kill_conditions'),
+            'governance_requirements': thesis_dict.get('governance_requirements'),
+            'financial_thresholds': thesis_dict.get('financial_thresholds'),
+            'data_confidence_tolerance': thesis_dict.get('data_confidence_tolerance'),
+            'impact_requirements': thesis_dict.get('impact_requirements'),
+            'weights': thesis_dict.get('weights'),
+            'name': thesis_dict.get('name'),
+            'is_default': thesis_dict.get('is_default', False)
+        }
+        
+        # Remove None values
+        safe_fields = {k: v for k, v in safe_fields.items() if v is not None}
+        
         if existing_thesis:
-            # Update existing thesis
-            result = storage.supabase.table('thesis').update(thesis_dict).eq('id', existing_thesis['id']).execute()
+            # Update existing thesis - only update fields that exist
+            result = storage.supabase.table('thesis').update(safe_fields).eq('id', existing_thesis['id']).execute()
             thesis = result.data[0] if result.data else existing_thesis
         else:
             # Create new thesis
-            thesis_dict['id'] = str(uuid.uuid4())
-            thesis_dict['is_default'] = True  # First thesis is default
-            result = storage.supabase.table('thesis').insert(thesis_dict).execute()
+            safe_fields['id'] = str(uuid.uuid4())
+            safe_fields['is_default'] = safe_fields.get('is_default', True)
+            result = storage.supabase.table('thesis').insert(safe_fields).execute()
             thesis = result.data[0] if result.data else None
         
         if not thesis:
@@ -190,6 +213,13 @@ async def create_thesis(
         raise
     except Exception as e:
         logger.error(f"Error creating thesis: {e}", exc_info=True)
+        # Check if it's a column error
+        error_str = str(e)
+        if 'column' in error_str.lower() and 'not found' in error_str.lower():
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Database schema error: Missing column. Please run the migration: migrations/fix_thesis_table.sql. Error: {error_str}"
+            )
         raise HTTPException(status_code=500, detail=f"Failed to create thesis: {str(e)}")
 
 @router.get("/thesis")
@@ -197,12 +227,26 @@ async def get_thesis(current_user: Any = Depends(get_current_user)):
     """Get current user's thesis"""
     try:
         storage = get_storage()  # Always returns SupabaseStorage (raises if not configured)
-        user_id = current_user.id
-        
-        result = storage.supabase.table('thesis').select('*').eq('fund_id', user_id).order('created_at', desc=True).limit(1).execute()
+        user_id = str(current_user.id) if current_user.id else None
+        if not user_id:
+            logger.warning("get_thesis: current_user.id is empty")
+            return {"thesis": None}
+
+        logger.info(f"get_thesis: fetching for fund_id={user_id}")
+        # Match fund_id (UUID in DB) - ensure string for PostgREST
+        result = storage.supabase.table('thesis').select('*').eq('fund_id', user_id).limit(1).execute()
         thesis = result.data[0] if result.data else None
-        
+        if not thesis:
+            # Fallback: try ordering by created_at if column exists
+            try:
+                result = storage.supabase.table('thesis').select('*').eq('fund_id', user_id).order('created_at', desc=True).limit(1).execute()
+                thesis = result.data[0] if result.data else None
+            except Exception:
+                pass
+        logger.info(f"get_thesis: found={thesis is not None}")
         return {"thesis": thesis}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting thesis: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get thesis: {str(e)}")
@@ -253,6 +297,9 @@ async def create_deal(
         storage = get_storage()
         user_id = current_user.id
         
+        logger.info(f"Creating deal for user_id: {user_id}")
+        logger.info(f"Deal data: company_name={company_name}, sector={sector}, geography={geography}")
+        
         deal_dict = {
             'company_name': company_name,
             'sector': sector,
@@ -261,15 +308,20 @@ async def create_deal(
             'stage': stage,
             'revenue_usd': float(revenue_usd) if revenue_usd else None,
             'id': str(uuid.uuid4()),
-            'created_by': user_id,
+            'created_by': str(user_id),  # Ensure it's a string
             'status': 'draft',
             'created_at': datetime.utcnow().isoformat()
         }
         
+        logger.info(f"Attempting to insert deal with created_by: {deal_dict['created_by']}")
+        
         deal = storage.create_deal(deal_dict)
         
         if not deal:
-            raise HTTPException(status_code=500, detail="Failed to create deal")
+            logger.error("create_deal returned None - deal was not created")
+            raise HTTPException(status_code=500, detail="Failed to create deal - storage returned None")
+        
+        logger.info(f"Deal created successfully: {deal.get('id')}")
         
         return {"deal": deal}
     except HTTPException:
@@ -279,6 +331,7 @@ async def create_deal(
         raise HTTPException(status_code=400, detail=f"Invalid input: {str(e)}")
     except Exception as e:
         logger.error(f"Error creating deal: {e}", exc_info=True)
+        logger.error(f"User ID: {current_user.id if hasattr(current_user, 'id') else 'unknown'}")
         raise HTTPException(status_code=500, detail=f"Failed to create deal: {str(e)}")
 
 @router.get("/deals")
@@ -288,14 +341,23 @@ async def list_deals(current_user: Any = Depends(get_current_user)):
         storage = get_storage()
         user_id = current_user.id
         
+        logger.info(f"Fetching deals for user_id: {user_id}")
+        
         deals = storage.get_deals_by_user(user_id)
         
-        # Sort by created_at descending
-        deals.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        logger.info(f"Found {len(deals)} deals for user {user_id}")
         
-        return {"deals": deals}
+        # Sort by created_at descending
+        if deals:
+            deals.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        
+        # Always return 200 with deals array (even if empty)
+        return {"deals": deals or []}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error listing deals: {e}", exc_info=True)
+        logger.error(f"User ID: {current_user.id if hasattr(current_user, 'id') else 'unknown'}")
         raise HTTPException(status_code=500, detail=f"Failed to list deals: {str(e)}")
 
 @router.get("/deals/{deal_id}")

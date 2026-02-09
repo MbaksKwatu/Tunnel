@@ -54,7 +54,11 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
       throw new Error('Unsupported file type. Please upload PDF, CSV, or XLSX files.');
     }
 
-    const parserUrl = process.env.NEXT_PUBLIC_API_URL;
+    const parserUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+    if (!parserUrl) {
+      throw new Error('API URL not configured. Please set NEXT_PUBLIC_API_URL environment variable.');
+    }
 
     // Local-first mode: upload directly to backend
     if (isLocalMode) {
@@ -129,32 +133,33 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
     }
 
     // Supabase mode: use existing flow
-    // Update progress: uploading
-    setUploads(prev => prev.map(u =>
-      u.fileName === file.name ? { ...u, status: 'uploading', progress: 30, error: undefined } : u
-    ));
-
-    // Upload to Supabase Storage
-    const { url } = await uploadFile(file, userId);
-
-    // Update progress: creating record
-    setUploads(prev => prev.map(u =>
-      u.fileName === file.name ? { ...u, progress: 50 } : u
-    ));
-
-    // Create document record
-    const document = await createDocument(userId, file.name, fileType, url);
-
-    // Update progress: processing
-    setUploads(prev => prev.map(u =>
-      u.fileName === file.name ? { ...u, status: 'processing', progress: 70 } : u
-    ));
-
-    // Update document status to processing
-    await updateDocumentStatus(document.id, 'processing');
-
-    // Call parser API
+    let document: any = null;
     try {
+      // Update progress: uploading
+      setUploads(prev => prev.map(u =>
+        u.fileName === file.name ? { ...u, status: 'uploading', progress: 30, error: undefined } : u
+      ));
+
+      // Upload to Supabase Storage
+      const { url } = await uploadFile(file, userId);
+
+      // Update progress: creating record
+      setUploads(prev => prev.map(u =>
+        u.fileName === file.name ? { ...u, progress: 50 } : u
+      ));
+
+      // Create document record
+      document = await createDocument(userId, file.name, fileType, url);
+
+      // Update progress: processing
+      setUploads(prev => prev.map(u =>
+        u.fileName === file.name ? { ...u, status: 'processing', progress: 70 } : u
+      ));
+
+      // Update document status to processing
+      await updateDocumentStatus(document.id, 'processing');
+
+      // Call parser API
       const response = await axios.post(`${parserUrl}/parse`, {
         document_id: document.id,
         file_url: url,
@@ -193,6 +198,23 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
       if (errorMessage !== 'PASSWORD_REQUIRED') {
         throw new Error(`Parsing failed: ${errorMessage}`);
       }
+    } catch (uploadError: any) {
+      // Handle errors from upload, createDocument, or updateDocumentStatus
+      const errorMessage = uploadError.message || 'Upload failed';
+      setUploads(prev => prev.map(u =>
+        u.fileName === file.name ? { ...u, status: 'error', error: errorMessage, progress: 0 } : u
+      ));
+      
+      // If document was created, mark it as failed
+      if (document?.id) {
+        try {
+          await updateDocumentStatus(document.id, 'failed', 0, errorMessage);
+        } catch (updateError) {
+          console.error('Failed to update document status:', updateError);
+        }
+      }
+      
+      throw uploadError;
     }
   };
 

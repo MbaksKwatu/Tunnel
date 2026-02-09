@@ -38,7 +38,7 @@ export default function AnomalyTable({ documentId, onRowClick }: AnomalyTablePro
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch(`${API_URL}/api/anomalies?doc_id=${documentId}`);
+      const response = await fetch(`${API_URL}/document/${documentId}/anomalies`);
       if (!response.ok) throw new Error('Failed to load anomalies');
       const data = await response.json();
       setAnomalies(data.anomalies || []);

@@ -649,16 +649,9 @@ async def get_document_anomalies(document_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/anomalies")
-async def get_anomalies_by_query(doc_id: str):
-    """Alias endpoint: Get anomalies by document ID via query param"""
-    return await get_document_anomalies(doc_id)
-
-
-@app.post("/api/anomalies/run")
-async def rerun_anomaly_detection(request: AnalyzeRequest):
-    """Alias endpoint: Re-run anomaly detection"""
-    return await analyze_document(request)
+# Removed duplicate endpoints:
+# - /api/anomalies -> Use /document/{id}/anomalies instead
+# - /api/anomalies/run -> Use /analyze instead
 
 
 @app.post("/api/documents/{doc_id}/detect")
@@ -987,58 +980,8 @@ async def cleanup_stuck_files(max_age_minutes: int = 30):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/report")
-async def generate_ic_report_endpoint(doc_id: str):
-    """Generate Investment Committee PDF report"""
-    try:
-        logger.info(f"Generating IC report for document {doc_id}")
-        
-        # Fetch document data
-        document = storage.get_document(doc_id)
-        if not document:
-            raise HTTPException(status_code=404, detail="Document not found")
-        
-        # Fetch anomalies
-        anomalies = storage.get_anomalies(doc_id)
-        
-        # Fetch rows (limited sample)
-        rows = storage.get_rows(doc_id, limit=10000)
-        
-        # Fetch notes
-        try:
-            notes = notes_manager.get_all_notes(doc_id).get('notes', [])
-        except:
-            notes = []
-        
-        # Generate insights
-        insights = insight_generator.generate_insights(anomalies)
-        
-        # Generate PDF report
-        report_path = report_generator.generate_report(
-            document_id=doc_id,
-            document_name=document.get('file_name', 'Unknown'),
-            insights=insights,
-            anomalies=anomalies,
-            notes=notes,
-            rows_sample=rows[:50] if rows else None
-        )
-        
-        logger.info(f"Report generated successfully: {report_path}")
-        
-        # Return file
-        return FileResponse(
-            report_path,
-            media_type='application/pdf',
-            filename=f"{document.get('file_name', 'document')}_IC_Report.pdf"
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error generating IC report: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+# Removed duplicate endpoint:
+# - /api/report -> Use /document/{id}/report instead
 
 
 # ==================== INVESTEE ENDPOINTS ====================

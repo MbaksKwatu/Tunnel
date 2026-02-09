@@ -205,7 +205,11 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
                     e.stopPropagation();
                     if (confirm(`Cancel processing for "${document.file_name}"?`)) {
                       try {
-                        const API_BASE = process.env.NEXT_PUBLIC_API_URL;
+                        const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+                        if (!API_BASE) {
+                          alert('API URL not configured');
+                          return;
+                        }
                         const response = await fetch(`${API_BASE}/document/${document.id}/cancel`, {
                           method: 'POST'
                         });
@@ -234,7 +238,11 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
                     e.stopPropagation();
                     if (confirm(`Retry processing for "${document.file_name}"?`)) {
                       try {
-                        const API_BASE = process.env.NEXT_PUBLIC_API_URL;
+                        const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+                        if (!API_BASE) {
+                          alert('API URL not configured');
+                          return;
+                        }
                         const response = await fetch(`${API_BASE}/document/${document.id}/retry`, {
                           method: 'POST'
                         });

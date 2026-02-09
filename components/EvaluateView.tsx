@@ -68,7 +68,7 @@ export default function EvaluateView({ document, rows }: EvaluateViewProps) {
   const loadAnomaliesAndComputeInsights = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${API_URL}/api/anomalies?doc_id=${document.id}`);
+      const response = await fetch(`${API_URL}/document/${document.id}/anomalies`);
 
       if (!response.ok) throw new Error('Failed to load anomalies');
 

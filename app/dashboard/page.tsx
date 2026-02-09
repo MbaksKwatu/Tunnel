@@ -44,7 +44,7 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'investees' | 'dashboards' | 'reports'>('investees');
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
   useEffect(() => {
     fetchAllData();
@@ -53,6 +53,9 @@ export default function DashboardPage() {
   const fetchAllData = async () => {
     setIsLoading(true);
     try {
+      if (!apiUrl) {
+        throw new Error('API URL not configured');
+      }
       const [investeesRes, dashboardsRes, reportsRes] = await Promise.all([
         axios.get(`${apiUrl}/investees`),
         axios.get(`${apiUrl}/dashboards`),
