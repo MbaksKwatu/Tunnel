@@ -184,28 +184,12 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
         throw new Error(response.data.error || 'Parsing failed');
       }
     } catch (error: any) {
-      // Update document status to failed
+      // Handle errors from upload, createDocument, updateDocumentStatus, or parser API
       const errorMessage = error.message === 'PASSWORD_REQUIRED'
         ? 'PASSWORD_REQUIRED'
-        : (error.response?.data?.detail || error.message || 'Unknown error');
+        : (error.response?.data?.detail || error.message || 'Upload failed');
 
-      await updateDocumentStatus(document.id, 'failed', 0, errorMessage);
-
-      setUploads(prev => prev.map(u =>
-        u.fileName === file.name ? { ...u, status: 'error', error: errorMessage, progress: 0 } : u
-      ));
-
-      if (errorMessage !== 'PASSWORD_REQUIRED') {
-        throw new Error(`Parsing failed: ${errorMessage}`);
-      }
-    } catch (uploadError: any) {
-      // Handle errors from upload, createDocument, or updateDocumentStatus
-      const errorMessage = uploadError.message || 'Upload failed';
-      setUploads(prev => prev.map(u =>
-        u.fileName === file.name ? { ...u, status: 'error', error: errorMessage, progress: 0 } : u
-      ));
-      
-      // If document was created, mark it as failed
+      // Update document status if document was created
       if (document?.id) {
         try {
           await updateDocumentStatus(document.id, 'failed', 0, errorMessage);
@@ -213,8 +197,16 @@ export default function FileUpload({ userId, onUploadComplete }: FileUploadProps
           console.error('Failed to update document status:', updateError);
         }
       }
-      
-      throw uploadError;
+
+      // Update UI state
+      setUploads(prev => prev.map(u =>
+        u.fileName === file.name ? { ...u, status: 'error', error: errorMessage, progress: 0 } : u
+      ));
+
+      // Re-throw PASSWORD_REQUIRED to trigger password modal, otherwise throw error
+      if (errorMessage !== 'PASSWORD_REQUIRED') {
+        throw new Error(`Parsing failed: ${errorMessage}`);
+      }
     }
   };
 
