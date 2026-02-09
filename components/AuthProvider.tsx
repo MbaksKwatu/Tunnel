@@ -11,6 +11,7 @@ interface AuthContextType {
   loading: boolean
   signIn: (email: string, password: string) => Promise<{ error?: any }>
   signUp: (email: string, password: string) => Promise<{ error?: any; data?: any }>
+  resetPassword: (email: string) => Promise<{ error?: any }>
   signOut: () => Promise<void>
 }
 
@@ -125,6 +126,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error, data }
   }
 
+  const resetPassword = async (email: string) => {
+    const supabase = getSupabaseClient()
+    if (!supabase) {
+      return { error: { message: 'Supabase not configured' } }
+    }
+    
+    // Get the redirect URL for password reset
+    const redirectUrl = typeof window !== 'undefined' 
+      ? `${window.location.origin}/auth/reset-password`
+      : process.env.NEXT_PUBLIC_SITE_URL 
+        ? `${process.env.NEXT_PUBLIC_SITE_URL}/auth/reset-password`
+        : '/auth/reset-password'
+    
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: redirectUrl,
+    })
+    return { error }
+  }
+
   const signOut = async () => {
     const supabase = getSupabaseClient()
     if (supabase) {
@@ -139,6 +159,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     loading,
     signIn,
     signUp,
+    resetPassword,
     signOut,
   }
 
