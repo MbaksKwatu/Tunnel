@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from './AuthProvider'
 import { useRouter } from 'next/navigation'
+import { createBrowserClient } from '@/lib/supabase'
 
 export default function Login() {
   const [isSignUp, setIsSignUp] = useState(false)
@@ -36,9 +37,23 @@ export default function Login() {
 
     try {
       if (isSignUp) {
-        const { error } = await signUp(email, password)
-        if (error) throw error
-        setMessage('Check your email to confirm your account!')
+        const result = await signUp(email, password)
+        if (result.error) throw result.error
+        
+        // Check if user needs email confirmation
+        // If session exists in result.data, user was auto-confirmed (email confirmation disabled)
+        // If no session, user needs to confirm email
+        if (result.data?.session) {
+          // User is already signed in (email confirmation disabled)
+          setMessage('Account created successfully! Redirecting...')
+          // AuthProvider will handle redirect via onAuthStateChange
+        } else if (result.data?.user && !result.data?.session) {
+          // User created but needs email confirmation
+          setMessage('Check your email to confirm your account! The confirmation link will expire in 1 hour. Check your spam folder if you don\'t see it.')
+        } else {
+          // Fallback message
+          setMessage('Account created! Check your email to confirm your account.')
+        }
       } else {
         const { error } = await signIn(email, password)
         if (error) throw error

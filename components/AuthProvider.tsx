@@ -10,7 +10,7 @@ interface AuthContextType {
   session: Session | null
   loading: boolean
   signIn: (email: string, password: string) => Promise<{ error?: any }>
-  signUp: (email: string, password: string) => Promise<{ error?: any }>
+  signUp: (email: string, password: string) => Promise<{ error?: any; data?: any }>
   signOut: () => Promise<void>
 }
 
@@ -120,7 +120,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         emailRedirectTo: redirectUrl,
       }
     })
-    return { error }
+    
+    // Return both error and data so we can check if session exists
+    return { error, data }
   }
 
   const signOut = async () => {
