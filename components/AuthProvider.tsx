@@ -58,16 +58,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Handle events
         if (event === 'SIGNED_IN') {
           // Check if user needs onboarding
-          const { data: thesis } = await supabase
-            .from('thesis')
-            .select('id')
-            .eq('fund_id', session?.user?.id)
-            .single()
-          
-          if (!thesis) {
+          try {
+            const { data: thesis, error } = await supabase
+              .from('thesis')
+              .select('id')
+              .eq('fund_id', session?.user?.id)
+              .single()
+            
+            if (error || !thesis) {
+              router.push('/onboarding/thesis')
+            } else {
+              router.push('/deals')
+            }
+          } catch (error) {
+            console.warn('Failed to check thesis:', error)
+            // On error, default to onboarding to be safe
             router.push('/onboarding/thesis')
-          } else {
-            router.push('/deals')
           }
         }
         
@@ -99,11 +105,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!supabase) {
       return { error: { message: 'Supabase not configured' } }
     }
+    
+    // Get the redirect URL - use production URL if available, otherwise use current origin
+    const redirectUrl = typeof window !== 'undefined' 
+      ? `${window.location.origin}/auth/callback`
+      : process.env.NEXT_PUBLIC_SITE_URL 
+        ? `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
+        : '/auth/callback'
+    
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: redirectUrl,
       }
     })
     return { error }

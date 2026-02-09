@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from './AuthProvider'
 import { useRouter } from 'next/navigation'
 
@@ -14,6 +14,19 @@ export default function Login() {
   
   const { signIn, signUp } = useAuth()
   const router = useRouter()
+
+  // Check for error in URL (from auth callback)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const errorParam = params.get('error')
+      if (errorParam) {
+        setError(decodeURIComponent(errorParam))
+        // Clean up URL
+        window.history.replaceState({}, '', '/login')
+      }
+    }
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
