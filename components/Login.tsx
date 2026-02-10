@@ -5,10 +5,13 @@ import { useAuth } from './AuthProvider'
 import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@/lib/supabase'
 
+const isDemoMode = process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
+const demoEmail = process.env.NEXT_PUBLIC_DEMO_EMAIL || ''
+
 export default function Login() {
   const [isSignUp, setIsSignUp] = useState(false)
   const [showForgotPassword, setShowForgotPassword] = useState(false)
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState(isDemoMode ? demoEmail : '')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -48,7 +51,7 @@ export default function Login() {
         if (error) throw error
         setMessage('Check your email for a password reset link! The link will expire in 1 hour.')
         setShowForgotPassword(false)
-      } else if (isSignUp) {
+      } else if (isSignUp && !isDemoMode) {
         const result = await signUp(email, password)
         if (result.error) throw result.error
         
@@ -87,14 +90,16 @@ export default function Login() {
             <span className="text-white font-bold text-3xl">P</span>
           </div>
           <h1 className="text-3xl font-bold text-white mb-2">
-            {showForgotPassword ? 'Reset Password' : isSignUp ? 'Create Account' : 'Welcome Back'}
+            {showForgotPassword ? 'Reset Password' : isSignUp && !isDemoMode ? 'Create Account' : 'Welcome Back'}
           </h1>
           <p className="text-gray-400">
             {showForgotPassword
               ? 'Enter your email to receive a password reset link'
-              : isSignUp 
-                ? 'Sign up to start assessing deals' 
-                : 'Sign in to continue to Parity'
+              : isDemoMode
+                ? `Demo: sign in with ${demoEmail || 'the demo account'}`
+                : isSignUp
+                  ? 'Sign up to start assessing deals'
+                  : 'Sign in to continue to Parity'
             }
           </p>
         </div>
@@ -123,8 +128,9 @@ export default function Login() {
               id="email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => !isDemoMode && setEmail(e.target.value)}
               required
+              readOnly={isDemoMode}
               className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
               placeholder="you@example.com"
             />
@@ -201,7 +207,7 @@ export default function Login() {
             >
               Back to sign in
             </button>
-          ) : (
+          ) : !isDemoMode ? (
             <button
               type="button"
               onClick={() => {
@@ -213,7 +219,7 @@ export default function Login() {
             >
               {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
             </button>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

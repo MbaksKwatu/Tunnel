@@ -4,16 +4,15 @@ import { API_URL } from '@/lib/api';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-// Single Supabase client for the browser (avoids Multiple GoTrueClient and AbortErrors)
-let _browserClient: SupabaseClient | null = null
-
+// Single Supabase client for the browser (guards against multiple GoTrue clients, even across HMR)
+const globalForSupabase = globalThis as typeof globalThis & { __supabaseBrowserClient?: SupabaseClient }
 export const createBrowserClient = (): SupabaseClient | null => {
-  if (_browserClient) return _browserClient
+  if (globalForSupabase.__supabaseBrowserClient) return globalForSupabase.__supabaseBrowserClient
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   if (!url || !key) return null
-  _browserClient = createClient(url, key)
-  return _browserClient
+  globalForSupabase.__supabaseBrowserClient = createClient(url, key)
+  return globalForSupabase.__supabaseBrowserClient
 }
 
 // For server components

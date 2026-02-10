@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import AppLayout from '@/components/Layout/AppLayout';
 import FeatureCard from '@/components/FeatureCard';
 import FileUpload from '@/components/FileUpload';
@@ -10,26 +10,15 @@ import DataReview from '@/components/DataReview';
 import { Upload, Database, Link as LinkIcon, FileText, Zap } from 'lucide-react';
 import { Document } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
-import { v4 as uuidv4 } from 'uuid';
+import { useAuth } from '@/components/AuthProvider';
+import ProtectedRoute from '@/components/ProtectedRoute';
 
 export default function ConnectDataPage() {
   const router = useRouter();
-  const [userId, setUserId] = useState<string | null>(null);
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
-
-  useEffect(() => {
-    const existing = typeof window !== 'undefined' ? localStorage.getItem('parity_user_id') : null;
-    if (existing) {
-      setUserId(existing);
-      return;
-    }
-    const generated = uuidv4();
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('parity_user_id', generated);
-    }
-    setUserId(generated);
-  }, []);
 
   const handleUploadComplete = () => {
     setRefreshTrigger(prev => prev + 1);
@@ -44,8 +33,9 @@ export default function ConnectDataPage() {
   };
 
   return (
-    <AppLayout>
-      <motion.div
+    <ProtectedRoute>
+      <AppLayout>
+        <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
@@ -140,7 +130,8 @@ export default function ConnectDataPage() {
       {selectedDocument && (
         <DataReview document={selectedDocument} onClose={handleCloseReview} />
       )}
-    </AppLayout>
+      </AppLayout>
+    </ProtectedRoute>
   );
 }
 

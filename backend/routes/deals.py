@@ -840,8 +840,12 @@ async def ask_parity(
         kill_explanation = ""
         missing_list = "—"
 
-    # 4. Thesis (or "Not set")
-    thesis_rows = storage.supabase.table("thesis").select("*").eq("fund_id", user_id).order("created_at", desc=True).limit(1).execute()
+    # 4. Thesis (or "Not set") — guard against missing created_at column
+    try:
+        thesis_rows = storage.supabase.table("thesis").select("*").eq("fund_id", user_id).order("created_at", desc=True).limit(1).execute()
+    except Exception as e:
+        logger.warning(f"Thesis query without created_at ordering (fallback). Error: {e}")
+        thesis_rows = storage.supabase.table("thesis").select("*").eq("fund_id", user_id).limit(1).execute()
     thesis = thesis_rows.data[0] if thesis_rows.data else None
     investment_focus = (thesis.get("investment_focus") or "Not set") if thesis else "Not set"
     min_revenue = thesis.get("min_revenue_usd") if thesis else None

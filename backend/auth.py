@@ -31,7 +31,19 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
                 detail="Invalid authentication credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        return user.user
+        auth_user = user.user
+        # Demo mode: only allow the configured demo account
+        if os.environ.get("DEMO_MODE", "").lower() in ("true", "1", "yes"):
+            allowed = (os.environ.get("DEMO_ALLOWED_EMAIL") or "").strip().lower()
+            user_email = (getattr(auth_user, "email", None) or "").strip().lower()
+            if allowed and user_email != allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Demo mode: only the configured demo account is allowed",
+                )
+        return auth_user
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
