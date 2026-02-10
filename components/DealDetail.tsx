@@ -6,6 +6,13 @@ import { Upload, FileText, CheckCircle, Clock, AlertCircle, Play, ArrowLeft, Tra
 import JudgmentCards from './JudgmentCards'
 import AskParityChat from './AskParityChat'
 import { fetchApi } from '@/lib/api'
+const ingest = (payload: Record<string, any>) => {
+  fetch('http://127.0.0.1:7242/ingest/c06d0fd1-c297-47eb-9e68-2482808d33d7', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).catch(() => {})
+}
 
 interface Deal {
   id: string
@@ -73,32 +80,103 @@ export default function DealDetail({ dealId }: { dealId: string }) {
     fetchDealData()
   }, [dealId])
 
+  const safeJson = async (res: Response) => {
+    try {
+      return await res.json()
+    } catch (err) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`Failed to parse response (${res.status}) ${text}`)
+    }
+  }
+
+  const normalizeDeal = (d: any): Deal => ({
+    id: d?.id ?? '',
+    company_name: d?.company_name ?? 'Unknown',
+    sector: d?.sector ?? 'unknown',
+    geography: d?.geography ?? 'unknown',
+    deal_type: d?.deal_type ?? 'unknown',
+    stage: d?.stage ?? 'unknown',
+    revenue_usd: typeof d?.revenue_usd === 'number' ? d.revenue_usd : undefined,
+    status: d?.status ?? 'draft',
+    created_at: d?.created_at ?? '',
+    updated_at: d?.updated_at ?? d?.created_at ?? ''
+  })
+
+  const normalizeEvidence = (list: any[]): Evidence[] =>
+    (list || []).map((ev) => ({
+      id: ev?.id ?? '',
+      deal_id: ev?.deal_id ?? '',
+      file_name: ev?.file_name ?? ev?.original_name ?? 'unknown',
+      file_type: ev?.file_type ?? '',
+      evidence_type: ev?.evidence_type ?? 'document',
+      upload_date: ev?.upload_date ?? ev?.uploaded_at ?? ev?.created_at ?? '',
+      extracted_data: ev?.extracted_data,
+      // keep compatibility with possible subtype fields
+      // evidence_subtype is not used in render; ignore if absent
+    }))
+
   const fetchDealData = async () => {
     setLoading(true)
     setError('')
     
     try {
+      ingest({ location: 'components/DealDetail.tsx:fetchDealData', message: 'start', data: { dealId }, runId: 'deal-detail-debug', timestamp: Date.now() })
+
       const dealResponse = await fetchApi(`/api/deals/${dealId}`)
-      if (!dealResponse.ok) throw new Error('Failed to load deal')
-      const dealData = await dealResponse.json()
-      setDeal(dealData.deal || dealData)
+      console.log('[DealDetail] deal fetch status', dealResponse.status)
+      if (!dealResponse.ok) {
+        const text = await dealResponse.text().catch(() => '')
+        ingest({ location: 'components/DealDetail.tsx:fetchDealData', message: 'deal_fetch_failed', data: { dealId, status: dealResponse.status, body: text }, runId: 'deal-detail-debug', timestamp: Date.now() })
+        throw new Error('Failed to load deal')
+      }
+      const dealData = await safeJson(dealResponse)
+      const rawDeal = dealData.deal || dealData
+      setDeal(normalizeDeal(rawDeal))
+      ingest({ location: 'components/DealDetail.tsx:fetchDealData', message: 'deal_loaded', data: { dealId, deal: dealData?.deal || dealData }, runId: 'deal-detail-debug', timestamp: Date.now() })
+      console.log('[DealDetail] deal data', dealData)
 
       const evidenceResponse = await fetchApi(`/api/deals/${dealId}/evidence`)
+      console.log('[DealDetail] evidence fetch status', evidenceResponse.status)
       if (evidenceResponse.ok) {
-        const evidenceData = await evidenceResponse.json()
-        setEvidence(evidenceData.evidence || evidenceData || [])
+        const evidenceData = await safeJson(evidenceResponse)
+        setEvidence(normalizeEvidence(evidenceData.evidence || evidenceData || []))
+        ingest({ location: 'components/DealDetail.tsx:fetchDealData', message: 'evidence_loaded', data: { dealId, count: (evidenceData?.evidence || evidenceData || []).length || 0 }, runId: 'deal-detail-debug', timestamp: Date.now() })
+        console.log('[DealDetail] evidence data', evidenceData)
+      } else {
+        const text = await evidenceResponse.text().catch(() => '')
+        ingest({ location: 'components/DealDetail.tsx:fetchDealData', message: 'evidence_fetch_failed', data: { dealId, status: evidenceResponse.status, body: text }, runId: 'deal-detail-debug', timestamp: Date.now() })
       }
 
       const judgmentResponse = await fetchApi(`/api/deals/${dealId}/judgment`)
+      console.log('[DealDetail] judgment fetch status', judgmentResponse.status)
       if (judgmentResponse.ok) {
-        const judgmentData = await judgmentResponse.json()
+        const judgmentData = await safeJson(judgmentResponse)
         setJudgment(judgmentData.judgment || judgmentData)
+        ingest({ location: 'components/DealDetail.tsx:fetchDealData', message: 'judgment_loaded', data: { dealId, hasJudgment: !!(judgmentData?.judgment || judgmentData) }, runId: 'deal-detail-debug', timestamp: Date.now() })
+        console.log('[DealDetail] judgment data', judgmentData)
+      } else {
+        const text = await judgmentResponse.text().catch(() => '')
+        ingest({ location: 'components/DealDetail.tsx:fetchDealData', message: 'judgment_fetch_failed', data: { dealId, status: judgmentResponse.status, body: text }, runId: 'deal-detail-debug', timestamp: Date.now() })
       }
     } catch (err: any) {
       setError(err.message)
+      console.error('[DealDetail] fetch error', err)
+      ingest({ location: 'components/DealDetail.tsx:fetchDealData', message: 'error', data: { dealId, error: err?.message || String(err) }, runId: 'deal-detail-debug', timestamp: Date.now() })
     } finally {
       setLoading(false)
     }
+  }
+
+  const safeDate = (value?: string) => {
+    if (!value) return 'N/A'
+    const d = new Date(value)
+    return isNaN(d.getTime()) ? 'N/A' : d.toLocaleDateString()
+  }
+
+  const safeDateTime = (value?: string) => {
+    if (!value) return 'N/A'
+    const d = new Date(value)
+    return isNaN(d.getTime()) ? 'N/A' : d.toLocaleString()
   }
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -324,7 +402,7 @@ export default function DealDetail({ dealId }: { dealId: string }) {
                         <div>
                           <p className="text-white font-medium">{item.file_name}</p>
                           <p className="text-sm text-gray-400">
-                            {item.evidence_type} • {new Date(item.upload_date).toLocaleDateString()}
+                            {item.evidence_type} • {safeDate(item.upload_date)}
                           </p>
                         </div>
                       </div>
@@ -377,7 +455,7 @@ export default function DealDetail({ dealId }: { dealId: string }) {
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-xl font-bold text-white">Judgment Results</h2>
                   <span className="text-xs text-gray-400">
-                    {new Date(judgment.created_at).toLocaleString()}
+                    {safeDateTime(judgment.created_at)}
                   </span>
                 </div>
                 <JudgmentCards judgment={judgment} onRerun={handleRunJudgment} />

@@ -7,6 +7,13 @@ import { createBrowserClient } from '@/lib/supabase'
 
 const isDemoMode = process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
 const demoEmail = process.env.NEXT_PUBLIC_DEMO_EMAIL || ''
+const ingest = (payload: Record<string, any>) => {
+  fetch('http://127.0.0.1:7242/ingest/c06d0fd1-c297-47eb-9e68-2482808d33d7', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).catch(() => {})
+}
 
 export default function Login() {
   const [isSignUp, setIsSignUp] = useState(false)
@@ -39,7 +46,14 @@ export default function Login() {
     setError('')
     setMessage('')
 
+    const timeoutMs = 20000
+    const timeoutId = setTimeout(() => {
+      setError('Sign-in is taking too long. Check your network and that Supabase URL/keys are set correctly in this environment.')
+      setLoading(false)
+    }, timeoutMs)
+
     try {
+      ingest({ location: 'components/Login.tsx:handleSubmit', message: 'auth_submit_start', data: { email, isSignUp, showForgotPassword }, runId: 'auth-debug', timestamp: Date.now() })
       if (showForgotPassword) {
         // Handle password reset
         if (!email) {
@@ -49,34 +63,45 @@ export default function Login() {
         }
         const { error } = await resetPassword(email)
         if (error) throw error
+        clearTimeout(timeoutId)
         setMessage('Check your email for a password reset link! The link will expire in 1 hour.')
         setShowForgotPassword(false)
       } else if (isSignUp && !isDemoMode) {
         const result = await signUp(email, password)
         if (result.error) throw result.error
+        ingest({ location: 'components/Login.tsx:handleSubmit', message: 'auth_signup_success', data: { email }, runId: 'auth-debug', timestamp: Date.now() })
         
         // Check if user needs email confirmation
         // If session exists in result.data, user was auto-confirmed (email confirmation disabled)
         // If no session, user needs to confirm email
         if (result.data?.session) {
-          // User is already signed in (email confirmation disabled)
+          clearTimeout(timeoutId)
           setMessage('Account created successfully! Redirecting...')
           // AuthProvider will handle redirect via onAuthStateChange
         } else if (result.data?.user && !result.data?.session) {
-          // User created but needs email confirmation
+          clearTimeout(timeoutId)
           setMessage('Check your email to confirm your account! The confirmation link will expire in 1 hour. Check your spam folder if you don\'t see it.')
         } else {
-          // Fallback message
+          clearTimeout(timeoutId)
           setMessage('Account created! Check your email to confirm your account.')
         }
       } else {
         const { error } = await signIn(email, password)
         if (error) throw error
+        clearTimeout(timeoutId)
         // AuthProvider will handle redirect
+        ingest({ location: 'components/Login.tsx:handleSubmit', message: 'auth_signin_success', data: { email }, runId: 'auth-debug', timestamp: Date.now() })
       }
     } catch (err: any) {
-      setError(err.message || 'Authentication failed')
+      clearTimeout(timeoutId)
+      const msg = err?.message || 'Authentication failed'
+      setError(msg)
+      if (msg.includes('Invalid login') || msg.includes('invalid') || msg.toLowerCase().includes('credentials')) {
+        setError('Invalid email or password. Please try again.')
+      }
+      ingest({ location: 'components/Login.tsx:handleSubmit', message: 'auth_error', data: { email, error: msg }, runId: 'auth-debug', timestamp: Date.now() })
     } finally {
+      clearTimeout(timeoutId)
       setLoading(false)
     }
   }

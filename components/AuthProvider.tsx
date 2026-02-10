@@ -6,6 +6,14 @@ import { createBrowserClient } from '@/lib/supabase'
 import { setApiToken } from '@/lib/auth-bridge'
 import { useRouter } from 'next/navigation'
 
+const ingest = (payload: Record<string, any>) => {
+  fetch('http://127.0.0.1:7242/ingest/c06d0fd1-c297-47eb-9e68-2482808d33d7', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).catch(() => {})
+}
+
 interface AuthContextType {
   user: User | null
   session: Session | null
@@ -39,13 +47,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Get initial session and keep API token in sync so fetchApi always has it
     const getInitialSession = async () => {
       try {
+        ingest({ location: 'components/AuthProvider.tsx:getInitialSession', message: 'start', data: {}, runId: 'auth-debug', timestamp: Date.now() })
         const { data: { session } } = await supabase.auth.getSession()
         setSession(session)
         setUser(session?.user ?? null)
         setApiToken(session?.access_token ?? null)
+        ingest({ location: 'components/AuthProvider.tsx:getInitialSession', message: 'success', data: { hasSession: !!session, userId: session?.user?.id || null }, runId: 'auth-debug', timestamp: Date.now() })
       } catch (error) {
         console.warn('Failed to get session:', error)
         setApiToken(null)
+        ingest({ location: 'components/AuthProvider.tsx:getInitialSession', message: 'error', data: { error: (error as any)?.message || String(error) }, runId: 'auth-debug', timestamp: Date.now() })
       } finally {
         setLoading(false)
       }
@@ -59,6 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSession(session)
         setUser(session?.user ?? null)
         setApiToken(session?.access_token ?? null)
+        ingest({ location: 'components/AuthProvider.tsx:onAuthStateChange', message: 'auth_event', data: { event, hasSession: !!session, userId: session?.user?.id || null }, runId: 'auth-debug', timestamp: Date.now() })
         if (event === 'SIGNED_IN') {
           // Check if user needs onboarding
           try {
@@ -96,10 +108,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!supabase) {
       return { error: { message: 'Supabase not configured' } }
     }
+    ingest({ location: 'components/AuthProvider.tsx:signIn', message: 'start', data: { email }, runId: 'auth-debug', timestamp: Date.now() })
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     })
+    ingest({ location: 'components/AuthProvider.tsx:signIn', message: error ? 'error' : 'success', data: { email, hasSession: !!data?.session }, runId: 'auth-debug', timestamp: Date.now() })
     return { error }
   }
 

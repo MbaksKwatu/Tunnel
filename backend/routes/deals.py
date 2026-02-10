@@ -12,6 +12,7 @@ import logging
 from datetime import datetime
 
 from auth import get_current_user
+import json
 from local_storage import get_storage  # Returns SupabaseStorage only
 from judgment_engine import JudgmentEngine
 from parsers import get_parser, PasswordRequiredError
@@ -20,6 +21,23 @@ from insight_generator import InsightGenerator
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# ================ DEBUG LOG HELPER (temporary) =================
+DEBUG_LOG_PATH = "/Users/mbakswatu/Desktop/Fintelligence/.cursor/debug.log"
+
+def debug_log(location: str, message: str, data: Dict[str, Any], run_id: str):
+    try:
+        with open(DEBUG_LOG_PATH, "a") as _f:
+            _f.write(json.dumps({
+                "id": f"log_{datetime.utcnow().timestamp()}",
+                "timestamp": datetime.utcnow().isoformat(),
+                "location": location,
+                "message": message,
+                "data": data,
+                "runId": run_id
+            }) + "\n")
+    except Exception:
+        pass
 
 # Initialize judgment engine
 judgment_engine = JudgmentEngine()
@@ -163,6 +181,7 @@ async def create_thesis(
     try:
         storage = get_storage()  # Always returns SupabaseStorage (raises if not configured)
         user_id = current_user.id
+        debug_log("deals.py:create_thesis", "start", {"user_id": user_id}, "api-health")
         
         # Check if user already has a thesis
         result = storage.supabase.table('thesis').select('*').eq('fund_id', user_id).execute()
@@ -208,11 +227,14 @@ async def create_thesis(
         if not thesis:
             raise HTTPException(status_code=500, detail="Failed to save thesis")
         
+        debug_log("deals.py:create_thesis", "success", {"user_id": user_id, "thesis_id": thesis.get("id") if thesis else None}, "api-health")
         return {"thesis": thesis}
     except HTTPException:
+        debug_log("deals.py:create_thesis", "error_http", {"detail": "http_exception"}, "api-health")
         raise
     except Exception as e:
         logger.error(f"Error creating thesis: {e}", exc_info=True)
+        debug_log("deals.py:create_thesis", "error", {"error": str(e)}, "api-health")
         # Check if it's a column error
         error_str = str(e)
         if 'column' in error_str.lower() and 'not found' in error_str.lower():
@@ -233,6 +255,7 @@ async def get_thesis(current_user: Any = Depends(get_current_user)):
             return {"thesis": None}
 
         logger.info(f"get_thesis: fetching for fund_id={user_id}")
+        debug_log("deals.py:get_thesis", "start", {"user_id": user_id}, "api-health")
         # Match fund_id (UUID in DB) - ensure string for PostgREST
         result = storage.supabase.table('thesis').select('*').eq('fund_id', user_id).limit(1).execute()
         thesis = result.data[0] if result.data else None
@@ -244,11 +267,13 @@ async def get_thesis(current_user: Any = Depends(get_current_user)):
             except Exception:
                 pass
         logger.info(f"get_thesis: found={thesis is not None}")
+        debug_log("deals.py:get_thesis", "success", {"user_id": user_id, "has_thesis": thesis is not None}, "api-health")
         return {"thesis": thesis}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting thesis: {e}", exc_info=True)
+        debug_log("deals.py:get_thesis", "error", {"error": str(e)}, "api-health")
         raise HTTPException(status_code=500, detail=f"Failed to get thesis: {str(e)}")
 
 @router.put("/thesis")
