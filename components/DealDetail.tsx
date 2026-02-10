@@ -115,6 +115,29 @@ export default function DealDetail({ dealId }: { dealId: string }) {
       // evidence_subtype is not used in render; ignore if absent
     }))
 
+  const normalizeJudgment = (j: any): Judgment => ({
+    investment_readiness: j?.investment_readiness ?? 'NOT_READY',
+    thesis_alignment: j?.thesis_alignment ?? 'MISALIGNED',
+    kill_signals: j?.kill_signals ?? { type: 'NONE', reason: '', detail: '' },
+    confidence_level: j?.confidence_level ?? 'LOW',
+    dimension_scores: {
+      financial: j?.dimension_scores?.financial ?? 0,
+      governance: j?.dimension_scores?.governance ?? 0,
+      market: j?.dimension_scores?.market ?? 0,
+      team: j?.dimension_scores?.team ?? 0,
+      product: j?.dimension_scores?.product ?? 0,
+      data_confidence: j?.dimension_scores?.data_confidence ?? 0,
+    },
+    explanations: {
+      investment_readiness: j?.explanations?.investment_readiness ?? 'No explanation provided.',
+      thesis_alignment: j?.explanations?.thesis_alignment ?? 'No explanation provided.',
+      kill_signals: j?.explanations?.kill_signals ?? 'No kill signal explanation provided.',
+      confidence_level: j?.explanations?.confidence_level ?? 'No confidence explanation provided.',
+    },
+    missing_evidence: j?.missing_evidence ?? j?.suggested_missing ?? [],
+    created_at: j?.created_at ?? ''
+  })
+
   const fetchDealData = async () => {
     setLoading(true)
     setError('')
@@ -151,8 +174,9 @@ export default function DealDetail({ dealId }: { dealId: string }) {
       console.log('[DealDetail] judgment fetch status', judgmentResponse.status)
       if (judgmentResponse.ok) {
         const judgmentData = await safeJson(judgmentResponse)
-        setJudgment(judgmentData.judgment || judgmentData)
-        ingest({ location: 'components/DealDetail.tsx:fetchDealData', message: 'judgment_loaded', data: { dealId, hasJudgment: !!(judgmentData?.judgment || judgmentData) }, runId: 'deal-detail-debug', timestamp: Date.now() })
+        const rawJudgment = judgmentData.judgment || judgmentData
+        setJudgment(rawJudgment ? normalizeJudgment(rawJudgment) : null)
+        ingest({ location: 'components/DealDetail.tsx:fetchDealData', message: 'judgment_loaded', data: { dealId, hasJudgment: !!rawJudgment }, runId: 'deal-detail-debug', timestamp: Date.now() })
         console.log('[DealDetail] judgment data', judgmentData)
       } else {
         const text = await judgmentResponse.text().catch(() => '')
