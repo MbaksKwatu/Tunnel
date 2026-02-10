@@ -523,6 +523,20 @@ class JudgmentEngine:
                 return True
         return False
 
+    def _has_team_bios(self, evidence: List[Dict[str, Any]]) -> bool:
+        for e in evidence:
+            data = e.extracted_data or {}
+            if e.evidence_type == "team" and (data.get("team_bios") is True or data.get("subtype") == "team_bios"):
+                return True
+        return False
+
+    def _has_org_chart(self, evidence: List[Dict[str, Any]]) -> bool:
+        for e in evidence:
+            data = e.extracted_data or {}
+            if e.evidence_type == "team" and (data.get("org_chart") is True or data.get("subtype") == "org_chart"):
+                return True
+        return False
+
     def _check_family_ownership(self, evidence: List[Dict[str, Any]]) -> bool:
         for e in evidence:
             if e.evidence_type == "governance":
