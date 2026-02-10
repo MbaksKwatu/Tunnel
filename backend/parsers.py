@@ -450,13 +450,18 @@ class ExcelParser(FileParser):
 
 def get_parser(file_type: str):
     """Get the appropriate parser for the file type"""
+    normalized_type = file_type.lower()
+    # Treat legacy .xls as .xlsx for parsing purposes
+    if normalized_type == "xls":
+        normalized_type = "xlsx"
+
     parsers = {
         'pdf': PDFParser,
         'csv': CSVParser,
         'xlsx': ExcelParser,
     }
     
-    parser = parsers.get(file_type.lower())
+    parser = parsers.get(normalized_type)
     if not parser:
         raise ValueError(f"Unsupported file type: {file_type}")
     

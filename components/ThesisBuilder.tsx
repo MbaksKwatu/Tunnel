@@ -17,11 +17,10 @@ interface ThesisData {
   data_confidence_tolerance: string
   impact_requirements: string[]
   weights: {
-    financial: number
+    cashflow: number
     governance: number
-    market: number
     team: number
-    product: number
+    market: number
   }
   name: string
   is_default: boolean
@@ -45,7 +44,8 @@ export default function ThesisBuilder({ onSubmit, initialData, loading = false }
     financial_thresholds: {},
     data_confidence_tolerance: 'medium',
     impact_requirements: [],
-    weights: { financial: 40, governance: 15, market: 15, team: 15, product: 15 },
+    // Phase 1 default scorecard weights: cashflow/governance/team/market = 40/20/20/20
+    weights: { cashflow: 40, governance: 20, team: 20, market: 20 },
     name: 'Default Thesis',
     is_default: true
   })
@@ -55,17 +55,20 @@ export default function ThesisBuilder({ onSubmit, initialData, loading = false }
     if (formData.investment_focus === 'debt') {
       setFormData(prev => ({
         ...prev,
-        weights: { financial: 40, governance: 15, market: 15, team: 15, product: 15 }
+        // Debt: emphasise cashflow but keep overall 100%
+        weights: { cashflow: 40, governance: 20, team: 20, market: 20 }
       }))
     } else if (formData.investment_focus === 'equity') {
       setFormData(prev => ({
         ...prev,
-        weights: { financial: 20, governance: 10, market: 30, team: 30, product: 10 }
+        // Equity: tilt towards team/market while keeping 4-dim scorecard
+        weights: { cashflow: 20, governance: 20, team: 30, market: 30 }
       }))
     } else if (formData.investment_focus === 'venture_debt') {
       setFormData(prev => ({
         ...prev,
-        weights: { financial: 25, governance: 10, market: 25, team: 30, product: 10 }
+        // Venture debt: balance between cashflow and team/market
+        weights: { cashflow: 30, governance: 20, team: 25, market: 25 }
       }))
     }
   }, [formData.investment_focus])

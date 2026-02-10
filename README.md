@@ -153,6 +153,30 @@ GET  /documents/{id}/rows       # Get extracted rows
 DELETE /documents/{id}          # Delete document
 ```
 
+### Parity SME APIs (Phase 1)
+These routes power the thesis, evidence, and judgment flows described in the Parity MVP plan.
+
+```
+POST /api/thesis                # Create/update current user's thesis
+GET  /api/thesis                # Fetch current user's thesis
+PUT  /api/thesis                # Update thesis fields
+
+POST /api/deals                 # Create a deal
+GET  /api/deals                 # List deals for current user
+GET  /api/deals/{deal_id}       # Get deal details
+DELETE /api/deals/{deal_id}     # Delete a deal
+
+POST /api/deals/{deal_id}/evidence      # Upload PDF/CSV/Excel evidence for a deal
+GET  /api/deals/{deal_id}/evidence      # List normalized evidence for a deal
+
+POST /api/deals/{deal_id}/judge         # Run judgment engine for a deal
+GET  /api/deals/{deal_id}/judgment      # Fetch latest judgment (narrative, scorecard, follow‑ups)
+
+POST /api/v1/thesis                      # v1 alias for thesis creation
+POST /api/v1/evidence/upload             # v1 unified evidence upload (file or URL → normalized evidence)
+POST /api/v1/parity/judge                # v1 alias for judgment engine
+```
+
 ### Demo Backend (SQLite)
 ```
 GET  /health                    # Health check

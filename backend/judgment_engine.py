@@ -241,12 +241,52 @@ class JudgmentEngine:
         return max(0.0, min(total * 100.0, 100.0))
 
     def calculate_alignment(self, dimension_scores: Dict[str, float], thesis: Dict[str, Any]) -> float:
-        weights = thesis.weights if isinstance(thesis.weights, dict) else self.default_weights()
-        s = sum(float(v) for v in weights.values()) or 1.0
-        weights = {k: float(v) / s for k, v in weights.items()}
+        """
+        Calculate thesis alignment using thesis-level weights.
+
+        Thesis weights are stored on the thesis row and can be expressed either in:
+        - Scorecard dimensions: cashflow / governance / team / market (40/20/20/20 default)
+        - Internal engine dimensions: financial / governance / market / team / product / data_confidence
+
+        For Phase 1, we primarily expect scorecard-style weights on the thesis:
+        cashflow, governance, team, market. Here we map those to the internal
+        dimension names so the judgment engine can still work off the same
+        dimension_scores structure.
+        """
+        raw_weights = thesis.weights if isinstance(thesis.weights, dict) else self.default_weights()
+
+        # Map thesis weight keys onto internal dimension keys
+        key_to_dimension = {
+            "cashflow": "financial",   # scorecard cashflow → financial dimension
+            "financial": "financial",
+            "governance": "governance",
+            "team": "team",
+            "market": "market",
+            "product": "product",
+            "data_confidence": "data_confidence",
+        }
+
+        dimension_weights: Dict[str, float] = {}
+        for key, value in raw_weights.items():
+            dim = key_to_dimension.get(str(key))
+            if not dim:
+                continue
+            try:
+                v = float(value)
+            except (TypeError, ValueError):
+                continue
+            dimension_weights[dim] = dimension_weights.get(dim, 0.0) + v
+
+        if not dimension_weights:
+            dimension_weights = self.default_weights()
+
+        s = sum(float(v) for v in dimension_weights.values()) or 1.0
+        normalized_weights = {k: float(v) / s for k, v in dimension_weights.items()}
+
         total = 0.0
-        for k, w in weights.items():
-            total += (dimension_scores.get(k, 0.0) / 100.0) * w
+        for dim, w in normalized_weights.items():
+            total += (dimension_scores.get(dim, 0.0) / 100.0) * w
+
         return max(0.0, min(total * 100.0, 100.0))
 
     def calculate_confidence(self, confidence_score: float) -> str:

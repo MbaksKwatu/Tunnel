@@ -10,6 +10,8 @@ import os
 import uuid
 import logging
 from datetime import datetime
+import re
+from urllib.parse import urlparse
 
 from auth import get_current_user
 import json
@@ -77,6 +79,7 @@ class ThesisCreate(BaseModel):
     data_confidence_tolerance: Optional[str] = None
     impact_requirements: Optional[List[str]] = None
     weights: Optional[Dict[str, float]] = None
+    judgment_mode: Optional[str] = None
     name: Optional[str] = None
     is_default: Optional[bool] = False
 
@@ -92,8 +95,13 @@ class ThesisUpdate(BaseModel):
     data_confidence_tolerance: Optional[str] = None
     impact_requirements: Optional[List[str]] = None
     weights: Optional[Dict[str, float]] = None
+    judgment_mode: Optional[str] = None
     name: Optional[str] = None
     is_default: Optional[bool] = None
+
+
+class JudgeRequest(BaseModel):
+    deal_id: str
 
 class AskRequest(BaseModel):
     message: str
@@ -158,6 +166,7 @@ def dict_to_thesis(thesis_dict: Dict[str, Any]) -> Any:
             self.data_confidence_tolerance = data.get('data_confidence_tolerance')
             self.impact_requirements = data.get('impact_requirements')
             self.weights = data.get('weights')
+            self.judgment_mode = data.get('judgment_mode', 'default')
             self.name = data.get('name')
             self.is_default = data.get('is_default', False)
     
@@ -190,6 +199,11 @@ async def create_thesis(
         # Convert to dict and only include fields that exist in the database
         thesis_dict = thesis_data.dict(exclude_none=True)
         thesis_dict['fund_id'] = user_id
+        default_weights = {"cashflow": 40, "governance": 20, "team": 20, "market": 20}
+        if 'weights' not in thesis_dict or thesis_dict.get('weights') is None:
+            thesis_dict['weights'] = default_weights
+        if 'judgment_mode' not in thesis_dict or thesis_dict.get('judgment_mode') is None:
+            thesis_dict['judgment_mode'] = 'default'
         
         # Remove fields that might not exist in database schema
         # Keep only fields that are safe to insert/update
@@ -206,6 +220,7 @@ async def create_thesis(
             'data_confidence_tolerance': thesis_dict.get('data_confidence_tolerance'),
             'impact_requirements': thesis_dict.get('impact_requirements'),
             'weights': thesis_dict.get('weights'),
+            'judgment_mode': thesis_dict.get('judgment_mode'),
             'name': thesis_dict.get('name'),
             'is_default': thesis_dict.get('is_default', False)
         }
@@ -243,6 +258,52 @@ async def create_thesis(
                 detail=f"Database schema error: Missing column. Please run the migration: migrations/fix_thesis_table.sql. Error: {error_str}"
             )
         raise HTTPException(status_code=500, detail=f"Failed to create thesis: {str(e)}")
+
+# Helpers for evidence normalization and URL text extraction
+def normalize_evidence_payload(
+    deal_id: str,
+    evidence_type: str,
+    source: str,
+    data: Dict[str, Any],
+    meta: Optional[Dict[str, Any]] = None,
+    confidence: float = 0.7,
+    document_id: Optional[str] = None,
+):
+    meta_payload = meta or {}
+    extracted = {
+        "type": evidence_type,
+        "source": source,
+        "data": data or {},
+        "meta": meta_payload,
+    }
+    payload = {
+        "id": str(uuid.uuid4()),
+        "deal_id": deal_id,
+        "document_id": document_id,
+        "evidence_type": evidence_type,
+        "extracted_data": extracted,
+        "confidence_score": confidence,
+        "uploaded_at": datetime.utcnow().isoformat(),
+    }
+    return payload
+
+
+def _strip_html_to_text(html: str) -> Dict[str, Any]:
+    """Lightweight HTML text extraction: title, meta description, main text."""
+    title_match = re.search(r"<title>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+    meta_desc_match = re.search(
+        r'<meta[^>]*name=["\']description["\'][^>]*content=["\'](.*?)["\']', html, re.IGNORECASE | re.DOTALL
+    )
+    # Remove script/style
+    clean = re.sub(r"<script.*?>.*?</script>", " ", html, flags=re.IGNORECASE | re.DOTALL)
+    clean = re.sub(r"<style.*?>.*?</style>", " ", clean, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<[^>]+>", " ", clean)
+    text = re.sub(r"\s+", " ", text).strip()
+    return {
+        "title": title_match.group(1).strip() if title_match else None,
+        "description": meta_desc_match.group(1).strip() if meta_desc_match else None,
+        "text": text[:20000]  # guard size
+    }
 
 @router.get("/thesis")
 async def get_thesis(current_user: Any = Depends(get_current_user)):
@@ -470,13 +531,11 @@ async def upload_evidence(
             )
         
         # Determine evidence type from filename or file type
-        evidence_type = 'document'
+        evidence_type = 'financial' if file_type in ['pdf', 'csv', 'xlsx', 'xls'] else 'text'
         if 'financial' in file.filename.lower() or 'statement' in file.filename.lower():
-            evidence_type = 'financial_statements'
+            evidence_type = 'financial'
         elif 'bank' in file.filename.lower():
-            evidence_type = 'bank_statements'
-        elif file_type in ['pdf', 'csv', 'xlsx', 'xls']:
-            evidence_type = 'financial_data'
+            evidence_type = 'financial'
         
         # Create document record
         document_id = str(uuid.uuid4())
@@ -504,20 +563,23 @@ async def upload_evidence(
                     error_message='No data found in document'
                 )
                 # Still create evidence record, but with no data
-                evidence_data = {
-                    'id': str(uuid.uuid4()),
-                    'deal_id': deal_id,
-                    'document_id': document_id,  # ✅ LINKED!
-                    'evidence_type': evidence_type,
-                    'extracted_data': {
-                        'filename': file.filename,
-                        'file_type': file_type,
+                evidence_data = normalize_evidence_payload(
+                    deal_id=deal_id,
+                    evidence_type=evidence_type,
+                    source=file_type,
+                    data={
                         'rows_count': 0,
                         'anomalies_count': 0
                     },
-                    'confidence_score': 0.0,
-                    'uploaded_at': datetime.utcnow().isoformat()
-                }
+                    meta={
+                        'filename': file.filename,
+                        'file_type': file_type,
+                        'status': 'ok',
+                        'document_id': document_id
+                    },
+                    confidence=0.0,
+                    document_id=document_id
+                )
                 evidence = storage.add_evidence(deal_id, evidence_data)
                 return {
                     "evidence": evidence,
@@ -547,21 +609,24 @@ async def upload_evidence(
             )
             
             # Create evidence record WITH document_id linked
-            evidence_data = {
-                'id': str(uuid.uuid4()),
-                'deal_id': deal_id,
-                'document_id': document_id,  # ✅ LINKED!
-                'evidence_type': evidence_type,
-                'extracted_data': {
-                    'filename': file.filename,
-                    'file_type': file_type,
+            evidence_data = normalize_evidence_payload(
+                deal_id=deal_id,
+                evidence_type=evidence_type,
+                source=file_type,
+                data={
                     'rows_count': rows_inserted,
                     'anomalies_count': anomalies_count,
-                    'has_insights': bool(insights)
+                    'insights': insights
                 },
-                'confidence_score': 0.9 if rows_inserted > 0 else 0.5,
-                'uploaded_at': datetime.utcnow().isoformat()
-            }
+                meta={
+                    'filename': file.filename,
+                    'file_type': file_type,
+                    'status': 'ok',
+                    'document_id': document_id
+                },
+                confidence=0.9 if rows_inserted > 0 else 0.5,
+                document_id=document_id
+            )
             
             evidence = storage.add_evidence(deal_id, evidence_data)
             
@@ -597,6 +662,26 @@ async def upload_evidence(
                 error_message=str(parse_error)
             )
             logger.error(f"Error processing evidence document: {parse_error}", exc_info=True)
+            # Record evidence entry with error meta (non-fatal)
+            try:
+                error_evidence = normalize_evidence_payload(
+                    deal_id=deal_id,
+                    evidence_type=evidence_type,
+                    source=file_type,
+                    data={},
+                    meta={
+                        'filename': file.filename,
+                        'file_type': file_type,
+                        'status': 'error',
+                        'error': str(parse_error),
+                        'document_id': document_id
+                    },
+                    confidence=0.0,
+                    document_id=document_id
+                )
+                storage.add_evidence(deal_id, error_evidence)
+            except Exception:
+                logger.warning("Failed to store error evidence record", exc_info=True)
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to process document: {str(parse_error)}"
@@ -607,6 +692,97 @@ async def upload_evidence(
     except Exception as e:
         logger.error(f"Error uploading evidence: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to upload evidence: {str(e)}")
+
+
+@router.post("/v1/evidence/upload")
+async def upload_evidence_v1(
+    deal_id: str = Form(...),
+    url: Optional[str] = Form(None),
+    file: UploadFile = File(None),
+    password: Optional[str] = Form(None),
+    current_user: Any = Depends(get_current_user)
+):
+    """
+    Unified evidence upload for Phase 1
+    - Accepts file (pdf/csv/xls/xlsx) OR url (html fetch)
+    """
+    if url and file:
+        raise HTTPException(status_code=400, detail="Provide either file or url, not both.")
+    if not url and file is None:
+        raise HTTPException(status_code=400, detail="Provide a file or url.")
+
+    # Reuse file upload path for files
+    if file is not None:
+        return await upload_evidence(deal_id=deal_id, file=file, password=password, current_user=current_user)
+
+    # URL ingestion (lightweight fetch + HTML text extract)
+    storage = get_storage()
+    user_id = current_user.id
+    deal = storage.get_deal(deal_id)
+    verify_deal_ownership(deal, user_id)
+
+    parsed_url = urlparse(url)
+    if not parsed_url.scheme:
+        raise HTTPException(status_code=400, detail="Invalid URL.")
+
+    html = ""
+    try:
+        try:
+            import httpx  # type: ignore
+        except ImportError:
+            httpx = None
+
+        if httpx:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(url, headers={"User-Agent": "ParityMVP/1.0"})
+                resp.raise_for_status()
+                html = resp.text
+        else:
+            import urllib.request
+            with urllib.request.urlopen(url, timeout=10) as resp:  # type: ignore
+                html_bytes = resp.read()
+                html = html_bytes.decode("utf-8", errors="ignore")
+    except Exception as fetch_error:
+        logger.error(f"Error fetching URL evidence: {fetch_error}", exc_info=True)
+        evidence_data = normalize_evidence_payload(
+            deal_id=deal_id,
+            evidence_type="url",
+            source="html",
+            data={},
+            meta={
+                "url": url,
+                "site_domain": parsed_url.netloc,
+                "status": "error",
+                "error": str(fetch_error)
+            },
+            confidence=0.0,
+            document_id=None
+        )
+        storage.add_evidence(deal_id, evidence_data)
+        raise HTTPException(status_code=500, detail="Failed to fetch URL content.")
+
+    extracted = _strip_html_to_text(html)
+    evidence_data = normalize_evidence_payload(
+        deal_id=deal_id,
+        evidence_type="url",
+        source="html",
+        data={
+            "title": extracted.get("title"),
+            "description": extracted.get("description"),
+            "text": extracted.get("text"),
+        },
+        meta={
+            "url": url,
+            "title": extracted.get("title"),
+            "date_fetched": datetime.utcnow().isoformat(),
+            "site_domain": parsed_url.netloc,
+            "status": "ok",
+        },
+        confidence=0.5,
+        document_id=None
+    )
+    evidence = storage.add_evidence(deal_id, evidence_data)
+    return {"evidence": evidence}
 
 @router.get("/deals/{deal_id}/evidence")
 async def get_evidence(
@@ -666,6 +842,7 @@ async def run_judgment(
         deal_obj = dict_to_deal(deal_dict)
         evidence_objs = [dict_to_evidence(ev) for ev in evidence_list]
         thesis_obj = dict_to_thesis(thesis_dict)
+        weights = thesis_dict.get('weights') or {"cashflow": 40, "governance": 20, "team": 20, "market": 20}
         
         # Run judgment engine
         judgment_result = judgment_engine.judge_deal(deal_obj, evidence_objs, thesis_obj)
@@ -693,6 +870,7 @@ async def run_judgment(
         
         # Confidence level should be uppercase: HIGH, MEDIUM, LOW
         confidence_level = judgment_result.get('confidence_level', 'low').upper()
+        confidence_note = f"Confidence derived from evidence quality: {confidence_level}"
         
         # Format explanations as dict expected by frontend
         explanations_list = judgment_result.get('explanations', [])
@@ -715,6 +893,35 @@ async def run_judgment(
         if isinstance(explanations_list, list) and explanations_list:
             additional_notes = ' '.join(explanations_list)
             explanations_dict['investment_readiness'] += f" {additional_notes}"
+
+        # Normalize scorecard with reasons (0-10 scale)
+        dimension_scores = judgment_result.get("dimension_scores", {}) or {}
+        def to_score(value: float) -> float:
+            try:
+                return round(float(value) / 10.0, 1)
+            except Exception:
+                return 0.0
+
+        scorecard = {
+            "cashflow": {
+                "score": to_score(dimension_scores.get("financial", 0)),
+                "reason": explanations_dict.get("investment_readiness", "Financial assessment based on provided evidence.")
+            },
+            "governance": {
+                "score": to_score(dimension_scores.get("governance", 0)),
+                "reason": "Governance signals evaluated from uploaded documents and evidence."
+            },
+            "team": {
+                "score": to_score(dimension_scores.get("team", 0)),
+                "reason": "Team strength based on bios/org info present in evidence."
+            },
+            "market": {
+                "score": to_score(dimension_scores.get("market", 0)),
+                "reason": "Market context derived from geography/sector evidence."
+            }
+        }
+
+        follow_ups = judgment_result.get("suggested_missing") or []
         
         judgment_data = {
             'investment_readiness': readiness_category,
@@ -723,6 +930,9 @@ async def run_judgment(
             'confidence_level': confidence_level,
             'dimension_scores': judgment_result.get('dimension_scores', {}),
             'explanations': explanations_dict,
+            'scorecard': scorecard,
+            'follow_up_questions': follow_ups,
+            'confidence_note': confidence_note,
             'created_at': datetime.utcnow().isoformat()
         }
         
@@ -737,6 +947,24 @@ async def run_judgment(
     except Exception as e:
         logger.error(f"Error running judgment: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to run judgment: {str(e)}")
+
+
+# ================ V1 ALIASES (Phase 1 APIs) ====================
+
+@router.post("/v1/thesis")
+async def create_thesis_v1(
+    thesis_data: ThesisCreate,
+    current_user: Any = Depends(get_current_user)
+):
+    return await create_thesis(thesis_data, current_user)
+
+
+@router.post("/v1/parity/judge")
+async def run_judgment_v1(
+    body: JudgeRequest,
+    current_user: Any = Depends(get_current_user)
+):
+    return await run_judgment(deal_id=body.deal_id, current_user=current_user)
 
 @router.get("/deals/{deal_id}/judgment")
 async def get_judgment(

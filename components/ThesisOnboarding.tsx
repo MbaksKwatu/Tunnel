@@ -70,7 +70,8 @@ export default function ThesisOnboarding() {
       financial_thresholds: {},
       data_confidence_tolerance: 'medium',
       impact_requirements: [],
-      weights: { financial: 40, governance: 15, market: 15, team: 15, product: 15 },
+      // Phase 1 scorecard weights use cashflow/governance/team/market (40/20/20/20)
+      weights: { cashflow: 40, governance: 20, team: 20, market: 20 },
       name: 'Default Thesis',
       is_default: true
     }

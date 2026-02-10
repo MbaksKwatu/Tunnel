@@ -75,6 +75,8 @@ export default function DealDetail({ dealId }: { dealId: string }) {
   const [deal, setDeal] = useState<Deal | null>(null)
   const [evidence, setEvidence] = useState<Evidence[]>([])
   const [judgment, setJudgment] = useState<Judgment | null>(null)
+  const [evidenceUrl, setEvidenceUrl] = useState('')
+  const [urlUploading, setUrlUploading] = useState(false)
 
   useEffect(() => {
     fetchDealData()
@@ -238,6 +240,39 @@ export default function DealDetail({ dealId }: { dealId: string }) {
     }
   }
 
+  const handleUrlUpload = async () => {
+    const url = evidenceUrl.trim()
+    if (!url) return
+
+    setUrlUploading(true)
+    setError('')
+    setSuccess('')
+
+    try {
+      const formData = new FormData()
+      formData.append('deal_id', dealId)
+      formData.append('url', url)
+
+      const response = await fetchApi('/api/v1/evidence/upload', {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.detail || 'Failed to ingest URL evidence')
+      }
+
+      setSuccess('URL evidence captured successfully')
+      setEvidenceUrl('')
+      await fetchDealData()
+    } catch (err: any) {
+      setError(err.message || 'Failed to ingest URL evidence')
+    } finally {
+      setUrlUploading(false)
+    }
+  }
+
   const handleRunJudgment = async () => {
     setJudging(true)
     setError('')
@@ -386,30 +421,55 @@ export default function DealDetail({ dealId }: { dealId: string }) {
             <div className="bg-gray-800 rounded-lg p-6">
               <h2 className="text-xl font-semibold text-white mb-4">Evidence Upload</h2>
               
-              <div className="mb-4">
-                <label className="block w-full cursor-pointer">
-                  <div className="border-2 border-dashed border-gray-600 rounded-lg p-6 text-center hover:border-blue-500 transition">
-                    <Upload className="w-12 h-12 text-gray-400 mx-auto mb-2" />
-                    <p className="text-gray-300 mb-2">Drop files here or click to upload</p>
-                    <p className="text-sm text-gray-500">PDF, CSV, Excel files supported</p>
-                  </div>
-                  <input
-                    type="file"
-                    multiple
-                    accept=".pdf,.csv,.xlsx,.xls"
-                    onChange={handleFileUpload}
-                    disabled={uploading}
-                    className="hidden"
-                  />
-                </label>
-              </div>
-
-              {uploading && (
-                <div className="flex items-center gap-2 text-blue-400">
-                  <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
-                  Uploading files...
+              <div className="space-y-4">
+                <div>
+                  <label className="block w-full cursor-pointer">
+                    <div className="border-2 border-dashed border-gray-600 rounded-lg p-6 text-center hover:border-blue-500 transition">
+                      <Upload className="w-12 h-12 text-gray-400 mx-auto mb-2" />
+                      <p className="text-gray-300 mb-2">Drop files here or click to upload</p>
+                      <p className="text-sm text-gray-500">PDF, CSV, Excel files supported</p>
+                    </div>
+                    <input
+                      type="file"
+                      multiple
+                      accept=".pdf,.csv,.xlsx,.xls"
+                      onChange={handleFileUpload}
+                      disabled={uploading}
+                      className="hidden"
+                    />
+                  </label>
+                  {uploading && (
+                    <div className="mt-2 flex items-center gap-2 text-blue-400">
+                      <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
+                      Uploading files...
+                    </div>
+                  )}
                 </div>
-              )}
+
+                <div className="border-t border-gray-700 pt-4">
+                  <p className="text-sm text-gray-400 mb-2">Or capture evidence from a URL</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      placeholder="https://example.com/article-or-report"
+                      value={evidenceUrl}
+                      onChange={(e) => setEvidenceUrl(e.target.value)}
+                      className="flex-1 px-3 py-2 rounded bg-gray-900 border border-gray-700 text-white text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleUrlUpload}
+                      disabled={urlUploading || !evidenceUrl.trim()}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded text-sm font-medium"
+                    >
+                      {urlUploading ? 'Adding…' : 'Add URL'}
+                    </button>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Parity will fetch the page and store a lightweight text extract as evidence.
+                  </p>
+                </div>
+              </div>
             </div>
 
             <div className="bg-gray-800 rounded-lg p-6">
