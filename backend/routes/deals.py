@@ -444,6 +444,39 @@ async def create_deal(
         logger.error(f"User ID: {current_user.id if hasattr(current_user, 'id') else 'unknown'}")
         raise HTTPException(status_code=500, detail=f"Failed to create deal: {str(e)}")
 
+
+@router.put("/deals/{deal_id}")
+async def update_deal_api(
+    deal_id: str,
+    deal_update: DealUpdate,
+    current_user: Any = Depends(get_current_user),
+):
+    """
+    Update an existing deal's core fields (company, sector, geography, type, stage, revenue, status).
+    """
+    try:
+        storage = get_storage()
+        user_id = current_user.id
+
+        # Ensure deal exists and belongs to user
+        existing = storage.get_deal(deal_id)
+        verify_deal_ownership(existing, user_id)
+
+        update_dict = deal_update.dict(exclude_none=True)
+        if not update_dict:
+            return {"deal": existing}
+
+        updated = storage.update_deal(deal_id, update_dict)
+        if not updated:
+            raise HTTPException(status_code=500, detail="Failed to update deal")
+
+        return {"deal": updated}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating deal {deal_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to update deal: {str(e)}")
+
 @router.get("/deals")
 async def list_deals(current_user: Any = Depends(get_current_user)):
     """List all deals for current user"""
