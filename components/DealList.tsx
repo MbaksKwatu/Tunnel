@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { fetchApi } from '@/lib/api'
 
@@ -20,6 +20,8 @@ export default function DealList() {
   const [error, setError] = useState('')
   const [deals, setDeals] = useState<Deal[]>([])
   const [filter, setFilter] = useState<string>('all')
+  const [page, setPage] = useState(1)
+  const pageSize = 10
 
   useEffect(() => {
     loadDeals()
@@ -71,6 +73,28 @@ export default function DealList() {
     if (filter === 'all') return true
     return deal.status === filter
   })
+
+  const pagedDeals = useMemo(() => {
+    const start = (page - 1) * pageSize
+    return filteredDeals.slice(start, start + pageSize)
+  }, [filteredDeals, page])
+
+  const totalPages = Math.max(1, Math.ceil(filteredDeals.length / pageSize))
+  const canPrev = page > 1
+  const canNext = page < totalPages
+
+  const goPrev = () => {
+    if (canPrev) setPage(p => Math.max(1, p - 1))
+  }
+
+  const goNext = () => {
+    if (canNext) setPage(p => Math.min(totalPages, p + 1))
+  }
+
+  useEffect(() => {
+    // Reset to first page when filter changes or data updates
+    setPage(1)
+  }, [filter, deals.length])
 
   if (loading) {
     return (
@@ -166,7 +190,7 @@ export default function DealList() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-700">
-                  {filteredDeals.map(deal => (
+                  {pagedDeals.map(deal => (
                     <tr
                       key={deal.id}
                       onClick={() => router.push(`/deals/${deal.id}`)}
@@ -200,7 +224,7 @@ export default function DealList() {
 
             {/* Mobile Cards */}
             <div className="md:hidden divide-y divide-gray-700">
-              {filteredDeals.map(deal => (
+              {pagedDeals.map(deal => (
                 <div
                   key={deal.id}
                   onClick={() => router.push(`/deals/${deal.id}`)}
@@ -247,6 +271,31 @@ export default function DealList() {
             >
               Create First Deal
             </button>
+          </div>
+        )}
+
+        {/* Pagination */}
+        {filteredDeals.length > 0 && (
+          <div className="mt-6 flex items-center justify-between text-sm text-gray-400">
+            <div>
+              Page {page} of {totalPages} · Showing {pagedDeals.length} of {filteredDeals.length} {filteredDeals.length === 1 ? 'deal' : 'deals'}
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={goPrev}
+                disabled={!canPrev}
+                className="px-3 py-2 rounded border border-gray-700 text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed hover:border-blue-500"
+              >
+                Previous
+              </button>
+              <button
+                onClick={goNext}
+                disabled={!canNext}
+                className="px-3 py-2 rounded border border-gray-700 text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed hover:border-blue-500"
+              >
+                Next
+              </button>
+            </div>
           </div>
         )}
       </div>
