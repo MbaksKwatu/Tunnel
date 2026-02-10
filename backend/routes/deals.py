@@ -649,6 +649,11 @@ async def run_judgment(
         
         # Get evidence
         evidence_list = storage.get_evidence(deal_id)
+        if not evidence_list:
+            raise HTTPException(
+                status_code=400,
+                detail="Evidence is required before running judgment. Please upload at least one evidence file."
+            )
         
         # Get user's thesis (storage is always SupabaseStorage)
         thesis_result = storage.supabase.table('thesis').select('*').eq('fund_id', user_id).order('created_at', desc=True).limit(1).execute()

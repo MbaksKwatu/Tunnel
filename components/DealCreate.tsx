@@ -9,15 +9,57 @@ export default function DealCreate() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const { user, session } = useAuth()
+  const [successMessage, setSuccessMessage] = useState('')
+  const [showEvidence, setShowEvidence] = useState(false)
+  const [evidenceOption, setEvidenceOption] = useState<'none' | 'file' | 'db' | 'link'>('none')
+  const [fileType, setFileType] = useState<'csv' | 'excel' | 'pdf' | 'image' | 'other'>('csv')
+  const [file, setFile] = useState<File | null>(null)
+  const [modalMessage, setModalMessage] = useState<string | null>(null)
+  const { user } = useAuth()
+
+  const allowedFileTypes: Record<'csv' | 'excel' | 'pdf', string> = {
+    csv: '.csv',
+    excel: '.xlsx,.xls',
+    pdf: '.pdf',
+  }
+
+  const handleComingSoon = (message: string) => {
+    setModalMessage(message)
+  }
+
+  const validateEvidenceSelection = () => {
+    if (!showEvidence || evidenceOption === 'none') return true
+    if (evidenceOption === 'db' || evidenceOption === 'link') {
+      handleComingSoon('This option is coming soon. Please use file upload or skip for now.')
+      return false
+    }
+    if (evidenceOption === 'file') {
+      if (fileType === 'image' || fileType === 'other') {
+        handleComingSoon('Image and Other uploads are coming soon.')
+        return false
+      }
+      if (!file) {
+        setError('Please select a file to upload, or uncheck "Upload deal details now".')
+        return false
+      }
+      return true
+    }
+    return true
+  }
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setLoading(true)
     setError('')
+    setSuccessMessage('')
     
     if (!user) {
       setError('Please sign in to create a deal')
+      setLoading(false)
+      return
+    }
+
+    if (!validateEvidenceSelection()) {
       setLoading(false)
       return
     }
@@ -47,6 +89,32 @@ export default function DealCreate() {
       
       if (!result.deal || !result.deal.id) {
         throw new Error('Invalid response: deal ID missing')
+      }
+
+      if (showEvidence && evidenceOption === 'file' && file && (fileType === 'csv' || fileType === 'excel' || fileType === 'pdf')) {
+        try {
+          const evidenceForm = new FormData()
+          evidenceForm.append('deal_id', result.deal.id)
+          evidenceForm.append('file', file)
+          const uploadRes = await fetchApi(`/api/deals/${result.deal.id}/evidence`, {
+            method: 'POST',
+            body: evidenceForm
+          })
+          if (!uploadRes.ok) {
+            let msg = 'Failed to upload evidence'
+            try {
+              const data = await uploadRes.json()
+              msg = data.detail || data.message || msg
+            } catch {
+              msg = `${uploadRes.status}: ${uploadRes.statusText}`
+            }
+            setModalMessage(msg)
+          } else {
+            setSuccessMessage('Deal created and evidence uploaded successfully.')
+          }
+        } catch (uploadErr: any) {
+          setModalMessage(uploadErr?.message || 'Failed to upload evidence.')
+        }
       }
       
       router.push(`/deals/${result.deal.id}`)
@@ -79,10 +147,15 @@ export default function DealCreate() {
           </p>
         </div>
 
-        {/* Error Message */}
+        {/* Error / Success */}
         {error && (
           <div className="bg-red-500/10 border border-red-500 text-red-500 p-4 rounded mb-6">
             {error}
+          </div>
+        )}
+        {successMessage && (
+          <div className="bg-green-500/10 border border-green-500 text-green-500 p-4 rounded mb-6">
+            {successMessage}
           </div>
         )}
 
@@ -200,6 +273,106 @@ export default function DealCreate() {
             </p>
           </div>
 
+          {/* Optional Evidence Section */}
+          <div className="border border-gray-700 rounded-lg p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 text-sm text-gray-200">
+                <input
+                  type="checkbox"
+                  checked={showEvidence}
+                  onChange={(e) => {
+                    setShowEvidence(e.target.checked)
+                    if (!e.target.checked) {
+                      setEvidenceOption('none')
+                      setFile(null)
+                    }
+                  }}
+                  className="text-blue-500 focus:ring-blue-500 rounded"
+                />
+                Upload deal details now (optional)
+              </label>
+              <span className="text-xs text-gray-500">You can skip and add later</span>
+            </div>
+
+            {showEvidence && (
+              <div className="space-y-3">
+                <div className="text-sm text-gray-300">Choose how to add details:</div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setEvidenceOption('file')}
+                    className={`w-full border rounded px-3 py-2 text-left ${evidenceOption === 'file' ? 'border-blue-500 text-white' : 'border-gray-700 text-gray-300'}`}
+                  >
+                    File upload
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEvidenceOption('db')
+                      handleComingSoon('Connect to DB is coming soon.')
+                    }}
+                    className={`w-full border rounded px-3 py-2 text-left ${evidenceOption === 'db' ? 'border-blue-500 text-white' : 'border-gray-700 text-gray-300'}`}
+                  >
+                    Connect to DB
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEvidenceOption('link')
+                      handleComingSoon('Add link is coming soon.')
+                    }}
+                    className={`w-full border rounded px-3 py-2 text-left ${evidenceOption === 'link' ? 'border-blue-500 text-white' : 'border-gray-700 text-gray-300'}`}
+                  >
+                    Add link
+                  </button>
+                </div>
+
+                {evidenceOption === 'file' && (
+                  <div className="space-y-3">
+                    <div className="text-sm text-gray-300">Select file type:</div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {(['csv', 'excel', 'pdf', 'image', 'other'] as const).map((type) => (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => {
+                            setFileType(type)
+                            if (type === 'image' || type === 'other') {
+                              handleComingSoon('Image and Other uploads are coming soon.')
+                            }
+                          }}
+                          className={`w-full border rounded px-3 py-2 text-left capitalize ${
+                            fileType === type ? 'border-blue-500 text-white' : 'border-gray-700 text-gray-300'
+                          }`}
+                        >
+                          {type === 'excel' ? 'Excel' : type.toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
+
+                    {(fileType === 'csv' || fileType === 'excel' || fileType === 'pdf') && (
+                      <div className="space-y-2">
+                        <label className="block text-sm text-gray-300">
+                          Choose {fileType.toUpperCase()} file
+                        </label>
+                        <input
+                          type="file"
+                          accept={allowedFileTypes[fileType]}
+                          onChange={(e) => {
+                            const selected = e.target.files?.[0]
+                            setFile(selected || null)
+                          }}
+                          className="w-full text-sm text-gray-300"
+                        />
+                        <p className="text-xs text-gray-500">Supported: CSV, XLSX/XLS, PDF</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Submit Button */}
           <button
             type="submit"
@@ -220,10 +393,29 @@ export default function DealCreate() {
           </button>
 
           <p className="text-sm text-gray-500 text-center">
-            After creating, you'll upload evidence and run judgment
+            After creating, you can always upload evidence and run judgment from the deal page
           </p>
         </form>
       </div>
+
+      {/* Modal */}
+      {modalMessage && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 max-w-md w-full mx-4 space-y-4">
+            <h3 className="text-lg font-bold text-white">Notice</h3>
+            <p className="text-sm text-gray-200">{modalMessage}</p>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setModalMessage(null)}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
