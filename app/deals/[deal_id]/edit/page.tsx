@@ -75,16 +75,20 @@ function DealEditInner({ dealId }: { dealId: string }) {
     const form = e.currentTarget
     const formData = new FormData(form)
     const payload: any = {}
-    for (const [key, value] of formData.entries()) {
-      const v = (value as string).trim()
-      if (!v) continue
+    formData.forEach((value, key) => {
+      const v = String(value ?? '').trim()
+      if (!v) {
+        return
+      }
       if (key === 'revenue_usd') {
         const num = Number(v)
-        if (!Number.isNaN(num)) payload[key] = num
+        if (!Number.isNaN(num)) {
+          payload[key] = num
+        }
       } else {
         payload[key] = v
       }
-    }
+    })
 
     try {
       const res = await fetchApi(`/api/deals/${dealId}`, {
