@@ -1,8 +1,4 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
-import { API_URL } from '@/lib/api';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 // Single Supabase client for the browser (guards against multiple GoTrue clients, even across HMR)
 const globalForSupabase = globalThis as typeof globalThis & { __supabaseBrowserClient?: SupabaseClient }
@@ -58,7 +54,7 @@ export const createClientComponentClient = createBrowserClient
 export const supabase = createBrowserClient()
 
 // Backend API base URL (local-first mode)
-const API_BASE = API_URL;
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 // Check if we're in local-first mode (no Supabase)
 export const isLocalMode =
