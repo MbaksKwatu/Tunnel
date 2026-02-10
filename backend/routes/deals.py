@@ -106,6 +106,10 @@ class JudgeRequest(BaseModel):
 class AskRequest(BaseModel):
     message: str
 
+
+class EvidenceSummaryUpdate(BaseModel):
+    summary: str
+
 # ==================== HELPER FUNCTIONS ====================
 
 class DictWrapper:
@@ -269,7 +273,27 @@ def normalize_evidence_payload(
     confidence: float = 0.7,
     document_id: Optional[str] = None,
 ):
-    meta_payload = meta or {}
+    meta_payload: Dict[str, Any] = meta.copy() if meta else {}
+
+    # Derive a simple text signal for unreadable detection
+    text_candidate = ""
+    if isinstance(data, dict):
+        # Prefer full text fields if present (URLs), otherwise a preview field
+        text_candidate = str(
+            data.get("text")
+            or data.get("text_preview")
+            or ""
+        )
+    text_length = len(text_candidate or "")
+
+    # Very lightweight heuristic for unreadable content (e.g. scans/images)
+    src = (source or "").lower()
+    is_potential_scan_type = src in {"pdf", "jpg", "jpeg", "png"}
+    is_unreadable = (is_potential_scan_type or evidence_type == "url") and text_length < 50
+
+    # Only set flags if caller didn't explicitly override them
+    meta_payload.setdefault("unreadable", is_unreadable)
+    meta_payload.setdefault("fallback_method", None)
     extracted = {
         "type": evidence_type,
         "source": source,
@@ -589,6 +613,18 @@ async def upload_evidence(
             
             # Store extracted rows
             rows_inserted = storage.store_rows(document_id, rows)
+            # Build a lightweight text preview from the first few rows
+            text_pieces = []
+            try:
+                for row in rows[:10]:
+                    if isinstance(row, dict):
+                        for value in list(row.values())[:10]:
+                            if value not in (None, ""):
+                                text_pieces.append(str(value))
+            except Exception:
+                # Best-effort only; preview is purely for UX/unreadable detection
+                pass
+            text_preview = " ".join(text_pieces)[:2000] if text_pieces else ""
             
             # Run anomaly detection
             anomalies = anomaly_detector.detect_all(rows)
@@ -616,7 +652,8 @@ async def upload_evidence(
                 data={
                     'rows_count': rows_inserted,
                     'anomalies_count': anomalies_count,
-                    'insights': insights
+                    'insights': insights,
+                    'text_preview': text_preview
                 },
                 meta={
                     'filename': file.filename,
@@ -806,6 +843,54 @@ async def get_evidence(
     except Exception as e:
         logger.error(f"Error getting evidence: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get evidence: {str(e)}")
+
+
+@router.post("/deals/{deal_id}/evidence/{evidence_id}/summary")
+async def update_evidence_summary(
+    deal_id: str,
+    evidence_id: str,
+    summary_update: EvidenceSummaryUpdate,
+    current_user: Any = Depends(get_current_user),
+):
+    """
+    Set or update a human-written summary for a specific evidence record.
+    Stores the summary under extracted_data.meta.summary in the evidence JSON.
+    """
+    try:
+        storage = get_storage()
+        user_id = current_user.id
+
+        # Ensure deal exists and belongs to user
+        deal = storage.get_deal(deal_id)
+        verify_deal_ownership(deal, user_id)
+
+        # Find the evidence entry for this deal
+        evidence_list = storage.get_evidence(deal_id)
+        target = None
+        for ev in evidence_list or []:
+            if ev.get("id") == evidence_id:
+                target = ev
+                break
+        if not target:
+            raise HTTPException(status_code=404, detail="Evidence not found for this deal")
+
+        extracted = target.get("extracted_data") or {}
+        meta = extracted.get("meta") or {}
+        meta["summary"] = summary_update.summary
+        extracted["meta"] = meta
+
+        result = storage.supabase.table("evidence")\
+            .update({"extracted_data": extracted})\
+            .eq("id", evidence_id)\
+            .execute()
+
+        updated = result.data[0] if result.data else {**target, "extracted_data": extracted}
+        return {"evidence": updated}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating evidence summary: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to update evidence summary: {str(e)}")
 
 # ==================== JUDGMENT ENDPOINTS ====================
 

@@ -77,6 +77,8 @@ export default function DealDetail({ dealId }: { dealId: string }) {
   const [judgment, setJudgment] = useState<Judgment | null>(null)
   const [evidenceUrl, setEvidenceUrl] = useState('')
   const [urlUploading, setUrlUploading] = useState(false)
+  const [summaryEditingId, setSummaryEditingId] = useState<string | null>(null)
+  const [summaryDraft, setSummaryDraft] = useState<string>('')
 
   useEffect(() => {
     fetchDealData()
@@ -297,6 +299,50 @@ export default function DealDetail({ dealId }: { dealId: string }) {
     }
   }
 
+  const handleStartEditSummary = (item: Evidence) => {
+    const existingSummary =
+      item.extracted_data?.meta?.summary ??
+      item.extracted_data?.summary ??
+      ''
+    setSummaryEditingId(item.id)
+    setSummaryDraft(existingSummary)
+  }
+
+  const handleSaveSummary = async (item: Evidence) => {
+    if (!summaryDraft.trim()) {
+      setError('Summary cannot be empty.')
+      return
+    }
+    setError('')
+    setSuccess('')
+    try {
+      const res = await fetchApi(
+        `/api/deals/${dealId}/evidence/${item.id}/summary`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ summary: summaryDraft.trim() }),
+        }
+      )
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || 'Failed to save summary')
+      }
+      const data = await res.json().catch(() => ({}))
+      const updated = data.evidence || data
+
+      // Merge updated evidence into local state
+      setEvidence((prev) =>
+        prev.map((ev) => (ev.id === item.id ? { ...ev, ...updated } : ev))
+      )
+      setSuccess('Summary saved')
+      setSummaryEditingId(null)
+      setSummaryDraft('')
+    } catch (err: any) {
+      setError(err.message || 'Failed to save summary')
+    }
+  }
+
   const getStatusBadge = (status: string) => {
     const styles = {
       draft: 'bg-gray-100 text-gray-800',
@@ -381,6 +427,14 @@ export default function DealDetail({ dealId }: { dealId: string }) {
         {error && (
           <div className="bg-red-500/10 border border-red-500 text-red-500 p-4 rounded mb-6">
             {error}
+          </div>
+        )}
+
+        {evidence.some((ev) => ev.extracted_data?.meta?.unreadable) && (
+          <div className="bg-yellow-500/10 border border-yellow-500 text-yellow-200 p-4 rounded mb-6 text-sm">
+            Some evidence files were not machine-readable. You can re-upload
+            cleaner versions or add a brief manual summary so Parity can still
+            use them as context.
           </div>
         )}
 
@@ -479,27 +533,92 @@ export default function DealDetail({ dealId }: { dealId: string }) {
                 <p className="text-gray-400">No evidence uploaded yet</p>
               ) : (
                 <div className="space-y-3">
-                  {evidence.map((item) => (
-                    <div key={item.id} className="flex items-center justify-between p-3 bg-gray-700 rounded">
-                      <div className="flex items-center gap-3">
-                        <FileText className="w-5 h-5 text-gray-400" />
-                        <div>
-                          <p className="text-white font-medium">{item.file_name}</p>
-                          <p className="text-sm text-gray-400">
-                            {item.evidence_type} • {safeDate(item.upload_date)}
-                          </p>
+                  {evidence.map((item) => {
+                    const meta = item.extracted_data?.meta || {}
+                    const isUnreadable = !!meta.unreadable
+                    const hasSummary = typeof meta.summary === 'string' && meta.summary.trim().length > 0
+                    return (
+                      <div
+                        key={item.id}
+                        className="space-y-2 p-3 bg-gray-700 rounded border border-gray-700"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <FileText className="w-5 h-5 text-gray-400" />
+                            <div>
+                              <p className="text-white font-medium">{item.file_name}</p>
+                              <p className="text-sm text-gray-400">
+                                {item.evidence_type} • {safeDate(item.upload_date)}
+                              </p>
+                              {isUnreadable && (
+                                <p className="mt-1 text-xs text-yellow-300 flex items-center gap-1">
+                                  <AlertCircle className="w-3 h-3" />
+                                  We couldn&apos;t reliably read this file (likely a scan or image-based PDF).
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {isUnreadable && (
+                              <button
+                                type="button"
+                                onClick={() => handleStartEditSummary(item)}
+                                className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white"
+                              >
+                                {hasSummary ? 'Edit Summary' : 'Add Summary'}
+                              </button>
+                            )}
+                            <button className="p-1 text-gray-400 hover:text-white">
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            <button className="p-1 text-gray-400 hover:text-red-400">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
+
+                        {hasSummary && summaryEditingId !== item.id && (
+                          <div className="mt-1 text-sm text-gray-200 bg-gray-800/70 rounded p-2">
+                            <p className="font-semibold text-xs text-gray-400 mb-1">
+                              Analyst Summary
+                            </p>
+                            <p>{meta.summary}</p>
+                          </div>
+                        )}
+
+                        {summaryEditingId === item.id && (
+                          <div className="mt-2 space-y-2">
+                            <textarea
+                              value={summaryDraft}
+                              onChange={(e) => setSummaryDraft(e.target.value)}
+                              rows={3}
+                              className="w-full px-3 py-2 rounded bg-gray-900 border border-gray-600 text-sm text-white"
+                              placeholder="Enter a brief summary of what this document tells you (key facts, context, and caveats)."
+                            />
+                            <div className="flex gap-2 justify-end">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSummaryEditingId(null)
+                                  setSummaryDraft('')
+                                }}
+                                className="px-3 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-100"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSaveSummary(item)}
+                                className="px-3 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white"
+                              >
+                                Save Summary
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button className="p-1 text-gray-400 hover:text-white">
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <button className="p-1 text-gray-400 hover:text-red-400">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </div>
