@@ -31,14 +31,28 @@ export default function DealCreate() {
       })
       
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || 'Failed to create deal')
+        let errorMessage = 'Failed to create deal'
+        try {
+          const errorData = await response.json()
+          errorMessage = errorData.detail || errorData.message || errorMessage
+        } catch {
+          errorMessage = `${response.status}: ${response.statusText}`
+        }
+        console.error('Deal creation failed:', errorMessage)
+        throw new Error(errorMessage)
       }
       
-      const { deal } = await response.json()
-      router.push(`/deals/${deal.id}`)
+      const result = await response.json()
+      console.log('Deal creation response:', result)
+      
+      if (!result.deal || !result.deal.id) {
+        throw new Error('Invalid response: deal ID missing')
+      }
+      
+      router.push(`/deals/${result.deal.id}`)
     } catch (err: any) {
-      setError(err.message)
+      console.error('Error creating deal:', err)
+      setError(err.message || 'Failed to create deal. Please check console for details.')
     } finally {
       setLoading(false)
     }

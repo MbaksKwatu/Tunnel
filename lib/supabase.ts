@@ -4,19 +4,16 @@ import { API_URL } from '@/lib/api';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-// For client components (browser) - use standard createClient
-// This works during build and runtime, and handles missing env vars gracefully
+// Single Supabase client for the browser (avoids Multiple GoTrueClient and AbortErrors)
+let _browserClient: SupabaseClient | null = null
+
 export const createBrowserClient = (): SupabaseClient | null => {
+  if (_browserClient) return _browserClient
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  
-  if (!url || !key) {
-    // During build or when env vars are missing, return null
-    // This prevents build failures. The app will handle missing Supabase at runtime.
-    return null
-  }
-  
-  return createClient(url, key)
+  if (!url || !key) return null
+  _browserClient = createClient(url, key)
+  return _browserClient
 }
 
 // For server components
@@ -31,24 +28,24 @@ export const createServerClient = (): SupabaseClient | null => {
   return createClient(supabaseUrl, supabaseAnonKey)
 }
 
-// Get current session
+// Get current session (uses shared client)
 export const getSession = async () => {
-  const supabase = createBrowserClient()
-  if (!supabase) return null
+  const client = createBrowserClient()
+  if (!client) return null
   try {
-    const { data: { session } } = await supabase.auth.getSession()
+    const { data: { session } } = await client.auth.getSession()
     return session
   } catch {
     return null
   }
 }
 
-// Get current user
+// Get current user (uses shared client)
 export const getUser = async () => {
-  const supabase = createBrowserClient()
-  if (!supabase) return null
+  const client = createBrowserClient()
+  if (!client) return null
   try {
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { user } } = await client.auth.getUser()
     return user
   } catch {
     return null
@@ -58,8 +55,8 @@ export const getUser = async () => {
 // Legacy export for backward compatibility
 export const createClientComponentClient = createBrowserClient
 
-// Make Supabase optional - use backend API if not available
-export const supabase = createClientComponentClient();
+// Shared instance (same as createBrowserClient() after first call)
+export const supabase = createBrowserClient()
 
 // Backend API base URL (local-first mode)
 const API_BASE = API_URL;

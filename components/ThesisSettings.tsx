@@ -25,13 +25,20 @@ export default function ThesisSettings() {
       const response = await fetchApi('/api/thesis')
       
       if (!response.ok) {
-        throw new Error('Failed to load thesis')
+        let message = 'Failed to load thesis'
+        try {
+          const errBody = await response.json()
+          message = errBody.detail || errBody.message || message
+        } catch {
+          message = `${response.status}: ${response.statusText}`
+        }
+        throw new Error(message)
       }
       
       const data = await response.json()
-      setThesisData(data.thesis || data)
+      setThesisData(data.thesis ?? data)
     } catch (err: any) {
-      setError(err.message)
+      setError(err.message || 'Failed to load thesis')
     } finally {
       setLoading(false)
     }

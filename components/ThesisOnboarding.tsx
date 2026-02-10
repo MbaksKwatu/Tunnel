@@ -25,9 +25,18 @@ export default function ThesisOnboarding() {
       })
       
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || 'Failed to save thesis')
+        let errorMessage = 'Failed to save thesis'
+        try {
+          const errorData = await response.json()
+          errorMessage = errorData.detail || errorData.message || errorMessage
+        } catch {
+          // If response is not JSON, use status text
+          errorMessage = `${response.status}: ${response.statusText}`
+        }
+        throw new Error(errorMessage)
       }
+      
+      const result = await response.json()
       
       setStep('success')
       
@@ -36,13 +45,19 @@ export default function ThesisOnboarding() {
         router.push('/deals')
       }, 2000)
     } catch (err: any) {
-      setError(err.message)
+      console.error('Error saving thesis:', err)
+      setError(err.message || 'Failed to save thesis. Please try again.')
     } finally {
       setLoading(false)
     }
   }
 
-  const handleSkip = () => {
+  const handleSkip = async () => {
+    if (loading) return // Prevent multiple clicks
+    
+    setLoading(true)
+    setError('')
+    
     // Create default thesis and continue
     const defaultThesis = {
       investment_focus: 'debt',
@@ -60,7 +75,12 @@ export default function ThesisOnboarding() {
       is_default: true
     }
     
-    handleSubmit(defaultThesis)
+    try {
+      await handleSubmit(defaultThesis)
+    } catch (err: any) {
+      setError(err.message || 'Failed to create default thesis')
+      setLoading(false)
+    }
   }
 
   if (step === 'intro') {
@@ -104,9 +124,12 @@ export default function ThesisOnboarding() {
             </button>
             <button
               onClick={handleSkip}
-              className="px-6 bg-gray-700 hover:bg-gray-600 text-white py-3 rounded transition"
+              disabled={loading}
+              className={`px-6 bg-gray-700 hover:bg-gray-600 text-white py-3 rounded transition ${
+                loading ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
             >
-              Skip (Use Defaults)
+              {loading ? 'Creating...' : 'Skip (Use Defaults)'}
             </button>
           </div>
         </div>

@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { User, Session } from '@supabase/supabase-js'
 import { createBrowserClient } from '@/lib/supabase'
+import { setApiToken } from '@/lib/auth-bridge'
 import { useRouter } from 'next/navigation'
 
 interface AuthContextType {
@@ -35,14 +36,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return
     }
 
-    // Get initial session
+    // Get initial session and keep API token in sync so fetchApi always has it
     const getInitialSession = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession()
         setSession(session)
         setUser(session?.user ?? null)
+        setApiToken(session?.access_token ?? null)
       } catch (error) {
         console.warn('Failed to get session:', error)
+        setApiToken(null)
       } finally {
         setLoading(false)
       }
@@ -50,13 +53,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     getInitialSession()
 
-    // Listen for auth changes
+    // Listen for auth changes and keep API token in sync
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event: string, session: Session | null) => {
         setSession(session)
         setUser(session?.user ?? null)
-        
-        // Handle events
+        setApiToken(session?.access_token ?? null)
         if (event === 'SIGNED_IN') {
           // Check if user needs onboarding
           try {
@@ -146,6 +148,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const signOut = async () => {
+    setApiToken(null)
     const supabase = getSupabaseClient()
     if (supabase) {
       await supabase.auth.signOut()

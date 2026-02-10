@@ -1,80 +1,46 @@
 import { createBrowserClient } from './supabase'
+import { getApiToken, setApiToken } from './auth-bridge'
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 export const fetchApi = async (endpoint: string, options?: RequestInit) => {
   const url = `${API_URL}${endpoint}`
   const supabase = createBrowserClient()
-  
-  let session = null
-  if (supabase) {
+  // Use token from AuthProvider first (same session the UI shows), then getSession()
+  let token = getApiToken()
+  if (!token && supabase) {
     try {
-      const { data, error } = await supabase.auth.getSession()
-      if (error) {
-        console.warn('Failed to get session:', error)
-      } else {
-        session = data.session
-      }
-    } catch (error) {
-      // Supabase not available (e.g., during build) - continue without auth
-      console.warn('Failed to get session:', error)
+      const { data } = await supabase.auth.getSession()
+      token = data.session?.access_token ?? null
+      if (token) setApiToken(token)
+    } catch {
+      // continue without auth
     }
   }
-  
-  if (!session) {
-    // If no session, try to refresh
-    if (supabase) {
-      try {
-        const { data, error } = await supabase.auth.refreshSession()
-        if (!error && data.session) {
-          session = data.session
-        }
-      } catch (error) {
-        console.warn('Failed to refresh session:', error)
-      }
-    }
-  }
-  
-  const defaultHeaders = {
+  const defaultHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...(session && { 'Authorization': `Bearer ${session.access_token}` })
+    ...(options?.headers as Record<string, string>),
+    ...(token && { Authorization: `Bearer ${token}` })
   }
-  
-  const mergedOptions = {
-    ...options,
-    headers: {
-      ...defaultHeaders,
-      ...options?.headers
-    }
+  if (options?.body instanceof FormData) {
+    delete defaultHeaders['Content-Type']
   }
-  
-  const response = await fetch(url, mergedOptions)
-  
-  // If 401, try refreshing session once
-  if (response.status === 401 && supabase && !session) {
+  const res = await fetch(url, { ...options, headers: defaultHeaders })
+  if (res.status === 401 && supabase && token) {
     try {
-      const { data, error } = await supabase.auth.refreshSession()
-      if (!error && data.session) {
-        // Retry with new session
-        const retryHeaders = {
-          ...defaultHeaders,
-          'Authorization': `Bearer ${data.session.access_token}`
-        }
-        const retryOptions = {
+      const { data } = await supabase.auth.refreshSession()
+      if (data.session?.access_token) {
+        setApiToken(data.session.access_token)
+        return fetch(url, {
           ...options,
-          headers: {
-            ...retryHeaders,
-            ...options?.headers
-          }
-        }
-        return fetch(url, retryOptions)
+          headers: { ...defaultHeaders, Authorization: `Bearer ${data.session.access_token}` }
+        })
       }
-    } catch (error) {
-      console.warn('Failed to refresh session on 401:', error)
+    } catch {
+      // return original response
     }
   }
-  
-  return response
+  return res
 }
 
 export async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
