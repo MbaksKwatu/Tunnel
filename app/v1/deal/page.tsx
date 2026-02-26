@@ -338,11 +338,10 @@ export default function V1DealPage() {
                   <p>
                     % difference:{' '}
                     {(
-                      (Math.abs(
+                      Math.abs(
                         (deal.accrual_revenue_cents - (run.bank_operational_inflow_cents ?? 0)) /
                           deal.accrual_revenue_cents
-                      ) *
-                        100
+                      ) * 100
                     ).toFixed(2)}
                     %
                   </p>
