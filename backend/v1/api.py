@@ -4,7 +4,7 @@ All money fields: integer cents.  All ratios: integer basis points.
 Snapshot only on explicit POST /v1/deals/{deal_id}/export.
 """
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request, BackgroundTasks
 from typing import Any, Dict, Optional
 
 import uuid
@@ -167,34 +167,52 @@ def get_deal(request: Request, deal_id: str):
 # ===================================================================
 
 @router.post("/deals/{deal_id}/documents")
-async def upload_document(request: Request, deal_id: str, file: UploadFile = File(...), created_by: Optional[str] = Form(None)):
+async def upload_document(
+    request: Request,
+    deal_id: str,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    created_by: Optional[str] = Form(None),
+):
     repos = _repos(request)
     deal = repos["deals"].get_deal(deal_id)
     if not deal:
         _error("NOT_FOUND", f"Deal {deal_id} not found")
 
     content = await file.read()
+    document_id = str(uuid.uuid4())
+    file_type = file.filename.split(".")[-1] if "." in file.filename else "csv"
+    created_by_val = created_by or deal.get("created_by") or str(uuid.uuid4())
+
+    document = {
+        "id": document_id,
+        "deal_id": deal_id,
+        "storage_url": f"inline://{file.filename}",
+        "file_type": file_type.lower(),
+        "status": "processing",
+        "currency_detected": None,
+        "currency_mismatch": False,
+        "created_by": created_by_val,
+    }
+    repos["documents"].create_document(document)
+
     ingestion = IngestionService(
         documents_repo=repos["documents"],
         raw_tx_repo=repos["raw"],
         analysis_repo=repos["runs"],
     )
-    try:
-        result = ingestion.ingest(
-            deal_id=deal_id,
-            created_by=created_by or deal.get("created_by") or str(uuid.uuid4()),
-            file_bytes=content,
-            file_name=file.filename,
-            file_type=file.filename.split(".")[-1],
-            deal_currency=deal["currency"],
-        )
-        return {"ingestion": result}
-    except CurrencyMismatchError:
-        _error("CURRENCY_MISMATCH", "Document currency does not match deal currency", next_action="upload_new_file")
-    except InvalidSchemaError as exc:
-        _error("INVALID_SCHEMA", str(exc), next_action="fix_format")
-    except Exception as exc:
-        _error("INTERNAL", str(exc), next_action="contact_support")
+    background_tasks.add_task(
+        ingestion.process_document_background,
+        document_id=document_id,
+        deal_id=deal_id,
+        created_by=created_by_val,
+        file_bytes=content,
+        file_name=file.filename,
+        file_type=file_type,
+        deal_currency=deal["currency"],
+    )
+
+    return {"ingestion": {"document_id": document_id, "status": "processing", "rows_count": 0}}
 
 
 @router.get("/deals/{deal_id}/documents")

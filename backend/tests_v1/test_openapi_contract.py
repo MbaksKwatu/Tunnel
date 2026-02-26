@@ -464,7 +464,11 @@ class TestErrorSemantics(unittest.TestCase):
             f"/v1/deals/{did}/documents",
             files={"file": ("bad.csv", f, "text/csv")},
         )
-        self._assert_error(resp, "INVALID_SCHEMA", 400)
+        self.assertEqual(resp.status_code, 200)
+        doc_id = resp.json()["ingestion"]["document_id"]
+        # Background processing sets status=failed for invalid schema
+        status = self.client.get(f"/v1/documents/{doc_id}/status")
+        self.assertEqual(status.json()["status"], "failed")
 
     # --- 200 empty arrays ---
 

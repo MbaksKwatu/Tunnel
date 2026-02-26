@@ -86,9 +86,15 @@ export default function V1DealPage() {
       setDocumentId(ingestion.document_id);
 
       setAnalysisState('polling');
+      const POLL_INTERVAL_MS = 2000;
       let status = await getDocumentStatus(ingestion.document_id);
       while (status.status !== 'completed') {
-        await new Promise((r) => setTimeout(r, 500));
+        if (status.status === 'failed') {
+          setErrorMsg('Document processing failed');
+          setAnalysisState('error');
+          return;
+        }
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
         status = await getDocumentStatus(ingestion.document_id);
       }
 

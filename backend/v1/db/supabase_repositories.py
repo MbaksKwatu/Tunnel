@@ -70,12 +70,20 @@ class DocumentsRepo(DocumentsRepository, BaseRepo):
         return self.select_eq("deal_id", deal_id)
 
 
+BATCH_SIZE = 1000
+
+
 class RawTxRepo(RawTransactionsRepository, BaseRepo):
     def __init__(self):
         super().__init__("pds_raw_transactions")
 
     def insert_batch(self, rows: Iterable[Dict[str, Any]]) -> None:
-        self.insert_many(rows)
+        items = list(rows)
+        if not items:
+            return
+        for i in range(0, len(items), BATCH_SIZE):
+            batch = items[i : i + BATCH_SIZE]
+            self.client.table(self.table).insert(batch).execute()
 
     def list_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         return self.select_eq("deal_id", deal_id)

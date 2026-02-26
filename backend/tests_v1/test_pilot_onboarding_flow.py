@@ -121,11 +121,12 @@ class TestPilotOnboardingFlow(unittest.TestCase):
             f"/v1/deals/{deal_id}/documents",
             files={"file": ("mismatch.csv", f, "text/csv")},
         )
-        self.assertIn(resp.status_code, (400, 409))
-        self.assertIn(
-            resp.json()["detail"]["error_code"],
-            ("CURRENCY_MISMATCH", "INVALID_SCHEMA"),
-        )
+        self.assertEqual(resp.status_code, 200)
+        doc_id = resp.json()["ingestion"]["document_id"]
+        # Background processing sets status=failed for currency mismatch
+        status = self.client.get(f"/v1/documents/{doc_id}/status")
+        self.assertEqual(status.json()["status"], "failed")
+        self.assertTrue(status.json().get("currency_mismatch", False))
         # Ensure no raw transactions written
         self.assertEqual(len(self.repos["raw"].list_by_deal(deal_id)), 0)
 
@@ -137,8 +138,12 @@ class TestPilotOnboardingFlow(unittest.TestCase):
             f"/v1/deals/{deal_id}/documents",
             files={"file": ("invalid.csv", f, "text/csv")},
         )
-        self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.json()["detail"]["error_code"], "INVALID_SCHEMA")
+        self.assertEqual(resp.status_code, 200)
+        doc_id = resp.json()["ingestion"]["document_id"]
+        # Background processing sets status=failed for invalid schema
+        status = self.client.get(f"/v1/documents/{doc_id}/status")
+        self.assertEqual(status.json()["status"], "failed")
+        # Ensure no raw transactions written
         self.assertEqual(len(self.repos["raw"].list_by_deal(deal_id)), 0)
 
     def test_scenario4_transfer_ambiguity(self):

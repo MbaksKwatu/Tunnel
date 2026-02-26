@@ -809,13 +809,16 @@
         "type": "object",
         "required": [
           "document_id",
-          "rows_count",
-          "raw_transaction_hash"
+          "status"
         ],
         "properties": {
           "document_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["processing", "completed"]
           },
           "rows_count": {
             "type": "integer",
