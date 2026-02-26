@@ -4,11 +4,14 @@ All money fields: integer cents.  All ratios: integer basis points.
 Snapshot only on explicit POST /v1/deals/{deal_id}/export.
 """
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request, BackgroundTasks
+import logging
+import time
+import uuid
 from typing import Any, Dict, Optional
 
-import uuid
-import time
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request, BackgroundTasks
+
+logger = logging.getLogger(__name__)
 from datetime import datetime, timezone
 
 from .config import SCHEMA_VERSION, CONFIG_VERSION, GIT_COMMIT, BUILD_TIMESTAMP, DETERMINISTIC_MODE
@@ -366,6 +369,35 @@ def export(request: Request, deal_id: str):
     if not raw:
         _error("BAD_REQUEST", "No transactions to export. Upload documents first.", next_action="upload_new_file")
 
+    # Short-circuit: return existing snapshot if no new docs/overrides since last export
+    latest_snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    latest_doc_at = repos["documents"].get_latest_update_at(deal_id)
+    latest_override_at = repos["overrides"].get_latest_update_at(deal_id) or ""
+    snap_created_at = (latest_snapshot or {}).get("created_at") or ""
+    if (
+        latest_snapshot
+        and snap_created_at
+        and (not latest_doc_at or snap_created_at >= latest_doc_at)
+        and snap_created_at > latest_override_at
+    ):
+        latest_run = repos["runs"].get_latest_run(deal_id)
+        if latest_run and latest_run.get("id") == latest_snapshot.get("analysis_run_id"):
+            entities = list(repos["entities"].list_by_deal(deal_id))
+            txn_map = list(repos["txn_map"].list_by_deal(deal_id))
+            run = dict(latest_run)
+            run.setdefault("bank_operational_inflow_cents", 0)
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            if request:
+                request.app.state.last_export_ms = duration_ms
+                request.app.state.last_export_at = datetime.now(timezone.utc).isoformat()
+            logger.info("[EXPORT] deal=%s ms=%d short_circuit=1", deal_id, duration_ms)
+            return {
+                "analysis_run": run,
+                "snapshot": latest_snapshot,
+                "entities": entities,
+                "txn_entity_map": txn_map,
+            }
+
     run, links, entities, txn_map = run_pipeline(
         deal_id=deal_id,
         raw_transactions=raw,
@@ -431,6 +463,7 @@ def export(request: Request, deal_id: str):
     if request:
         request.app.state.last_export_ms = duration_ms
         request.app.state.last_export_at = datetime.now(timezone.utc).isoformat()
+    logger.info("[EXPORT] deal=%s ms=%d short_circuit=0", deal_id, duration_ms)
     return {
         "analysis_run": run,
         "snapshot": snapshot,

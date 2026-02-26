@@ -40,6 +40,10 @@ class DocumentsRepository:
         """Fetch documents for a deal."""
         raise NotImplementedError
 
+    def get_latest_update_at(self, deal_id: str) -> Optional[str]:
+        """Max created_at of documents for deal, or None if none."""
+        raise NotImplementedError
+
 
 class RawTransactionsRepository:
     def insert_batch(self, rows: Iterable[Dict[str, Any]]) -> None:
@@ -88,6 +92,10 @@ class OverridesRepository:
         """List overrides for a deal."""
         raise NotImplementedError
 
+    def get_latest_update_at(self, deal_id: str) -> Optional[str]:
+        """Max created_at of overrides for deal, or '' if none."""
+        raise NotImplementedError
+
 
 class AnalysisRunsRepository:
     def insert_run(self, run: Dict[str, Any]) -> Dict[str, Any]:
@@ -96,6 +104,10 @@ class AnalysisRunsRepository:
 
     def list_runs(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         """List analysis runs for a deal, typically newest-first."""
+        raise NotImplementedError
+
+    def get_latest_run(self, deal_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch latest analysis run for deal (by created_at desc)."""
         raise NotImplementedError
 
 
@@ -114,4 +126,8 @@ class SnapshotsRepository:
 
     def list_snapshots(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         """List snapshots for a deal."""
+        raise NotImplementedError
+
+    def get_latest_snapshot(self, deal_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch latest snapshot for deal (by created_at desc)."""
         raise NotImplementedError

@@ -69,6 +69,12 @@ class DocumentsRepo(DocumentsRepository, BaseRepo):
     def list_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         return self.select_eq("deal_id", deal_id)
 
+    def get_latest_update_at(self, deal_id: str) -> Optional[str]:
+        rows = self.select_eq("deal_id", deal_id)
+        if not rows:
+            return None
+        return max((r.get("created_at") or "") for r in rows)
+
 
 BATCH_SIZE = 1000
 
@@ -141,6 +147,12 @@ class OverridesRepo(OverridesRepository, BaseRepo):
     def list_overrides(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         return self.select_eq("deal_id", deal_id)
 
+    def get_latest_update_at(self, deal_id: str) -> Optional[str]:
+        rows = self.select_eq("deal_id", deal_id)
+        if not rows:
+            return ""
+        return max((r.get("created_at") or "") for r in rows)
+
 
 class AnalysisRunsRepo(AnalysisRunsRepository, BaseRepo):
     def __init__(self):
@@ -151,6 +163,12 @@ class AnalysisRunsRepo(AnalysisRunsRepository, BaseRepo):
 
     def list_runs(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         return self.select_eq("deal_id", deal_id)
+
+    def get_latest_run(self, deal_id: str) -> Optional[Dict[str, Any]]:
+        rows = self.select_eq("deal_id", deal_id)
+        if not rows:
+            return None
+        return max(rows, key=lambda r: r.get("created_at") or "")
 
 
 class SnapshotsRepo(SnapshotsRepository, BaseRepo):
@@ -170,3 +188,9 @@ class SnapshotsRepo(SnapshotsRepository, BaseRepo):
 
     def list_snapshots(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         return self.select_eq("deal_id", deal_id)
+
+    def get_latest_snapshot(self, deal_id: str) -> Optional[Dict[str, Any]]:
+        rows = self.select_eq("deal_id", deal_id)
+        if not rows:
+            return None
+        return max(rows, key=lambda r: r.get("created_at") or "")

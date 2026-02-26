@@ -64,6 +64,12 @@ class MemoryDocumentsRepo(DocumentsRepository):
                 return copy.deepcopy(d)
         return None
 
+    def get_latest_update_at(self, deal_id: str) -> Optional[str]:
+        rows = [d for d in self._store if d.get("deal_id") == deal_id]
+        if not rows:
+            return None
+        return max((r.get("created_at") or "") for r in rows)
+
 
 class MemoryRawTxRepo(RawTransactionsRepository):
     def __init__(self):
@@ -134,6 +140,12 @@ class MemoryOverridesRepo(OverridesRepository):
     def list_overrides(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         return [copy.deepcopy(o) for o in self._store if o.get("deal_id") == deal_id]
 
+    def get_latest_update_at(self, deal_id: str) -> Optional[str]:
+        rows = [o for o in self._store if o.get("deal_id") == deal_id]
+        if not rows:
+            return ""
+        return max((r.get("created_at") or "") for r in rows)
+
 
 class MemoryAnalysisRunsRepo(AnalysisRunsRepository):
     def __init__(self):
@@ -146,6 +158,13 @@ class MemoryAnalysisRunsRepo(AnalysisRunsRepository):
 
     def list_runs(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         return [copy.deepcopy(r) for r in self._store if r.get("deal_id") == deal_id]
+
+    def get_latest_run(self, deal_id: str) -> Optional[Dict[str, Any]]:
+        rows = [r for r in self._store if r.get("deal_id") == deal_id]
+        if not rows:
+            return None
+        latest = max(rows, key=lambda r: r.get("created_at") or "")
+        return copy.deepcopy(latest)
 
 
 class MemorySnapshotsRepo(SnapshotsRepository):
@@ -175,6 +194,13 @@ class MemorySnapshotsRepo(SnapshotsRepository):
 
     def list_snapshots(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         return [copy.deepcopy(s) for s in self._store if s.get("deal_id") == deal_id]
+
+    def get_latest_snapshot(self, deal_id: str) -> Optional[Dict[str, Any]]:
+        rows = [s for s in self._store if s.get("deal_id") == deal_id]
+        if not rows:
+            return None
+        latest = max(rows, key=lambda r: r.get("created_at") or "")
+        return copy.deepcopy(latest)
 
 
 def build_memory_repos() -> Dict[str, Any]:
