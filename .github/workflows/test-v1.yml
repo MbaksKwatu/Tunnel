@@ -1,0 +1,140 @@
+# Parity v1 — Full test suite with live Supabase integration
+#
+# Setup: Add repository secrets in Settings > Secrets and variables > Actions:
+#   - SUPABASE_URL (e.g. https://xxx.supabase.co)
+#   - SUPABASE_SERVICE_ROLE_KEY (service_role JWT)
+#   - SUPABASE_TEST_PROJECT_REF (e.g. abcdefgh — dedicated test DB only)
+#   - SUPABASE_PROD_PROJECT_REF (optional — blocklist; CI fails if URL contains this)
+#
+# Result: All v1 tests pass with 0 skipped (triggers + RLS validated against real Supabase)
+
+name: Test v1 (Live Supabase)
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  test-v1-live:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_TEST_MODE: "1"
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_TEST_PROJECT_REF: ${{ secrets.SUPABASE_TEST_PROJECT_REF }}
+      SUPABASE_PROD_PROJECT_REF: ${{ secrets.SUPABASE_PROD_PROJECT_REF }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # --- Contract guards (run first to fail fast) ---
+      - name: Schema drift guard (pds_ locked)
+        run: |
+          if git diff origin/main...HEAD -- supabase/migrations 2>/dev/null | grep -q "pds_"; then
+            echo "::error::pds_* schema change detected. Schema is locked during pilot."
+            echo "Bump SCHEMA_VERSION, update documentation, add explicit approval in PR."
+            exit 1
+          fi
+
+      - name: Snapshot engine guard
+        run: |
+          if git diff origin/main...HEAD -- backend/v1/core/snapshot_engine.py 2>/dev/null | grep -q .; then
+            if ! git diff origin/main...HEAD -- backend/v1/config.py 2>/dev/null | grep -q "SCHEMA_VERSION"; then
+              echo "::error::Snapshot engine changed without SCHEMA_VERSION bump."
+              exit 1
+            fi
+          fi
+
+      - name: Pipeline guard
+        run: |
+          if git diff origin/main...HEAD -- backend/v1/core/pipeline.py 2>/dev/null | grep -q .; then
+            if ! git diff origin/main...HEAD -- backend/v1/config.py 2>/dev/null | grep -q "SCHEMA_VERSION"; then
+              echo "::error::Pipeline changed without SCHEMA_VERSION bump."
+              exit 1
+            fi
+          fi
+
+      - name: Classifier guard (role vocabulary frozen)
+        run: |
+          if git diff origin/main...HEAD -- backend/v1/core/classifier.py 2>/dev/null | grep -q .; then
+            if ! git diff origin/main...HEAD -- backend/v1/config.py 2>/dev/null | grep -q "SCHEMA_VERSION"; then
+              echo "::error::Classifier changed without SCHEMA_VERSION bump."
+              exit 1
+            fi
+          fi
+
+      - name: OpenAPI contract guard
+        run: |
+          if git diff origin/main...HEAD -- docs/openapi/v1.openapi.json 2>/dev/null | grep -q .; then
+            if ! git diff origin/main...HEAD -- backend/v1/config.py 2>/dev/null | grep -q "SCHEMA_VERSION"; then
+              echo "::error::OpenAPI contract changed without SCHEMA_VERSION bump."
+              exit 1
+            fi
+          fi
+
+      - name: Deterministic mode guard
+        run: |
+          if grep -q "DETERMINISTIC_MODE = False" backend/v1/config.py; then
+            echo "::error::DETERMINISTIC_MODE must remain True."
+            exit 1
+          fi
+
+      # --- Setup ---
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      # --- Supabase safety ---
+      - name: Check Supabase secrets
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ "$SUPABASE_URL" = "" ]; then
+            echo "::error::SUPABASE_URL secret is required. Add it in Settings > Secrets."
+            exit 1
+          fi
+          if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ] || [ "$SUPABASE_SERVICE_ROLE_KEY" = "" ]; then
+            echo "::error::SUPABASE_SERVICE_ROLE_KEY secret is required. Add it in Settings > Secrets."
+            exit 1
+          fi
+
+      - name: Production DB guard
+        run: |
+          if [ -n "$SUPABASE_PROD_PROJECT_REF" ] && [ "$SUPABASE_PROD_PROJECT_REF" != "" ]; then
+            if [[ "$SUPABASE_URL" == *"$SUPABASE_PROD_PROJECT_REF"* ]]; then
+              echo "::error::CI cannot run against production Supabase."
+              exit 1
+            fi
+          fi
+
+      - name: Enforce dedicated test Supabase project
+        run: |
+          if [ -z "$SUPABASE_TEST_PROJECT_REF" ] || [ "$SUPABASE_TEST_PROJECT_REF" = "" ]; then
+            echo "::error::SUPABASE_TEST_PROJECT_REF secret is required. Add your test project ref."
+            exit 1
+          fi
+          if [[ "$SUPABASE_URL" != *"$SUPABASE_TEST_PROJECT_REF"* ]]; then
+            echo "::error::CI must run against the dedicated TEST Supabase project."
+            echo "SUPABASE_URL must contain SUPABASE_TEST_PROJECT_REF ($SUPABASE_TEST_PROJECT_REF)."
+            exit 1
+          fi
+
+      # --- Run tests ---
+      - name: Run v1 test suite (0 skipped expected)
+        run: |
+          python -m pytest backend/tests_v1/ -v --tb=short 2>&1 | tee pytest.log
+          PYTEST_EXIT=${PIPESTATUS[0]}
+          if grep -qE "[1-9][0-9]* skipped" pytest.log; then
+            echo "::error::Expected 0 skipped tests. Configure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY secrets."
+            exit 1
+          fi
+          exit $PYTEST_EXIT

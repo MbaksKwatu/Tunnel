@@ -1,0 +1,1462 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Parity v1 \u2014 Deterministic Financial Normalisation API",
+    "version": "1.0.0",
+    "description": "Integer-only money. Deterministic hashing. Immutable snapshots."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8000",
+      "description": "Local dev"
+    }
+  ],
+  "paths": {
+    "/v1/system/health": {
+      "get": {
+        "operationId": "systemHealth",
+        "summary": "Deterministic engine identity (no DB, no runtime state)",
+        "responses": {
+          "200": {
+            "description": "Engine identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemHealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/system/metrics": {
+      "get": {
+        "operationId": "systemMetrics",
+        "summary": "Minimal operational metrics (deterministic; does not affect hashing)",
+        "responses": {
+          "200": {
+            "description": "Operational metrics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemMetricsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/deals": {
+      "post": {
+        "operationId": "createDeal",
+        "summary": "Create a new deal",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "currency"
+                ],
+                "properties": {
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3,
+                    "description": "ISO 4217 currency code"
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "created_by": {
+                    "format": "uuid",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deal created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DealResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listDeals",
+        "summary": "List deals for a user",
+        "parameters": [
+          {
+            "name": "created_by",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deals list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DealsListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    },
+    "/v1/deals/{deal_id}": {
+      "get": {
+        "operationId": "getDeal",
+        "summary": "Get deal with analysis runs and snapshots",
+        "parameters": [
+          {
+            "name": "deal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deal detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DealDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/deals/{deal_id}/documents": {
+      "post": {
+        "operationId": "uploadDocument",
+        "summary": "Upload a financial document for ingestion",
+        "parameters": [
+          {
+            "name": "deal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "created_by": {
+                    "format": "uuid",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ingestion result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/CurrencyMismatch"
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidSchema"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listDocuments",
+        "summary": "List documents for a deal",
+        "parameters": [
+          {
+            "name": "deal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Documents list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentsListResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/documents/{document_id}/status": {
+      "get": {
+        "operationId": "getDocumentStatus",
+        "summary": "Get document processing status",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentStatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/documents/{document_id}/transactions": {
+      "get": {
+        "operationId": "getDocumentTransactions",
+        "summary": "Get raw transactions for a document",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transactions list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionsResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/deals/{deal_id}/overrides": {
+      "post": {
+        "operationId": "addOverride",
+        "summary": "Add an override (insert-only, append-only log)",
+        "parameters": [
+          {
+            "name": "deal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "entity_id",
+                  "weight",
+                  "new_value"
+                ],
+                "properties": {
+                  "entity_id": {
+                    "type": "string"
+                  },
+                  "weight": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "field": {
+                    "type": "string",
+                    "default": "role"
+                  },
+                  "new_value": {
+                    "type": "string"
+                  },
+                  "created_by": {
+                    "format": "uuid",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Override created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverrideResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listOverrides",
+        "summary": "List overrides for a deal",
+        "parameters": [
+          {
+            "name": "deal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Overrides list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverridesListResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/deals/{deal_id}/analysis/latest": {
+      "get": {
+        "operationId": "getLatestAnalysis",
+        "summary": "Get latest LIVE_DRAFT analysis run",
+        "parameters": [
+          {
+            "name": "deal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Latest analysis run (null if none)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LatestAnalysisResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/deals/{deal_id}/export": {
+      "post": {
+        "operationId": "exportSnapshot",
+        "summary": "Run pipeline and create immutable snapshot (idempotent by sha256)",
+        "parameters": [
+          {
+            "name": "deal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Export result (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportResponse"
+                },
+                "examples": {
+                  "successful_export": {
+                    "summary": "Successful idempotent export",
+                    "value": {
+                      "analysis_run": {
+                        "id": "a1b2c3d4-0000-0000-0000-000000000001",
+                        "deal_id": "d1e2f3a4-0000-0000-0000-000000000001",
+                        "state": "LIVE_DRAFT",
+                        "schema_version": "v1",
+                        "config_version": "v1",
+                        "run_trigger": "parse_complete",
+                        "non_transfer_abs_total_cents": 150000,
+                        "classified_abs_total_cents": 150000,
+                        "coverage_pct_bp": 10000,
+                        "missing_month_count": 0,
+                        "missing_month_penalty_bp": 0,
+                        "override_penalty_bp": 0,
+                        "reconciliation_status": "NOT_RUN",
+                        "reconciliation_pct_bp": null,
+                        "base_confidence_bp": 10000,
+                        "final_confidence_bp": 10000,
+                        "tier": "High",
+                        "tier_capped": true,
+                        "raw_transaction_hash": "abc123...",
+                        "transfer_links_hash": "def456...",
+                        "entities_hash": "ghi789...",
+                        "overrides_hash": "jkl012..."
+                      },
+                      "snapshot": {
+                        "id": "s1a2b3c4-0000-0000-0000-000000000001",
+                        "deal_id": "d1e2f3a4-0000-0000-0000-000000000001",
+                        "financial_state_hash": "9d6c0b4c8c6c4f8b2f1e3d2c1a0b9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f",
+                        "sha256_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        "schema_version": "v1",
+                        "config_version": "v1",
+                        "created_at": "2024-06-15T12:00:00Z"
+                      }
+                    }
+                  },
+                  "denom_zero": {
+                    "summary": "Zero denominator (all transfers)",
+                    "value": {
+                      "analysis_run": {
+                        "coverage_pct_bp": 0,
+                        "reconciliation_status": "NOT_RUN",
+                        "final_confidence_bp": 0,
+                        "tier": "Low",
+                        "tier_capped": false
+                      },
+                      "snapshot": {
+                        "financial_state_hash": "...",
+                        "sha256_hash": "..."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/deals/{deal_id}/snapshots": {
+      "get": {
+        "operationId": "listSnapshots",
+        "summary": "List snapshots for a deal",
+        "parameters": [
+          {
+            "name": "deal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Snapshots list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotsListResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/snapshots/{snapshot_id}": {
+      "get": {
+        "operationId": "getSnapshot",
+        "summary": "Get a single snapshot by id",
+        "parameters": [
+          {
+            "name": "snapshot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Snapshot detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "SystemHealthResponse": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "config_version",
+          "git_commit",
+          "build_timestamp",
+          "deterministic_mode"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "type": "string"
+          },
+          "config_version": {
+            "type": "string"
+          },
+          "git_commit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "build_timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deterministic_mode": {
+            "type": "boolean",
+            "const": true
+          }
+        }
+      },
+      "SystemMetricsResponse": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "config_version",
+          "last_export_ms",
+          "last_export_at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "type": "string"
+          },
+          "config_version": {
+            "type": "string"
+          },
+          "last_export_ms": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "last_export_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": [
+          "error_code",
+          "error_message"
+        ],
+        "properties": {
+          "error_code": {
+            "type": "string",
+            "enum": [
+              "CURRENCY_MISMATCH",
+              "INVALID_SCHEMA",
+              "DOCUMENTS_NOT_READY",
+              "NOT_FOUND",
+              "BAD_REQUEST",
+              "UNAUTHORIZED",
+              "INTERNAL",
+              "SERVICE_UNAVAILABLE"
+            ]
+          },
+          "error_message": {
+            "type": "string"
+          },
+          "next_action": {
+            "enum": [
+              "upload_new_file",
+              "enter_password",
+              "fix_format",
+              "contact_support",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "details": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        }
+      },
+      "Deal": {
+        "type": "object",
+        "required": [
+          "id",
+          "currency",
+          "created_by"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "currency": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "DealResponse": {
+        "type": "object",
+        "required": [
+          "deal"
+        ],
+        "properties": {
+          "deal": {
+            "$ref": "#/components/schemas/Deal"
+          }
+        }
+      },
+      "DealsListResponse": {
+        "type": "object",
+        "required": [
+          "deals"
+        ],
+        "properties": {
+          "deals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Deal"
+            }
+          }
+        }
+      },
+      "DealDetailResponse": {
+        "type": "object",
+        "required": [
+          "deal",
+          "analysis_runs",
+          "snapshots"
+        ],
+        "properties": {
+          "deal": {
+            "$ref": "#/components/schemas/Deal"
+          },
+          "analysis_runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnalysisRun"
+            }
+          },
+          "snapshots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Snapshot"
+            }
+          }
+        }
+      },
+      "IngestionResult": {
+        "type": "object",
+        "required": [
+          "document_id",
+          "rows_count",
+          "raw_transaction_hash"
+        ],
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "rows_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "raw_transaction_hash": {
+            "type": "string"
+          },
+          "currency_detection": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "IngestionResponse": {
+        "type": "object",
+        "required": [
+          "ingestion"
+        ],
+        "properties": {
+          "ingestion": {
+            "$ref": "#/components/schemas/IngestionResult"
+          }
+        }
+      },
+      "Document": {
+        "type": "object",
+        "required": [
+          "id",
+          "deal_id",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "storage_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "file_type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "processing",
+              "completed",
+              "failed"
+            ]
+          },
+          "currency_detected": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency_mismatch": {
+            "type": "boolean"
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "DocumentsListResponse": {
+        "type": "object",
+        "required": [
+          "documents"
+        ],
+        "properties": {
+          "documents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Document"
+            }
+          }
+        }
+      },
+      "DocumentStatusResponse": {
+        "type": "object",
+        "required": [
+          "document_id",
+          "status"
+        ],
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "file_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency_mismatch": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "RawTransaction": {
+        "type": "object",
+        "required": [
+          "txn_id",
+          "txn_date",
+          "signed_amount_cents"
+        ],
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "txn_id": {
+            "type": "string"
+          },
+          "deal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "document_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "txn_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "signed_amount_cents": {
+            "type": "integer",
+            "description": "Signed amount in minor currency units"
+          },
+          "abs_amount_cents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "raw_descriptor": {
+            "type": "string"
+          },
+          "parsed_descriptor": {
+            "type": "string"
+          },
+          "normalized_descriptor": {
+            "type": "string"
+          },
+          "account_id": {
+            "type": "string"
+          }
+        }
+      },
+      "TransactionsResponse": {
+        "type": "object",
+        "required": [
+          "document_id",
+          "transactions"
+        ],
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "transactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RawTransaction"
+            }
+          }
+        }
+      },
+      "Override": {
+        "type": "object",
+        "required": [
+          "id",
+          "deal_id",
+          "entity_id",
+          "field",
+          "new_value",
+          "weight"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "old_value": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "new_value": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "OverrideResponse": {
+        "type": "object",
+        "required": [
+          "override"
+        ],
+        "properties": {
+          "override": {
+            "$ref": "#/components/schemas/Override"
+          }
+        }
+      },
+      "OverridesListResponse": {
+        "type": "object",
+        "required": [
+          "overrides"
+        ],
+        "properties": {
+          "overrides": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Override"
+            }
+          }
+        }
+      },
+      "ReconciliationStatusEnum": {
+        "type": "string",
+        "enum": [
+          "NOT_RUN",
+          "OK",
+          "FAILED_OVERLAP"
+        ]
+      },
+      "TierEnum": {
+        "type": "string",
+        "enum": [
+          "Low",
+          "Medium",
+          "High"
+        ]
+      },
+      "AnalysisRun": {
+        "type": "object",
+        "required": [
+          "id",
+          "deal_id",
+          "state",
+          "schema_version",
+          "config_version"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "LIVE_DRAFT"
+            ]
+          },
+          "schema_version": {
+            "type": "string"
+          },
+          "config_version": {
+            "type": "string"
+          },
+          "run_trigger": {
+            "type": "string",
+            "enum": [
+              "parse_complete",
+              "override_applied",
+              "manual_export"
+            ]
+          },
+          "non_transfer_abs_total_cents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "classified_abs_total_cents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "coverage_pct_bp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "missing_month_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "missing_month_penalty_bp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5000
+          },
+          "override_penalty_bp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 7000
+          },
+          "reconciliation_status": {
+            "$ref": "#/components/schemas/ReconciliationStatusEnum"
+          },
+          "reconciliation_pct_bp": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "base_confidence_bp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "final_confidence_bp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "tier": {
+            "$ref": "#/components/schemas/TierEnum"
+          },
+          "tier_capped": {
+            "type": "boolean"
+          },
+          "raw_transaction_hash": {
+            "type": "string"
+          },
+          "transfer_links_hash": {
+            "type": "string"
+          },
+          "entities_hash": {
+            "type": "string"
+          },
+          "overrides_hash": {
+            "type": "string"
+          },
+          "bank_operational_inflow_cents": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Sum of positive revenue_operational non-transfer amounts (backend-computed)"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "LatestAnalysisResponse": {
+        "type": "object",
+        "required": [
+          "analysis_run"
+        ],
+        "properties": {
+          "analysis_run": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AnalysisRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Snapshot": {
+        "type": "object",
+        "required": [
+          "id",
+          "deal_id",
+          "sha256_hash",
+          "financial_state_hash",
+          "schema_version",
+          "config_version"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "analysis_run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "financial_state_hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Deterministic hash of the financial state (excludes override audit trail)"
+          },
+          "sha256_hash": {
+            "type": "string"
+          },
+          "schema_version": {
+            "type": "string"
+          },
+          "config_version": {
+            "type": "string"
+          },
+          "canonical_json": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ExportResponse": {
+        "type": "object",
+        "required": [
+          "analysis_run",
+          "snapshot"
+        ],
+        "properties": {
+          "analysis_run": {
+            "$ref": "#/components/schemas/AnalysisRun"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/Snapshot"
+          },
+          "entities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "entity_id": { "type": "string" },
+                "deal_id": { "type": "string" },
+                "display_name": { "type": "string" }
+              }
+            }
+          },
+          "txn_entity_map": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "txn_id": { "type": "string" },
+                "entity_id": { "type": "string" },
+                "role": { "type": "string" }
+              }
+            }
+          }
+        }
+      },
+      "SnapshotsListResponse": {
+        "type": "object",
+        "required": [
+          "snapshots"
+        ],
+        "properties": {
+          "snapshots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Snapshot"
+            }
+          }
+        }
+      },
+      "SnapshotDetailResponse": {
+        "type": "object",
+        "required": [
+          "snapshot"
+        ],
+        "properties": {
+          "snapshot": {
+            "$ref": "#/components/schemas/Snapshot"
+          }
+        }
+      }
+    },
+    "responses": {
+      "NotFound": {
+        "description": "Resource not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "deal_not_found": {
+                "value": {
+                  "error_code": "NOT_FOUND",
+                  "error_message": "Deal abc-123 not found",
+                  "next_action": null,
+                  "details": {}
+                }
+              }
+            }
+          }
+        }
+      },
+      "BadRequest": {
+        "description": "Bad request",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "missing_param": {
+                "value": {
+                  "error_code": "BAD_REQUEST",
+                  "error_message": "created_by query parameter is required",
+                  "next_action": null,
+                  "details": {}
+                }
+              }
+            }
+          }
+        }
+      },
+      "CurrencyMismatch": {
+        "description": "Document currency does not match deal currency",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "mismatch": {
+                "value": {
+                  "error_code": "CURRENCY_MISMATCH",
+                  "error_message": "Document currency does not match deal currency",
+                  "next_action": "upload_new_file",
+                  "details": {}
+                }
+              }
+            }
+          }
+        }
+      },
+      "InvalidSchema": {
+        "description": "File schema is invalid or unparseable",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "missing_cols": {
+                "value": {
+                  "error_code": "INVALID_SCHEMA",
+                  "error_message": "Missing required columns: amount, date",
+                  "next_action": "fix_format",
+                  "details": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

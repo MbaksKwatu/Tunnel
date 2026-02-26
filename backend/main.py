@@ -32,6 +32,7 @@ from evaluate_engine import Evaluator
 # Import Parity AI Routes
 import custom_report
 from routes import dashboard_mutation, llm_actions, deals
+from v1 import api as v1_api
 
 # Load environment variables
 load_dotenv()
@@ -66,10 +67,14 @@ app.add_middleware(
 )
 
 # Register Parity AI Routers
-app.include_router(custom_report.router)
-app.include_router(dashboard_mutation.router)
-app.include_router(llm_actions.router)
-app.include_router(deals.router, prefix="/api", tags=["deals"])
+# Legacy routes mounted under /legacy
+app.include_router(custom_report.router, prefix="/legacy")
+app.include_router(dashboard_mutation.router, prefix="/legacy")
+app.include_router(llm_actions.router, prefix="/legacy")
+app.include_router(deals.router, prefix="/legacy/api", tags=["legacy-deals"])
+
+# V1 deterministic API
+app.include_router(v1_api.router)
 
 # Initialize storage (Supabase only)
 # Wrap in try-except so app can start even if env vars are missing

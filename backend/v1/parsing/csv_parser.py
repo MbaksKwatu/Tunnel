@@ -33,6 +33,7 @@ def parse_csv(file_bytes: bytes, document_id: str, deal_currency: str) -> Tuple[
         amount_val = lowered.get("amount")
         desc_val = lowered.get("description")
         direction_val = lowered.get("direction")
+        account_val = lowered.get("account_id") or lowered.get("account") or "default"
 
         if desc_val in (None, ""):
             raise InvalidSchemaError(f"Description missing at row {idx}")
@@ -64,7 +65,7 @@ def parse_csv(file_bytes: bytes, document_id: str, deal_currency: str) -> Tuple[
             "raw_descriptor": str(desc_val),
             "parsed_descriptor": str(desc_val).strip(),
             "normalized_descriptor": normalize_descriptor(desc_val),
-            "account_id": "default",
+            "account_id": str(account_val).strip(),
         }
         row_obj["txn_id"] = compute_txn_id(row_obj, document_id)
         rows.append(row_obj)

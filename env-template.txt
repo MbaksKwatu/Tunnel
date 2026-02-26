@@ -18,6 +18,7 @@
 NEXT_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-public-key-here
 NEXT_PUBLIC_PARSER_API_URL=http://localhost:8000
+NEXT_PUBLIC_API_URL=http://localhost:8000
 
 # ==========================================
 # BACKEND (backend/.env)

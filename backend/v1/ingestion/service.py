@@ -1,6 +1,7 @@
 import uuid
 from typing import Any, Dict, Optional
 
+from ..config import SCHEMA_VERSION, CONFIG_VERSION
 from ..parsing import parse_file
 from ..parsing.errors import InvalidSchemaError, CurrencyMismatchError
 from ..parsing.common import canonical_hash, sort_rows
@@ -48,7 +49,15 @@ class IngestionService:
         document_id = str(uuid.uuid4())
 
         # Parse deterministically
-        rows, raw_hash, currency_detection = parse_file(file_bytes, file_type, document_id, deal_currency)
+        try:
+            rows, raw_hash, currency_detection = parse_file(file_bytes, file_type, document_id, deal_currency)
+        except CurrencyMismatchError:
+            # Surface directly to caller
+            raise
+        except InvalidSchemaError:
+            raise
+        except Exception as exc:
+            raise InvalidSchemaError(str(exc)) from exc
 
         # Persist document
         document = {
@@ -59,13 +68,15 @@ class IngestionService:
             "status": "completed",
             "currency_detected": None if currency_detection == "unknown" else currency_detection,
             "currency_mismatch": False,
+            "created_by": created_by,
         }
         self.documents_repo.create_document(document)
 
-        # Persist rows
+        # Persist rows (strip abs_amount_cents — it's a DB generated column)
         for r in rows:
             r["document_id"] = document_id
             r["deal_id"] = deal_id
+            r.pop("abs_amount_cents", None)
         self.raw_tx_repo.insert_batch(rows)
 
         # Optional: seed analysis_runs skeleton (LIVE_DRAFT placeholder without metrics)
@@ -75,8 +86,8 @@ class IngestionService:
                     "id": str(uuid.uuid4()),
                     "deal_id": deal_id,
                     "state": "LIVE_DRAFT",
-                    "schema_version": "v1",
-                    "config_version": "v1",
+                    "schema_version": SCHEMA_VERSION,
+                    "config_version": CONFIG_VERSION,
                     "run_trigger": "parse_complete",
                     "non_transfer_abs_total_cents": 0,
                     "classified_abs_total_cents": 0,

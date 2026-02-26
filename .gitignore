@@ -148,6 +148,7 @@ test_*.csv
 test_*.json
 !backend/tests/test_*.py
 !backend/tests/*_test.py
+!backend/tests_v1/test_*.py
 
 # Backup files
 *.bak

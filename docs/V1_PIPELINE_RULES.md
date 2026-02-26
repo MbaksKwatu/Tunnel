@@ -46,3 +46,8 @@
 ## Canonical Sorting (Before Hashing)
 - Sort transactions by: txn_date ASC, account_id ASC, signed_amount_cents ASC, normalized_descriptor ASC, txn_id ASC.
 - Apply sorting before hashing or aggregation to ensure deterministic raw_transaction_hash.
+
+## Dual Hash Model (Snapshots)
+- `sha256_hash` (provenance hash): canonical JSON of the full snapshot payload, **including** `overrides_applied` (audit trail). Export idempotency is keyed on this hash.
+- `financial_state_hash` (outcome-only hash): deterministic hash of the financial state, **excluding** override history and snapshot metadata. Proves identical outcomes even if override history differs.
+- Export idempotency: POST `/v1/deals/{deal_id}/export` returns the existing snapshot by `sha256_hash`. `financial_state_hash` is NOT used for idempotency.

@@ -18,6 +18,10 @@ class DealsRepository:
         """Fetch a deal by id."""
         raise NotImplementedError
 
+    def list_deals(self, created_by: str) -> Sequence[Dict[str, Any]]:
+        """List deals for a user."""
+        raise NotImplementedError
+
 
 class DocumentsRepository:
     def create_document(self, document: Dict[str, Any]) -> Dict[str, Any]:
@@ -28,10 +32,50 @@ class DocumentsRepository:
         """Update document status (and optional currency_mismatch flag)."""
         raise NotImplementedError
 
+    def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a document by id."""
+        raise NotImplementedError
+
+    def list_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
+        """Fetch documents for a deal."""
+        raise NotImplementedError
+
 
 class RawTransactionsRepository:
     def insert_batch(self, rows: Iterable[Dict[str, Any]]) -> None:
         """Bulk insert canonical raw transactions; rows must already be deterministic."""
+        raise NotImplementedError
+
+    def list_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
+        """Fetch raw transactions for a deal."""
+        raise NotImplementedError
+
+    def list_by_document(self, document_id: str) -> Sequence[Dict[str, Any]]:
+        """Fetch raw transactions for a document."""
+        raise NotImplementedError
+
+
+class TransferLinksRepository:
+    def insert_batch(self, links: Iterable[Dict[str, Any]]) -> None:
+        raise NotImplementedError
+
+    def list_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
+        raise NotImplementedError
+
+
+class EntitiesRepository:
+    def upsert_entities(self, entities: Iterable[Dict[str, Any]]) -> None:
+        raise NotImplementedError
+
+    def list_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
+        raise NotImplementedError
+
+
+class TxnEntityMapRepository:
+    def upsert_mappings(self, mappings: Iterable[Dict[str, Any]]) -> None:
+        raise NotImplementedError
+
+    def list_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         raise NotImplementedError
 
 
@@ -62,6 +106,10 @@ class SnapshotsRepository:
 
     def get_by_hash(self, sha256_hash: str) -> Optional[Dict[str, Any]]:
         """Fetch snapshot by hash (for idempotent export)."""
+        raise NotImplementedError
+
+    def get_snapshot(self, snapshot_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch snapshot by id."""
         raise NotImplementedError
 
     def list_snapshots(self, deal_id: str) -> Sequence[Dict[str, Any]]:
