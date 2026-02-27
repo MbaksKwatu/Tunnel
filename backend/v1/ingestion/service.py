@@ -1,5 +1,6 @@
 import logging
 import time
+import traceback
 import uuid
 from typing import Any, Dict, Optional
 
@@ -7,6 +8,7 @@ from ..config import SCHEMA_VERSION, CONFIG_VERSION
 from ..parsing import parse_file
 from ..parsing.errors import InvalidSchemaError, CurrencyMismatchError
 from ..parsing.common import canonical_hash, sort_rows
+from ..errors import is_dev_diagnostics
 from ..db.repositories import (
     AnalysisRunsRepository,
     DocumentsRepository,
@@ -14,6 +16,16 @@ from ..db.repositories import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Ingestion stages (must match exactly for diagnostics)
+STAGE_FILE_RECEIVED = "FILE_RECEIVED"
+STAGE_PARSE_START = "PARSE_START"
+STAGE_PARSE_DONE = "PARSE_DONE"
+STAGE_SCHEMA_VALIDATED = "SCHEMA_VALIDATED"
+STAGE_NORMALIZATION_DONE = "NORMALIZATION_DONE"
+STAGE_DB_INSERT_START = "DB_INSERT_START"
+STAGE_DB_INSERT_DONE = "DB_INSERT_DONE"
+STAGE_STATUS_COMPLETED = "STATUS_COMPLETED"
 
 
 class IngestionResult(Dict[str, Any]):
@@ -127,6 +139,32 @@ class IngestionService:
             "currency_detection": currency_detection,
         }
 
+    def _update_failed(
+        self,
+        document_id: str,
+        error_type: str,
+        error_message: str,
+        stage: str,
+        next_action: str,
+        currency_mismatch: bool = False,
+        exc: Optional[Exception] = None,
+    ) -> None:
+        tb_str = traceback.format_exc() if (is_dev_diagnostics() and exc) else None
+        try:
+            self.documents_repo.update_status(
+                document_id,
+                "failed",
+                currency_mismatch=currency_mismatch,
+                error_message=error_message,
+                error_type=error_type,
+                error_stage=stage,
+                next_action=next_action,
+            )
+        except Exception:
+            pass
+        if tb_str:
+            logger.debug("[INGEST] traceback (dev): %s", tb_str)
+
     def process_document_background(
         self,
         *,
@@ -141,35 +179,45 @@ class IngestionService:
         """
         Process document in background. Document must already exist with status=processing.
         On success: updates status=completed, inserts rows, inserts analysis run.
-        On failure: updates status=failed.
+        On failure: updates status=failed with structured error taxonomy.
         """
+        stage = STAGE_FILE_RECEIVED
         try:
+            stage = STAGE_PARSE_START
+            logger.info("[INGEST] stage=%s document_id=%s", stage, document_id)
             parse_start = time.perf_counter()
             rows, raw_hash, currency_detection = parse_file(
                 file_bytes, file_type, document_id, deal_currency
             )
             parse_end = time.perf_counter()
             parse_ms = int((parse_end - parse_start) * 1000)
+            stage = STAGE_PARSE_DONE
+            logger.info("[INGEST] stage=%s rows=%d parse_ms=%d", stage, len(rows), parse_ms)
+
+            stage = STAGE_SCHEMA_VALIDATED
+            logger.info("[INGEST] stage=%s rows=%d", stage, len(rows))
+
+            stage = STAGE_NORMALIZATION_DONE
+            for r in rows:
+                r["document_id"] = document_id
+                r["deal_id"] = deal_id
+                r.pop("abs_amount_cents", None)
+
+            stage = STAGE_DB_INSERT_START
+            logger.info("[INGEST] stage=%s rows=%d", stage, len(rows))
+            db_insert_start = time.perf_counter()
+            self.raw_tx_repo.insert_batch(rows)
+            db_insert_end = time.perf_counter()
+            insert_ms = int((db_insert_end - db_insert_start) * 1000)
+            stage = STAGE_DB_INSERT_DONE
+            logger.info("[INGEST] stage=%s rows=%d insert_ms=%d", stage, len(rows), insert_ms)
 
             self.documents_repo.update_status(
                 document_id,
                 "completed",
                 currency_mismatch=False,
             )
-            # Update currency_detected if we have it (DocumentsRepo may not support; skip if not)
-            # Schema has currency_detected; we'd need update_status to accept it. Keep minimal.
-
-            for r in rows:
-                r["document_id"] = document_id
-                r["deal_id"] = deal_id
-                r.pop("abs_amount_cents", None)
-
-            db_insert_start = time.perf_counter()
-            self.raw_tx_repo.insert_batch(rows)
-            db_insert_end = time.perf_counter()
-            insert_ms = int((db_insert_end - db_insert_start) * 1000)
-
-            logger.info("[INGEST] rows=%d parse_ms=%d insert_ms=%d", len(rows), parse_ms, insert_ms)
+            stage = STAGE_STATUS_COMPLETED
 
             if self.analysis_repo:
                 self.analysis_repo.insert_run(
@@ -198,22 +246,39 @@ class IngestionService:
                         "overrides_hash": canonical_hash([]),
                     }
                 )
-        except CurrencyMismatchError:
-            logger.warning("[INGEST] background currency mismatch")
-            try:
-                self.documents_repo.update_status(document_id, "failed", currency_mismatch=True)
-            except Exception:
-                pass
+
+            logger.info("[INGEST] rows=%d parse_ms=%d insert_ms=%d", len(rows), parse_ms, insert_ms)
+        except CurrencyMismatchError as exc:
+            logger.warning("[INGEST] background currency mismatch stage=%s", stage)
+            self._update_failed(
+                document_id,
+                error_type="CurrencyMismatchError",
+                error_message=str(exc),
+                stage=stage,
+                next_action="fix_currency",
+                currency_mismatch=True,
+                exc=exc,
+            )
         except InvalidSchemaError as exc:
-            logger.warning("[INGEST] background invalid schema: %s", exc)
-            try:
-                currency_mismatch = "currency mismatch" in str(exc).lower()
-                self.documents_repo.update_status(document_id, "failed", currency_mismatch=currency_mismatch)
-            except Exception:
-                pass
+            logger.warning("[INGEST] background invalid schema stage=%s: %s", stage, exc)
+            currency_mismatch = "currency mismatch" in str(exc).lower()
+            self._update_failed(
+                document_id,
+                error_type="SchemaValidationError",
+                error_message=str(exc),
+                stage=stage,
+                next_action="fix_csv_header",
+                currency_mismatch=currency_mismatch,
+                exc=exc,
+            )
         except Exception as exc:
-            logger.exception("[INGEST] background failed: %s", exc)
-            try:
-                self.documents_repo.update_status(document_id, "failed", currency_mismatch=False)
-            except Exception:
-                pass
+            logger.exception("[INGEST] background failed stage=%s: %s", stage, exc)
+            self._update_failed(
+                document_id,
+                error_type=exc.__class__.__name__,
+                error_message=str(exc),
+                stage=stage,
+                next_action="retry_or_contact_support",
+                currency_mismatch=False,
+                exc=exc,
+            )

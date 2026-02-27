@@ -59,8 +59,27 @@ class DocumentsRepo(DocumentsRepository, BaseRepo):
     def create_document(self, document: Dict[str, Any]) -> Dict[str, Any]:
         return self.insert(document)
 
-    def update_status(self, document_id: str, status: str, *, currency_mismatch: bool = False) -> None:
-        self.client.table(self.table).update({"status": status, "currency_mismatch": currency_mismatch}).eq("id", document_id).execute()
+    def update_status(
+        self,
+        document_id: str,
+        status: str,
+        *,
+        currency_mismatch: bool = False,
+        error_message: Optional[str] = None,
+        error_type: Optional[str] = None,
+        error_stage: Optional[str] = None,
+        next_action: Optional[str] = None,
+    ) -> None:
+        data: Dict[str, Any] = {"status": status, "currency_mismatch": currency_mismatch}
+        if error_message is not None:
+            data["error_message"] = error_message
+        if error_type is not None:
+            data["error_type"] = error_type
+        if error_stage is not None:
+            data["error_stage"] = error_stage
+        if next_action is not None:
+            data["next_action"] = next_action
+        self.client.table(self.table).update(data).eq("id", document_id).execute()
 
     def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
         rows = self.select_eq("id", document_id)

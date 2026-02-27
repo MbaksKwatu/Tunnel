@@ -92,9 +92,20 @@ export async function uploadDocument(
   return res.json()
 }
 
+export interface DocumentStatusResponse {
+  document_id: string
+  status: string
+  error?: string
+  error_type?: string
+  error_message?: string
+  stage?: string
+  next_action?: string
+  traceback?: string
+}
+
 export async function getDocumentStatus(
   documentId: string
-): Promise<{ document_id: string; status: string }> {
+): Promise<DocumentStatusResponse> {
   const res = await fetchApi(`${BASE}/documents/${documentId}/status`)
   if (!res.ok) throw new Error(await res.text())
   return res.json()

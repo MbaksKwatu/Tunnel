@@ -949,6 +949,26 @@
               "string",
               "null"
             ]
+          },
+          "error": {
+            "type": "string",
+            "description": "When status is failed, the specific ingestion error message (legacy)"
+          },
+          "error_type": {
+            "type": "string",
+            "description": "When status is failed, structured error type (e.g. SchemaValidationError)"
+          },
+          "error_message": {
+            "type": "string",
+            "description": "When status is failed, human-readable error message"
+          },
+          "stage": {
+            "type": "string",
+            "description": "When status is failed, ingestion stage where failure occurred"
+          },
+          "next_action": {
+            "type": "string",
+            "description": "When status is failed, suggested next action"
           }
         }
       },

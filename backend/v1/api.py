@@ -234,7 +234,7 @@ def get_document_status(request: Request, document_id: str):
     doc = repos["documents"].get_document(document_id)
     if not doc:
         _error("NOT_FOUND", f"Document {document_id} not found")
-    return {
+    out = {
         "document_id": doc["id"],
         "deal_id": doc.get("deal_id"),
         "status": doc.get("status"),
@@ -242,6 +242,14 @@ def get_document_status(request: Request, document_id: str):
         "currency_mismatch": doc.get("currency_mismatch", False),
         "created_at": doc.get("created_at"),
     }
+    if doc.get("status") == "failed":
+        out["error_type"] = doc.get("error_type") or "UnknownError"
+        out["error_message"] = doc.get("error_message") or "Document processing failed"
+        out["stage"] = doc.get("error_stage") or "UNKNOWN"
+        out["next_action"] = doc.get("next_action") or "retry_or_contact_support"
+        # Legacy: keep "error" for backward compat
+        out["error"] = out["error_message"]
+    return out
 
 
 @router.get("/documents/{document_id}/transactions")
@@ -355,6 +363,8 @@ def get_latest_analysis(request: Request, deal_id: str):
 @router.post("/deals/{deal_id}/export")
 def export(request: Request, deal_id: str):
     started = time.perf_counter()
+    stage = "EXPORT_START"
+    logger.info("[EXPORT] stage=%s deal_id=%s", stage, deal_id)
     repos = _repos(request)
     deal = repos["deals"].get_deal(deal_id)
     if not deal:
@@ -364,6 +374,8 @@ def export(request: Request, deal_id: str):
     if not_ready:
         _error("DOCUMENTS_NOT_READY", "Documents still processing", status=409, next_action="wait_or_retry")
     raw = list(repos["raw"].list_by_deal(deal_id))
+    stage = "FETCH_INPUTS_DONE"
+    logger.info("[EXPORT] stage=%s raw_count=%d", stage, len(raw))
     overrides = list(repos["overrides"].list_overrides(deal_id))
 
     if not raw:
@@ -398,6 +410,7 @@ def export(request: Request, deal_id: str):
                 "txn_entity_map": txn_map,
             }
 
+    stage = "PIPELINE_DONE"
     run, links, entities, txn_map = run_pipeline(
         deal_id=deal_id,
         raw_transactions=raw,
@@ -408,6 +421,7 @@ def export(request: Request, deal_id: str):
             "accrual_period_end": deal.get("accrual_period_end"),
         },
     )
+    logger.info("[EXPORT] stage=%s", stage)
 
     txn_id_to_uuid = {tx["txn_id"]: tx["id"] for tx in raw if "id" in tx}
     for rec in txn_map:
@@ -428,6 +442,8 @@ def export(request: Request, deal_id: str):
     repos["entities"].upsert_entities(entities)
     repos["txn_map"].upsert_mappings(txn_map)
 
+    stage = "SNAPSHOT_BUILD_DONE"
+    logger.info("[EXPORT] stage=%s", stage)
     payload = build_pds_payload(
         schema_version=run["schema_version"],
         config_version=run["config_version"],
@@ -459,11 +475,14 @@ def export(request: Request, deal_id: str):
         payload=payload,
         created_by=deal.get("created_by") or str(uuid.uuid4()),
     )
+    stage = "SNAPSHOT_INSERT_DONE"
+    logger.info("[EXPORT] stage=%s", stage)
+    stage = "EXPORT_DONE"
     duration_ms = int((time.perf_counter() - started) * 1000)
     if request:
         request.app.state.last_export_ms = duration_ms
         request.app.state.last_export_at = datetime.now(timezone.utc).isoformat()
-    logger.info("[EXPORT] deal=%s ms=%d short_circuit=0", deal_id, duration_ms)
+    logger.info("[EXPORT] stage=%s deal=%s ms=%d short_circuit=0", stage, deal_id, duration_ms)
     return {
         "analysis_run": run,
         "snapshot": snapshot,

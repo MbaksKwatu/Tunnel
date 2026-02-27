@@ -28,8 +28,18 @@ class DocumentsRepository:
         """Insert a document row."""
         raise NotImplementedError
 
-    def update_status(self, document_id: str, status: str, *, currency_mismatch: bool = False) -> None:
-        """Update document status (and optional currency_mismatch flag)."""
+    def update_status(
+        self,
+        document_id: str,
+        status: str,
+        *,
+        currency_mismatch: bool = False,
+        error_message: Optional[str] = None,
+        error_type: Optional[str] = None,
+        error_stage: Optional[str] = None,
+        next_action: Optional[str] = None,
+    ) -> None:
+        """Update document status (and optional error taxonomy fields)."""
         raise NotImplementedError
 
     def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:

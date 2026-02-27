@@ -1,0 +1,3 @@
+txn_id,account_id,txn_date,signed_amount_cents,normalized_descriptor,balance_cents,currency
+tx1,ACC-1,2024-01-01,1000,revenue payment,0,USD
+tx2,ACC-1,2024-01-02,-400,supplier payment,0,USD

@@ -90,7 +90,15 @@ export default function V1DealPage() {
       let status = await getDocumentStatus(ingestion.document_id);
       while (status.status !== 'completed') {
         if (status.status === 'failed') {
-          setErrorMsg('Document processing failed');
+          const errType = status.error_type || 'UnknownError';
+          const errMsg = status.error_message || status.error || 'Document processing failed';
+          const stage = status.stage || '';
+          const nextAction = status.next_action || '';
+          setErrorMsg(
+            stage
+              ? `${errType}: ${errMsg} (stage: ${stage}, next: ${nextAction})`
+              : `${errType}: ${errMsg}`
+          );
           setAnalysisState('error');
           return;
         }
@@ -225,6 +233,10 @@ export default function V1DealPage() {
       {/* Step 1: Upload + Accrual */}
       <section className="bg-gray-800 rounded-lg p-6 mb-6">
         <h2 className="text-lg font-semibold mb-4">Upload & Accrual</h2>
+        <p className="text-sm text-gray-400 mb-3">
+          Upload a bank-export CSV or XLSX (must include <code className="text-gray-300">date</code>,{' '}
+          <code className="text-gray-300">description</code>, <code className="text-gray-300">amount</code> columns).
+        </p>
         <div
           {...getRootProps()}
           className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer mb-4 ${

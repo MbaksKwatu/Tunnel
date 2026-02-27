@@ -48,11 +48,29 @@ class MemoryDocumentsRepo(DocumentsRepository):
         self._store.append(row)
         return copy.deepcopy(row)
 
-    def update_status(self, document_id: str, status: str, *, currency_mismatch: bool = False) -> None:
+    def update_status(
+        self,
+        document_id: str,
+        status: str,
+        *,
+        currency_mismatch: bool = False,
+        error_message: Optional[str] = None,
+        error_type: Optional[str] = None,
+        error_stage: Optional[str] = None,
+        next_action: Optional[str] = None,
+    ) -> None:
         for d in self._store:
             if d["id"] == document_id:
                 d["status"] = status
                 d["currency_mismatch"] = currency_mismatch
+                if error_message is not None:
+                    d["error_message"] = error_message
+                if error_type is not None:
+                    d["error_type"] = error_type
+                if error_stage is not None:
+                    d["error_stage"] = error_stage
+                if next_action is not None:
+                    d["next_action"] = next_action
                 break
 
     def list_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:

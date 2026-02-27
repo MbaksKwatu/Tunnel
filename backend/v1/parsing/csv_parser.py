@@ -21,7 +21,11 @@ def parse_csv(file_bytes: bytes, document_id: str, deal_currency: str) -> Tuple[
     headers = {normalize_header(h) for h in (reader.fieldnames or [])}
     missing = REQUIRED_HEADERS - headers
     if missing:
-        raise InvalidSchemaError(f"Missing required columns: {', '.join(sorted(missing))}")
+        accepted = ", ".join(sorted(REQUIRED_HEADERS))
+        raise InvalidSchemaError(
+            f"Missing required columns: {', '.join(sorted(missing))}. "
+            f"Accepted headers: {accepted}"
+        )
 
     rows: List[Dict[str, Any]] = []
     currency_detection = "unknown"
