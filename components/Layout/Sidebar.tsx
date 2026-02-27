@@ -20,6 +20,7 @@ interface NavItem {
 }
 
 const navigation: NavItem[] = [
+  { name: 'Deal Analysis (v1)', href: '/v1/deal', icon: LayoutDashboard },
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Upload', href: '/upload', icon: Upload },
   { name: 'Reports', href: '/reports', icon: BarChart3 },

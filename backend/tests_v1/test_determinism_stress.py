@@ -862,16 +862,17 @@ class TestPhase6_LegacyRouteIsolation(unittest.TestCase):
         self.assertIn("v1_api", source, "main.py should reference v1_api")
         self.assertIn("include_router", source, "main.py should mount routers")
 
-    def test_legacy_routes_separated(self):
-        """Verify legacy routes are mounted under /legacy prefix."""
+    def test_no_legacy_routes(self):
+        """Verify no legacy routes; only v1 router is mounted."""
         main_path = os.path.abspath(
             os.path.join(self.V1_ROOT, os.pardir, "main.py")
         )
         with open(main_path, "r", encoding="utf-8") as f:
             source = f.read()
 
-        # Legacy routers must be prefixed with /legacy
-        self.assertIn('prefix="/legacy"', source, "Legacy routes should be prefixed with /legacy")
+        # Legacy routes decommissioned; only v1 router
+        self.assertIn("v1_api.router", source, "main.py should mount v1 router")
+        self.assertNotIn('prefix="/legacy"', source, "Legacy routes must not exist")
 
 
 # ===================================================================

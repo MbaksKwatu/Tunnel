@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { FileText, Trash2, Download, Eye, AlertCircle, CheckCircle, Clock, Loader2, X, RefreshCw } from 'lucide-react';
 import { getDocuments, deleteDocument, Document } from '@/lib/supabase';
 import { format } from 'date-fns';
@@ -15,29 +15,41 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loadingRef = useRef(true);
 
   const loadDocuments = async () => {
     try {
       setLoading(true);
+      loadingRef.current = true;
       setError(null);
       console.log('Loading documents for user:', userId);
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c06d0fd1-c297-47eb-9e68-2482808d33d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'780603'},body:JSON.stringify({sessionId:'780603',location:'DocumentList.tsx:loadDocuments:start',message:'loadDocuments started',data:{userId},hypothesisId:'H2,H3',timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       const docs = await getDocuments(userId);
       console.log('Documents loaded:', docs);
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c06d0fd1-c297-47eb-9e68-2482808d33d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'780603'},body:JSON.stringify({sessionId:'780603',location:'DocumentList.tsx:loadDocuments:done',message:'loadDocuments completed',data:{docCount:docs?.length??0,firstDocId:docs?.[0]?.id},hypothesisId:'H2,H3',timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       setDocuments(docs);
     } catch (err: any) {
       console.error('Error loading documents:', err);
       setError(err.message || 'Failed to load documents');
     } finally {
       setLoading(false);
+      loadingRef.current = false;
     }
   };
 
   useEffect(() => {
     loadDocuments();
 
-    // Add timeout to prevent infinite loading
+    // Add timeout to prevent infinite loading (use ref to avoid stale closure)
     const timeout = setTimeout(() => {
-      if (loading) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/c06d0fd1-c297-47eb-9e68-2482808d33d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'780603'},body:JSON.stringify({sessionId:'780603',location:'DocumentList.tsx:timeout:fired',message:'60s timeout fired',data:{loadingRef:loadingRef.current},hypothesisId:'H1',timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      if (loadingRef.current) {
         console.warn('Document loading timeout - setting error');
         setError('Loading timeout - please check your connection');
         setLoading(false);
