@@ -1,10 +1,5 @@
-import DealCreate from '@/components/DealCreate'
-import ProtectedRoute from '@/components/ProtectedRoute'
+import { redirect } from 'next/navigation'
 
 export default function NewDealPage() {
-  return (
-    <ProtectedRoute>
-      <DealCreate />
-    </ProtectedRoute>
-  )
+  redirect('/v1/deal')
 }

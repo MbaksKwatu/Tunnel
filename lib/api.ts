@@ -3,7 +3,17 @@ import { getApiToken, setApiToken } from './auth-bridge'
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
+const V1_PREFIX = '/v1'
 export const fetchApi = async (endpoint: string, options?: RequestInit) => {
+  if (!endpoint.startsWith(V1_PREFIX)) {
+    const err = new Error(
+      `Legacy API call blocked: "${endpoint}". All API calls must use /v1/* routes.`
+    )
+    if (typeof window !== 'undefined') {
+      console.error(err.message)
+    }
+    throw err
+  }
   const url = `${API_URL}${endpoint}`
   const supabase = createBrowserClient()
   // Use token from AuthProvider first (same session the UI shows), then getSession()

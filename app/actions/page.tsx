@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
 
-export default function DealsPage() {
+export default function ActionsPage() {
   redirect('/v1/deal')
 }

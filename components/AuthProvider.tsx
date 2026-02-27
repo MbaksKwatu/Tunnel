@@ -60,24 +60,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(session?.user ?? null)
         setApiToken(session?.access_token ?? null)
         if (event === 'SIGNED_IN') {
-          // Check if user needs onboarding
-          try {
-            const { data: thesis, error } = await supabase
-              .from('thesis')
-              .select('id')
-              .eq('fund_id', session?.user?.id)
-              .single()
-            
-            if (error || !thesis) {
-              router.push('/onboarding/thesis')
-            } else {
-              router.push('/deals')
-            }
-          } catch (error) {
-            console.warn('Failed to check thesis:', error)
-            // On error, default to onboarding to be safe
-            router.push('/onboarding/thesis')
-          }
+          router.push('/v1/deal')
         }
         
         if (event === 'SIGNED_OUT') {

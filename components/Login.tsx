@@ -7,13 +7,6 @@ import { createBrowserClient } from '@/lib/supabase'
 
 const isDemoMode = process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
 const demoEmail = process.env.NEXT_PUBLIC_DEMO_EMAIL || ''
-const ingest = (payload: Record<string, any>) => {
-  fetch('http://127.0.0.1:7242/ingest/c06d0fd1-c297-47eb-9e68-2482808d33d7', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  }).catch(() => {})
-}
 
 export default function Login() {
   const [isSignUp, setIsSignUp] = useState(false)
@@ -53,7 +46,6 @@ export default function Login() {
     }, timeoutMs)
 
     try {
-      ingest({ location: 'components/Login.tsx:handleSubmit', message: 'auth_submit_start', data: { email, isSignUp, showForgotPassword }, runId: 'auth-debug', timestamp: Date.now() })
       if (showForgotPassword) {
         // Handle password reset
         if (!email) {
@@ -69,8 +61,7 @@ export default function Login() {
       } else if (isSignUp && !isDemoMode) {
         const result = await signUp(email, password)
         if (result.error) throw result.error
-        ingest({ location: 'components/Login.tsx:handleSubmit', message: 'auth_signup_success', data: { email }, runId: 'auth-debug', timestamp: Date.now() })
-        
+
         // Check if user needs email confirmation
         // If session exists in result.data, user was auto-confirmed (email confirmation disabled)
         // If no session, user needs to confirm email
@@ -90,7 +81,6 @@ export default function Login() {
         if (error) throw error
         clearTimeout(timeoutId)
         // AuthProvider will handle redirect
-        ingest({ location: 'components/Login.tsx:handleSubmit', message: 'auth_signin_success', data: { email }, runId: 'auth-debug', timestamp: Date.now() })
       }
     } catch (err: any) {
       clearTimeout(timeoutId)
@@ -99,7 +89,6 @@ export default function Login() {
       if (msg.includes('Invalid login') || msg.includes('invalid') || msg.toLowerCase().includes('credentials')) {
         setError('Invalid email or password. Please try again.')
       }
-      ingest({ location: 'components/Login.tsx:handleSubmit', message: 'auth_error', data: { email, error: msg }, runId: 'auth-debug', timestamp: Date.now() })
     } finally {
       clearTimeout(timeoutId)
       setLoading(false)

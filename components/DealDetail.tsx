@@ -6,13 +6,6 @@ import { Upload, FileText, CheckCircle, Clock, AlertCircle, Play, ArrowLeft, Tra
 import JudgmentCards from './JudgmentCards'
 import AskParityChat from './AskParityChat'
 import { fetchApi } from '@/lib/api'
-const ingest = (payload: Record<string, any>) => {
-  fetch('http://127.0.0.1:7242/ingest/c06d0fd1-c297-47eb-9e68-2482808d33d7', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  }).catch(() => {})
-}
 
 interface Deal {
   id: string
@@ -147,19 +140,14 @@ export default function DealDetail({ dealId }: { dealId: string }) {
     setError('')
     
     try {
-      ingest({ location: 'components/DealDetail.tsx:fetchDealData', message: 'start', data: { dealId }, runId: 'deal-detail-debug', timestamp: Date.now() })
-
       const dealResponse = await fetchApi(`/api/deals/${dealId}`)
       console.log('[DealDetail] deal fetch status', dealResponse.status)
       if (!dealResponse.ok) {
-        const text = await dealResponse.text().catch(() => '')
-        ingest({ location: 'components/DealDetail.tsx:fetchDealData', message: 'deal_fetch_failed', data: { dealId, status: dealResponse.status, body: text }, runId: 'deal-detail-debug', timestamp: Date.now() })
         throw new Error('Failed to load deal')
       }
       const dealData = await safeJson(dealResponse)
       const rawDeal = dealData.deal || dealData
       setDeal(normalizeDeal(rawDeal))
-      ingest({ location: 'components/DealDetail.tsx:fetchDealData', message: 'deal_loaded', data: { dealId, deal: dealData?.deal || dealData }, runId: 'deal-detail-debug', timestamp: Date.now() })
       console.log('[DealDetail] deal data', dealData)
 
       const evidenceResponse = await fetchApi(`/api/deals/${dealId}/evidence`)
@@ -167,11 +155,7 @@ export default function DealDetail({ dealId }: { dealId: string }) {
       if (evidenceResponse.ok) {
         const evidenceData = await safeJson(evidenceResponse)
         setEvidence(normalizeEvidence(evidenceData.evidence || evidenceData || []))
-        ingest({ location: 'components/DealDetail.tsx:fetchDealData', message: 'evidence_loaded', data: { dealId, count: (evidenceData?.evidence || evidenceData || []).length || 0 }, runId: 'deal-detail-debug', timestamp: Date.now() })
         console.log('[DealDetail] evidence data', evidenceData)
-      } else {
-        const text = await evidenceResponse.text().catch(() => '')
-        ingest({ location: 'components/DealDetail.tsx:fetchDealData', message: 'evidence_fetch_failed', data: { dealId, status: evidenceResponse.status, body: text }, runId: 'deal-detail-debug', timestamp: Date.now() })
       }
 
       const judgmentResponse = await fetchApi(`/api/deals/${dealId}/judgment`)
@@ -180,16 +164,11 @@ export default function DealDetail({ dealId }: { dealId: string }) {
         const judgmentData = await safeJson(judgmentResponse)
         const rawJudgment = judgmentData.judgment || judgmentData
         setJudgment(rawJudgment ? normalizeJudgment(rawJudgment) : null)
-        ingest({ location: 'components/DealDetail.tsx:fetchDealData', message: 'judgment_loaded', data: { dealId, hasJudgment: !!rawJudgment }, runId: 'deal-detail-debug', timestamp: Date.now() })
         console.log('[DealDetail] judgment data', judgmentData)
-      } else {
-        const text = await judgmentResponse.text().catch(() => '')
-        ingest({ location: 'components/DealDetail.tsx:fetchDealData', message: 'judgment_fetch_failed', data: { dealId, status: judgmentResponse.status, body: text }, runId: 'deal-detail-debug', timestamp: Date.now() })
       }
     } catch (err: any) {
       setError(err.message)
       console.error('[DealDetail] fetch error', err)
-      ingest({ location: 'components/DealDetail.tsx:fetchDealData', message: 'error', data: { dealId, error: err?.message || String(err) }, runId: 'deal-detail-debug', timestamp: Date.now() })
     } finally {
       setLoading(false)
     }

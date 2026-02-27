@@ -26,20 +26,7 @@ export default function AuthCallback() {
         }
 
         if (data.session) {
-          // User is authenticated, check if they have a thesis
-          const { data: thesis, error: thesisError } = await supabase
-            .from('thesis')
-            .select('id')
-            .eq('fund_id', data.session.user.id)
-            .single()
-
-          if (thesisError || !thesis) {
-            // No thesis, redirect to onboarding
-            router.push('/onboarding/thesis')
-          } else {
-            // Has thesis, redirect to deals
-            router.push('/deals')
-          }
+          router.push('/v1/deal')
         } else {
           // No session, redirect to login
           router.push('/login?error=no_session')

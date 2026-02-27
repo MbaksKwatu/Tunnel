@@ -2,30 +2,17 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { 
-  FolderOpen, 
-  Bot, 
-  BarChart3, 
-  Settings,
-  Brain,
-  LayoutDashboard,
-  Upload
-} from 'lucide-react';
+import { Brain, LayoutDashboard } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 interface NavItem {
   name: string;
   href: string;
-  icon: typeof FolderOpen;
+  icon: typeof LayoutDashboard;
 }
 
 const navigation: NavItem[] = [
   { name: 'Deal Analysis (v1)', href: '/v1/deal', icon: LayoutDashboard },
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { name: 'Upload', href: '/upload', icon: Upload },
-  { name: 'Reports', href: '/reports', icon: BarChart3 },
-  { name: 'Actions', href: '/actions', icon: Bot },
-  { name: 'Settings', href: '/rules', icon: Settings },
 ];
 
 export default function Sidebar() {

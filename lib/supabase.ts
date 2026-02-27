@@ -7,9 +7,6 @@ export const createBrowserClient = (): SupabaseClient | null => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   if (!url || !key) return null
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/c06d0fd1-c297-47eb-9e68-2482808d33d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'780603'},body:JSON.stringify({sessionId:'780603',location:'supabase.ts:createBrowserClient:newInstance',message:'Creating new Supabase client',data:{hadExisting:!!globalForSupabase.__supabaseBrowserClient},hypothesisId:'H4',timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   globalForSupabase.__supabaseBrowserClient = createClient(url, key)
   return globalForSupabase.__supabaseBrowserClient
 }
@@ -230,9 +227,6 @@ export async function updateDocumentStatus(
 
 // Helper function to get documents for a user
 export async function getDocuments(userId: string): Promise<Document[]> {
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/c06d0fd1-c297-47eb-9e68-2482808d33d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'780603'},body:JSON.stringify({sessionId:'780603',location:'supabase.ts:getDocuments:entry',message:'getDocuments called',data:{userId,isLocalMode,hasSupabase:!!supabase},hypothesisId:'H2,H3',timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   if (isLocalMode || !supabase) {
     // Local mode: use backend API
     const url = userId ? `${API_BASE}/documents?session_id=${encodeURIComponent(userId)}` : `${API_BASE}/documents`;
@@ -259,10 +253,6 @@ export async function getDocuments(userId: string): Promise<Document[]> {
     .select('*')
     .eq('user_id', userId)
     .order('upload_date', { ascending: false });
-
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/c06d0fd1-c297-47eb-9e68-2482808d33d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'780603'},body:JSON.stringify({sessionId:'780603',location:'supabase.ts:getDocuments:supabaseResult',message:'Supabase query result',data:{rowCount:data?.length??0,error:error?.message,userId},hypothesisId:'H2,H3',timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
 
   if (error) {
     throw error;

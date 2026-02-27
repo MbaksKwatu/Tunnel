@@ -23,14 +23,8 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
       loadingRef.current = true;
       setError(null);
       console.log('Loading documents for user:', userId);
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/c06d0fd1-c297-47eb-9e68-2482808d33d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'780603'},body:JSON.stringify({sessionId:'780603',location:'DocumentList.tsx:loadDocuments:start',message:'loadDocuments started',data:{userId},hypothesisId:'H2,H3',timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       const docs = await getDocuments(userId);
       console.log('Documents loaded:', docs);
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/c06d0fd1-c297-47eb-9e68-2482808d33d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'780603'},body:JSON.stringify({sessionId:'780603',location:'DocumentList.tsx:loadDocuments:done',message:'loadDocuments completed',data:{docCount:docs?.length??0,firstDocId:docs?.[0]?.id},hypothesisId:'H2,H3',timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       setDocuments(docs);
     } catch (err: any) {
       console.error('Error loading documents:', err);
@@ -46,9 +40,6 @@ export default function DocumentList({ userId, onViewDocument, refreshTrigger }:
 
     // Add timeout to prevent infinite loading (use ref to avoid stale closure)
     const timeout = setTimeout(() => {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/c06d0fd1-c297-47eb-9e68-2482808d33d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'780603'},body:JSON.stringify({sessionId:'780603',location:'DocumentList.tsx:timeout:fired',message:'60s timeout fired',data:{loadingRef:loadingRef.current},hypothesisId:'H1',timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (loadingRef.current) {
         console.warn('Document loading timeout - setting error');
         setError('Loading timeout - please check your connection');

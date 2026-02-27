@@ -1,5 +1,5 @@
-import ThesisSettings from '@/components/ThesisSettings'
+import { redirect } from 'next/navigation'
 
-export default function ThesisSettingsPage() {
-  return <ThesisSettings />
+export default function SettingsThesisPage() {
+  redirect('/v1/deal')
 }

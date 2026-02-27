@@ -1,5 +1,5 @@
-import ThesisOnboarding from '@/components/ThesisOnboarding'
+import { redirect } from 'next/navigation'
 
-export default function ThesisOnboardingPage() {
-  return <ThesisOnboarding />
+export default function OnboardingThesisPage() {
+  redirect('/v1/deal')
 }

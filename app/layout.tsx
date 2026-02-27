@@ -12,8 +12,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Parity - Investment Judgment Engine",
-  description: "AI-powered investment judgment for emerging markets",
+  title: "Parity PDS - Deal Analysis",
+  description: "Deterministic v1 deal analysis and snapshot export",
 };
 
 export default function RootLayout({
