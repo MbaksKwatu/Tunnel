@@ -40,9 +40,9 @@ interface EntityBreakdownRow {
 export default function V1DealPage() {
   const router = useRouter();
   useEffect(() => {
-    if (!supabase) { router.replace('/auth/login'); return; }
+    if (!supabase) { router.replace('/login'); return; }
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) router.replace('/auth/login');
+      if (!session) router.replace('/login');
     });
   }, [router]);
 
