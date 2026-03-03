@@ -9,7 +9,7 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request, BackgroundTasks, Body
 
 logger = logging.getLogger(__name__)
 from datetime import datetime, timezone
@@ -184,13 +184,14 @@ async def upload_document(
 
     content = await file.read()
     document_id = str(uuid.uuid4())
-    file_type = file.filename.split(".")[-1] if "." in file.filename else "csv"
+    fname = file.filename or "upload.csv"
+    file_type = fname.rsplit(".", 1)[-1] if "." in fname else "csv"
     created_by_val = created_by or deal.get("created_by") or str(uuid.uuid4())
 
     document = {
         "id": document_id,
         "deal_id": deal_id,
-        "storage_url": f"inline://{file.filename}",
+        "storage_url": f"inline://{fname}",
         "file_type": file_type.lower(),
         "status": "processing",
         "currency_detected": None,
@@ -410,7 +411,7 @@ def export(request: Request, deal_id: str):
                 "txn_entity_map": txn_map,
             }
 
-    stage = "PIPELINE_DONE"
+    stage = "PIPELINE_START"
     run, links, entities, txn_map = run_pipeline(
         deal_id=deal_id,
         raw_transactions=raw,
@@ -421,6 +422,7 @@ def export(request: Request, deal_id: str):
             "accrual_period_end": deal.get("accrual_period_end"),
         },
     )
+    stage = "PIPELINE_DONE"
     logger.info("[EXPORT] stage=%s", stage)
 
     txn_id_to_uuid = {tx["txn_id"]: tx["id"] for tx in raw if "id" in tx}
@@ -507,3 +509,28 @@ def get_snapshot(request: Request, snapshot_id: str):
     if not snap:
         _error("NOT_FOUND", f"Snapshot {snapshot_id} not found")
     return {"snapshot": snap}
+
+
+# ===================================================================
+# Parity Review — deterministic Q&A (LLM = intent classifier only)
+# ===================================================================
+
+from .ask import classify_intent, extract_aggregates, answer_intent  # noqa: E402
+
+
+@router.post("/deals/{deal_id}/ask")
+def ask_parity(request: Request, deal_id: str, body: dict = Body(...)):
+    question = (body.get("question") or "").strip()
+    if not question:
+        _error("BAD_REQUEST", "question is required")
+    repos = _repos(request)
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+    snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    if not snapshot:
+        _error("NOT_FOUND", "No snapshot found. Run export first.")
+    intent = classify_intent(question)
+    if intent is None:
+        return {"answer": "This question is outside supported scope.", "intent": None}
+    agg = extract_aggregates(snapshot)
+    return {"answer": answer_intent(intent, agg), "intent": intent}

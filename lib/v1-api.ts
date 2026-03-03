@@ -162,3 +162,16 @@ export async function listOverrides(
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
+
+export async function askParity(
+  dealId: string,
+  question: string
+): Promise<{ answer: string; intent: string | null }> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/ask`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}

@@ -1,7 +1,9 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
+import { supabase } from '@/lib/supabase';
 import {
   createDeal,
   uploadDocument,
@@ -11,6 +13,7 @@ import {
   addOverride,
   listOverrides,
   listDocuments,
+  askParity,
 } from '@/lib/v1-api';
 import type {
   Deal,
@@ -35,6 +38,13 @@ interface EntityBreakdownRow {
 }
 
 export default function V1DealPage() {
+  const router = useRouter();
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) router.replace('/auth/login');
+    });
+  }, [router]);
+
   const [file, setFile] = useState<File | null>(null);
   const [currency, setCurrency] = useState('USD');
   const [dealName, setDealName] = useState('');
@@ -51,6 +61,9 @@ export default function V1DealPage() {
   const [overrideNote, setOverrideNote] = useState('');
   const [overrideSaving, setOverrideSaving] = useState(false);
   const [rawTransactions, setRawTransactions] = useState<Array<Record<string, unknown>>>([]);
+  const [reviewQuestion, setReviewQuestion] = useState('');
+  const [reviewAnswer, setReviewAnswer] = useState('');
+  const [reviewLoading, setReviewLoading] = useState(false);
 
   const onDrop = useCallback((accepted: File[]) => {
     if (accepted.length) setFile(accepted[0]);
@@ -146,6 +159,20 @@ export default function V1DealPage() {
       setAnalysisState('done');
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : 'Export failed');
+    }
+  };
+
+  const handleAsk = async () => {
+    if (!deal || !reviewQuestion.trim()) return;
+    setReviewLoading(true);
+    setReviewAnswer('');
+    try {
+      const { answer } = await askParity(deal.id, reviewQuestion.trim());
+      setReviewAnswer(answer);
+    } catch (e) {
+      setReviewAnswer(e instanceof Error ? e.message : 'Request failed');
+    } finally {
+      setReviewLoading(false);
     }
   };
 
@@ -513,6 +540,36 @@ export default function V1DealPage() {
               <p>sha256_hash: {snapshot.sha256_hash}</p>
               <p>financial_state_hash: {snapshot.financial_state_hash}</p>
             </div>
+          </section>
+
+          {/* 7. Parity Review */}
+          <section className="bg-gray-800 rounded-lg p-6 mb-6">
+            <h2 className="text-lg font-semibold mb-1">Parity Review</h2>
+            <p className="text-xs text-gray-400 mb-4">
+              Ask a question about this deal. Answers are computed deterministically from the latest snapshot — no hallucination.
+            </p>
+            <textarea
+              value={reviewQuestion}
+              onChange={(e) => setReviewQuestion(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAsk();
+              }}
+              placeholder="e.g. What percentage of revenue is payroll?"
+              rows={2}
+              className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm resize-none mb-3 focus:outline-none focus:border-gray-500"
+            />
+            <button
+              onClick={handleAsk}
+              disabled={reviewLoading || !reviewQuestion.trim()}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded text-sm font-medium"
+            >
+              {reviewLoading ? 'Thinking...' : 'Parity Review'}
+            </button>
+            {reviewAnswer && (
+              <div className="mt-4 bg-gray-900 border border-gray-700 rounded p-4">
+                <p className="text-sm text-gray-200 whitespace-pre-line">{reviewAnswer}</p>
+              </div>
+            )}
           </section>
         </>
       )}

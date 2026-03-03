@@ -195,6 +195,9 @@ class SnapshotsRepo(SnapshotsRepository, BaseRepo):
         super().__init__("pds_snapshots")
 
     def insert_snapshot(self, snapshot: Dict[str, Any]) -> Dict[str, Any]:
+        existing = self.get_by_hash(snapshot.get("sha256_hash", ""))
+        if existing:
+            return existing
         return self.insert(snapshot)
 
     def get_by_hash(self, sha256_hash: str) -> Optional[Dict[str, Any]]:

@@ -1,8 +1,5 @@
 from datetime import datetime
-from math import floor
 from typing import Dict, List, Tuple
-
-from ..parsing.common import canonical_hash
 
 
 def _active_period_dates(transactions: List[Dict]) -> Tuple[str, str]:
@@ -11,22 +8,20 @@ def _active_period_dates(transactions: List[Dict]) -> Tuple[str, str]:
 
 
 def _missing_months(txn_dates: List[str]) -> int:
+    """Count interior months (strictly between first and last transaction month)
+    that have NO transactions. A dataset with continuous data returns 0."""
     if not txn_dates:
         return 0
     dates = sorted(datetime.strptime(d, "%Y-%m-%d").date() for d in txn_dates)
+    months_with_data = {(d.year, d.month) for d in dates}
     start, end = dates[0], dates[-1]
-    # months strictly inside start/end (exclude partial leading/trailing)
-    months = 0
-    cur = (start.replace(day=1))
-    # advance to first full month strictly after start
-    if cur == start:
+    # Build set of all interior months (strictly between start and end month)
+    expected_interior: set = set()
+    cur = _add_months(start.replace(day=1), 1)
+    while (cur.year, cur.month) < (end.year, end.month):
+        expected_interior.add((cur.year, cur.month))
         cur = _add_months(cur, 1)
-    else:
-        cur = _add_months(cur, 1)
-    while cur.replace(day=1) < end.replace(day=1):
-        months += 1
-        cur = _add_months(cur, 1)
-    return months
+    return len(expected_interior - months_with_data)
 
 
 def _add_months(dt, months):
@@ -61,7 +56,7 @@ def compute_metrics(transactions: List[Dict], accrual: Dict) -> Dict:
             "bank_operational_inflow_cents": 0,
         }
 
-    coverage_bp = floor(classified_abs_total * 10000 / non_transfer_abs_total)
+    coverage_bp = classified_abs_total * 10000 // non_transfer_abs_total
 
     bank_operational_inflow_cents = sum(
         int(t["signed_amount_cents"])
@@ -105,7 +100,7 @@ def compute_metrics(transactions: List[Dict], accrual: Dict) -> Dict:
                         recon_status = "NOT_RUN"
                     else:
                         diff = abs(accrual_revenue_cents - bank_operational_inflow_cents)
-                        recon_bp = max(0, 10000 - floor((diff * 10000) / accrual_revenue_cents))
+                        recon_bp = max(0, 10000 - (diff * 10000 // accrual_revenue_cents))
                         recon_status = "OK"
 
     base_confidence = coverage_bp if recon_status != "OK" or recon_bp is None else min(coverage_bp, recon_bp)

@@ -24,15 +24,18 @@ app = FastAPI(
     version="2.0.0",
 )
 
+_CORS_ORIGINS = os.getenv("CORS_ORIGINS", "").split(",")
+_EXPLICIT_ORIGINS = [
+    "https://paritytunnel-w7d2.onrender.com",
+]
+_ALL_ORIGINS = list({o.strip() for o in _CORS_ORIGINS + _EXPLICIT_ORIGINS if o.strip()})
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://paritytunnel-w7d2.onrender.com",
-        "https://*.vercel.app",
-        "*",
-    ],
+    allow_origins=_ALL_ORIGINS,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 

@@ -818,7 +818,7 @@
           },
           "status": {
             "type": "string",
-            "enum": ["processing", "completed"]
+            "enum": ["uploaded", "processing", "completed", "failed"]
           },
           "rows_count": {
             "type": "integer",
@@ -1177,7 +1177,7 @@
             "enum": [
               "parse_complete",
               "override_applied",
-              "manual_export"
+              "manual_rerun"
             ]
           },
           "non_transfer_abs_total_cents": {

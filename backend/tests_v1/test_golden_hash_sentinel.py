@@ -47,7 +47,7 @@ GOLDEN_FIXTURE = [
 
 # Expected sha256_hash for GOLDEN_FIXTURE with current SCHEMA_VERSION/CONFIG_VERSION.
 # If pipeline, snapshot_engine, or config changes, this must be updated explicitly.
-GOLDEN_HASH_EXPECTED = "4f8596a8d1b3e7db6cfbac6875fb350bcef86f7de37e919b8909c6a50d84b39f"
+GOLDEN_HASH_EXPECTED = "e61407db11e40e7af2d76d593c7084125e4c98b74a7dbb8277bdad52cad5ccbb"
 
 
 class TestGoldenHashSentinel(unittest.TestCase):
