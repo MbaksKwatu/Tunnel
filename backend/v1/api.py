@@ -412,16 +412,24 @@ def export(request: Request, deal_id: str):
             }
 
     stage = "PIPELINE_START"
-    run, links, entities, txn_map = run_pipeline(
-        deal_id=deal_id,
-        raw_transactions=raw,
-        overrides=overrides,
-        accrual={
-            "accrual_revenue_cents": deal.get("accrual_revenue_cents"),
-            "accrual_period_start": deal.get("accrual_period_start"),
-            "accrual_period_end": deal.get("accrual_period_end"),
-        },
-    )
+    try:
+        run, links, entities, txn_map = run_pipeline(
+            deal_id=deal_id,
+            raw_transactions=raw,
+            overrides=overrides,
+            accrual={
+                "accrual_revenue_cents": deal.get("accrual_revenue_cents"),
+                "accrual_period_start": deal.get("accrual_period_start"),
+                "accrual_period_end": deal.get("accrual_period_end"),
+            },
+        )
+    except Exception as pipeline_exc:
+        import traceback
+        logger.error(
+            "[EXPORT] PIPELINE_CRASH deal=%s stage=%s error=%s\n%s",
+            deal_id, stage, pipeline_exc, traceback.format_exc(),
+        )
+        raise
     stage = "PIPELINE_DONE"
     logger.info("[EXPORT] stage=%s", stage)
 

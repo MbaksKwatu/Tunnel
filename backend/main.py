@@ -27,8 +27,12 @@ app = FastAPI(
 _CORS_ORIGINS = os.getenv("CORS_ORIGINS", "").split(",")
 _EXPLICIT_ORIGINS = [
     "https://paritytunnel-w7d2.onrender.com",
+    # Primary Vercel deployment — explicit entry in addition to regex to ensure
+    # CORS headers are injected even on 5xx error responses.
+    "https://v0-fund-iq-1-0.vercel.app",
 ]
 _ALL_ORIGINS = list({o.strip() for o in _CORS_ORIGINS + _EXPLICIT_ORIGINS if o.strip()})
+logger.info("[CORS] allow_origins=%s", _ALL_ORIGINS)
 
 app.add_middleware(
     CORSMiddleware,

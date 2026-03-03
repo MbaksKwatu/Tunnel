@@ -114,10 +114,28 @@ export async function getDocumentStatus(
 export async function exportSnapshot(
   dealId: string
 ): Promise<ExportResponse> {
-  const res = await fetchApi(`${BASE}/deals/${dealId}/export`, {
-    method: 'POST',
-  })
-  if (!res.ok) throw new Error(await res.text())
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/c06d0fd1-c297-47eb-9e68-2482808d33d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'780603'},body:JSON.stringify({sessionId:'780603',location:'v1-api.ts:exportSnapshot',message:'export called',data:{dealId},timestamp:Date.now(),runId:'run1',hypothesisId:'A-D'})}).catch(()=>{});
+  // #endregion
+  let res: Response
+  try {
+    res = await fetchApi(`${BASE}/deals/${dealId}/export`, { method: 'POST' })
+  } catch (fetchErr) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/c06d0fd1-c297-47eb-9e68-2482808d33d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'780603'},body:JSON.stringify({sessionId:'780603',location:'v1-api.ts:exportSnapshot:catch',message:'fetch threw (likely CORS)',data:{error:String(fetchErr)},timestamp:Date.now(),runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    throw fetchErr
+  }
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/c06d0fd1-c297-47eb-9e68-2482808d33d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'780603'},body:JSON.stringify({sessionId:'780603',location:'v1-api.ts:exportSnapshot:response',message:'got response',data:{status:res.status,ok:res.ok,corsHeader:res.headers.get('access-control-allow-origin')},timestamp:Date.now(),runId:'run1',hypothesisId:'B-C'})}).catch(()=>{});
+  // #endregion
+  if (!res.ok) {
+    const body = await res.text().catch(() => '(unreadable)')
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/c06d0fd1-c297-47eb-9e68-2482808d33d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'780603'},body:JSON.stringify({sessionId:'780603',location:'v1-api.ts:exportSnapshot:error',message:'non-ok response body',data:{status:res.status,body:body.slice(0,500)},timestamp:Date.now(),runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
+    throw new Error(body)
+  }
   return res.json()
 }
 
