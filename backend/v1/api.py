@@ -367,23 +367,41 @@ def export(request: Request, deal_id: str):
     stage = "EXPORT_START"
     logger.info("[EXPORT] stage=%s deal_id=%s", stage, deal_id)
     repos = _repos(request)
+    # #region agent log
+    logger.info("[DBG-780603] step=get_deal deal_id=%s", deal_id)
+    # #endregion
     deal = repos["deals"].get_deal(deal_id)
     if not deal:
         _error("NOT_FOUND", f"Deal {deal_id} not found")
+    # #region agent log
+    logger.info("[DBG-780603] step=list_docs deal=%s", deal_id)
+    # #endregion
     docs = repos["documents"].list_by_deal(deal_id)
     not_ready = [d for d in docs if d.get("status") != "completed"]
     if not_ready:
         _error("DOCUMENTS_NOT_READY", "Documents still processing", status=409, next_action="wait_or_retry")
+    # #region agent log
+    logger.info("[DBG-780603] step=list_raw deal=%s", deal_id)
+    # #endregion
     raw = list(repos["raw"].list_by_deal(deal_id))
     stage = "FETCH_INPUTS_DONE"
     logger.info("[EXPORT] stage=%s raw_count=%d", stage, len(raw))
+    # #region agent log
+    logger.info("[DBG-780603] step=list_overrides deal=%s", deal_id)
+    # #endregion
     overrides = list(repos["overrides"].list_overrides(deal_id))
 
     if not raw:
         _error("BAD_REQUEST", "No transactions to export. Upload documents first.", next_action="upload_new_file")
 
+    # #region agent log
+    logger.info("[DBG-780603] step=get_latest_snapshot deal=%s", deal_id)
+    # #endregion
     # Short-circuit: return existing snapshot if no new docs/overrides since last export
     latest_snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    # #region agent log
+    logger.info("[DBG-780603] step=get_latest_update_at deal=%s", deal_id)
+    # #endregion
     latest_doc_at = repos["documents"].get_latest_update_at(deal_id)
     latest_override_at = repos["overrides"].get_latest_update_at(deal_id) or ""
     snap_created_at = (latest_snapshot or {}).get("created_at") or ""
@@ -411,6 +429,9 @@ def export(request: Request, deal_id: str):
                 "txn_entity_map": txn_map,
             }
 
+    # #region agent log
+    logger.info("[DBG-780603] step=pre_pipeline deal=%s short_circuit=miss", deal_id)
+    # #endregion
     stage = "PIPELINE_START"
     try:
         run, links, entities, txn_map = run_pipeline(
@@ -443,13 +464,31 @@ def export(request: Request, deal_id: str):
         if lnk.get("id") is None:
             del lnk["id"]
 
+    # #region agent log
+    logger.info("[DBG-780603] step=delete_old_txn_map deal=%s", deal_id)
+    # #endregion
     repos["txn_map"].delete_eq("deal_id", deal_id)
+    # #region agent log
+    logger.info("[DBG-780603] step=delete_old_links deal=%s", deal_id)
+    # #endregion
     repos["links"].delete_eq("deal_id", deal_id)
 
     run_for_db = {k: v for k, v in run.items() if k != "bank_operational_inflow_cents"}
+    # #region agent log
+    logger.info("[DBG-780603] step=insert_run keys=%s deal=%s", list(run_for_db.keys()), deal_id)
+    # #endregion
     repos["runs"].insert_run(run_for_db)
+    # #region agent log
+    logger.info("[DBG-780603] step=insert_links count=%d deal=%s", len(links), deal_id)
+    # #endregion
     repos["links"].insert_batch(links)
+    # #region agent log
+    logger.info("[DBG-780603] step=upsert_entities count=%d deal=%s", len(entities), deal_id)
+    # #endregion
     repos["entities"].upsert_entities(entities)
+    # #region agent log
+    logger.info("[DBG-780603] step=upsert_txn_map count=%d deal=%s", len(txn_map), deal_id)
+    # #endregion
     repos["txn_map"].upsert_mappings(txn_map)
 
     stage = "SNAPSHOT_BUILD_DONE"
