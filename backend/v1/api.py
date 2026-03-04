@@ -515,7 +515,7 @@ def get_snapshot(request: Request, snapshot_id: str):
 # Parity Review — deterministic Q&A (LLM = intent classifier only)
 # ===================================================================
 
-from .ask import classify_intent, extract_aggregates, answer_intent  # noqa: E402
+from .ask import classify_intent, classify_intent_debug, extract_aggregates, answer_intent  # noqa: E402
 
 
 @router.post("/deals/{deal_id}/ask")
@@ -529,8 +529,10 @@ def ask_parity(request: Request, deal_id: str, body: dict = Body(...)):
     snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
     if not snapshot:
         _error("NOT_FOUND", "No snapshot found. Run export first.")
-    intent = classify_intent(question)
+    intent, _dbg = classify_intent_debug(question)
     if intent is None:
-        return {"answer": "This question is outside supported scope.", "intent": None}
+        # #region agent log
+        return {"answer": "This question is outside supported scope.", "intent": None, "_debug_llm": _dbg}
+        # #endregion
     agg = extract_aggregates(snapshot)
     return {"answer": answer_intent(intent, agg), "intent": intent}

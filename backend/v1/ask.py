@@ -87,11 +87,47 @@ def classify_intent(question: str) -> Optional[str]:
         return None
 
     intent = parsed.get("intent")
+    # #region agent log
+    logger.warning("[ask-780603] raw=%r parsed_intent=%r allowed=%s", raw, intent, sorted(ALLOWED_INTENTS))
+    # #endregion
     if intent not in ALLOWED_INTENTS:
         logger.info("[ask] Intent %r not in ALLOWED_INTENTS", intent)
         return None
 
     return intent
+
+
+def classify_intent_debug(question: str):
+    """Wrapper returning (intent, debug_info) for temporary diagnostics."""
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return None, {"error": "OPENAI_API_KEY not set"}
+    try:
+        import openai
+        client = openai.OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": _USER_TEMPLATE.format(
+                    intents=", ".join(sorted(ALLOWED_INTENTS)), question=question)},
+            ],
+            response_format={"type": "json_object"},
+            max_tokens=50,
+            temperature=0,
+        )
+        raw = response.choices[0].message.content
+    except Exception as exc:
+        return None, {"error": f"openai_error: {exc}"}
+    try:
+        parsed = json.loads(raw or "")
+    except Exception:
+        return None, {"error": "invalid_json", "raw": raw}
+    intent = parsed.get("intent")
+    dbg = {"raw": raw, "intent": intent, "allowed": sorted(ALLOWED_INTENTS)}
+    if intent not in ALLOWED_INTENTS:
+        return None, dbg
+    return intent, dbg
 
 
 # ---------------------------------------------------------------------------
