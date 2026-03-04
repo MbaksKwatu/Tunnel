@@ -76,9 +76,6 @@ class TransferLinksRepository:
     def list_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         raise NotImplementedError
 
-    def delete_eq(self, column: str, value: Any) -> None:
-        raise NotImplementedError
-
 
 class EntitiesRepository:
     def upsert_entities(self, entities: Iterable[Dict[str, Any]]) -> None:
