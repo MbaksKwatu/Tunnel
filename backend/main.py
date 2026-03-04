@@ -54,14 +54,17 @@ app.include_router(v1_api.router)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     tb = traceback.format_exc()
     logger.error("[UNHANDLED] %s: %s\n%s", type(exc).__name__, exc, tb)
+    # #region agent log — include traceback in response for remote debugging
     return JSONResponse(
         status_code=500,
         content={
             "status": "error",
             "error_type": type(exc).__name__,
             "error_message": str(exc),
+            "_debug_traceback": tb,
         },
     )
+    # #endregion
 
 
 @app.get("/")
