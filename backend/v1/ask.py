@@ -28,6 +28,27 @@ ALLOWED_INTENTS = frozenset({
     "reconciliation_explain",
 })
 
+# Keyword patterns for zero-dependency fallback (checked before LLM call)
+_KEYWORD_MAP = [
+    ("payroll_percent_revenue", ["payroll.*percent", "percent.*payroll", "payroll.*revenue",
+                                  "payroll.*proportion", "payroll.*ratio", "payroll.*share",
+                                  "what.*payroll.*of", "how much.*payroll"]),
+    ("total_revenue",           ["total.*revenue", "revenue.*total", "operational revenue",
+                                  "how much.*revenue", "revenue.*amount"]),
+    ("total_payroll",           ["total.*payroll", "payroll.*total", "payroll.*spend",
+                                  "payroll.*cost", "how much.*payroll", "salary.*total"]),
+    ("top_suppliers",           ["top.*supplier", "supplier.*top", "biggest.*supplier",
+                                  "largest.*supplier", "supplier.*spend", "who.*supplier"]),
+    ("top_revenue_entities",    ["top.*revenue.*entit", "revenue.*source", "biggest.*client",
+                                  "top.*client", "top.*customer", "who.*revenue"]),
+    ("revenue_by_month",        ["revenue.*month", "month.*revenue", "monthly.*revenue",
+                                  "revenue.*breakdown", "revenue.*over.*time"]),
+    ("confidence_explain",      ["confidence", "how.*confident", "analysis.*score",
+                                  "quality.*score", "data.*quality", "why.*score"]),
+    ("reconciliation_explain",  ["reconcil", "accrual", "bank.*data.*match", "match.*revenue",
+                                  "declared.*revenue", "does.*bank"]),
+]
+
 _SYSTEM_PROMPT = (
     "You are an intent classifier for Parity Review. "
     "Return only valid JSON with the single key \"intent\". "
@@ -45,12 +66,28 @@ _USER_TEMPLATE = (
 # ---------------------------------------------------------------------------
 
 
+def _keyword_classify(question: str) -> Optional[str]:
+    """Fast keyword-based classification — no network call required."""
+    import re
+    q = question.lower()
+    for intent, patterns in _KEYWORD_MAP:
+        if any(re.search(p, q) for p in patterns):
+            logger.info("[ask] keyword match intent=%s q=%r", intent, question[:60])
+            return intent
+    return None
+
+
 def classify_intent(question: str) -> Optional[str]:
     """
-    Call OpenAI with a strict JSON schema to classify the question.
-    Returns the intent string if valid, None if out-of-scope or invalid response.
-    Fails gracefully if OPENAI_API_KEY is missing or the API call errors.
+    Classify intent via keyword matching first, then OpenAI fallback.
+    Returns the intent string if valid, None if out-of-scope or API error.
     """
+    # Primary: keyword matching (fast, zero-dependency)
+    intent = _keyword_classify(question)
+    if intent:
+        return intent
+
+    # Fallback: LLM (only if keyword matching finds no match)
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
         logger.warning("[ask] OPENAI_API_KEY not set — returning None")
@@ -87,9 +124,6 @@ def classify_intent(question: str) -> Optional[str]:
         return None
 
     intent = parsed.get("intent")
-    # #region agent log
-    logger.warning("[ask-780603] raw=%r parsed_intent=%r allowed=%s", raw, intent, sorted(ALLOWED_INTENTS))
-    # #endregion
     if intent not in ALLOWED_INTENTS:
         logger.info("[ask] Intent %r not in ALLOWED_INTENTS", intent)
         return None
@@ -99,6 +133,9 @@ def classify_intent(question: str) -> Optional[str]:
 
 def classify_intent_debug(question: str):
     """Wrapper returning (intent, debug_info) for temporary diagnostics."""
+    kw = _keyword_classify(question)
+    if kw:
+        return kw, {"method": "keyword", "intent": kw}
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
         return None, {"error": "OPENAI_API_KEY not set"}
