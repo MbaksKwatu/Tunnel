@@ -2,8 +2,11 @@
 Parity Backend — PDS v1 API only.
 All legacy routes decommissioned. Use /v1/* exclusively.
 """
-from fastapi import FastAPI
+import traceback
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import logging
 import os
 from dotenv import load_dotenv
@@ -45,6 +48,20 @@ app.add_middleware(
 
 # V1 deterministic API — only active router
 app.include_router(v1_api.router)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    tb = traceback.format_exc()
+    logger.error("[UNHANDLED] %s: %s\n%s", type(exc).__name__, exc, tb)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "status": "error",
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+        },
+    )
 
 
 @app.get("/")
