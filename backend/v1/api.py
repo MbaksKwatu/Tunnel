@@ -363,6 +363,24 @@ def get_latest_analysis(request: Request, deal_id: str):
 
 @router.post("/deals/{deal_id}/export")
 def export(request: Request, deal_id: str):
+    try:
+        return _export_inner(request, deal_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import traceback as _tb
+        tb_str = _tb.format_exc()
+        logger.error("[EXPORT_CRASH] %s: %s\n%s", type(exc).__name__, exc, tb_str)
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=500, content={
+            "status": "error",
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+            "_debug_traceback": tb_str,
+        })
+
+
+def _export_inner(request: Request, deal_id: str):
     started = time.perf_counter()
     stage = "EXPORT_START"
     logger.info("[EXPORT] stage=%s deal_id=%s", stage, deal_id)
