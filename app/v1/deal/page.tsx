@@ -23,6 +23,9 @@ import type {
   TxnEntityMapping,
   ExportResponse,
 } from '@/lib/v1-api';
+// generateParityPdf is loaded dynamically at click time so Next.js never
+// evaluates jsPDF's Node.js build during server compilation.
+type GeneratePdfFn = typeof import('@/lib/generate-parity-pdf').generateParityPdf;
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'KES', 'NGN'];
 
@@ -61,6 +64,12 @@ export default function V1DealPage() {
   const [overrideRole, setOverrideRole] = useState('supplier');
   const [overrideNote, setOverrideNote] = useState('');
   const [overrideSaving, setOverrideSaving] = useState(false);
+  const [overrideSuccess, setOverrideSuccess] = useState('');
+  const [overrideError, setOverrideError] = useState('');
+  const [overridesList, setOverridesList] = useState<Array<Record<string, unknown>>>([]);
+  const [exportSuccess, setExportSuccess] = useState('');
+  const [exportError, setExportError] = useState('');
+  const [lastExportedAt, setLastExportedAt] = useState<Date | null>(null);
   const [rawTransactions, setRawTransactions] = useState<Array<Record<string, unknown>>>([]);
   const [reviewQuestion, setReviewQuestion] = useState('');
   const [reviewAnswer, setReviewAnswer] = useState('');
@@ -123,6 +132,8 @@ export default function V1DealPage() {
       setAnalysisState('exporting');
       const data = await exportSnapshot(d.id);
       setExportData(data);
+      setLastExportedAt(new Date());
+      setOverridesList([]);
       const docs = await listDocuments(d.id);
       if (docs.documents.length > 0) {
         const txRes = await getDocumentTransactions(docs.documents[0].id);
@@ -138,14 +149,20 @@ export default function V1DealPage() {
   const handleAddOverride = async () => {
     if (!deal || !overrideEntityId || !overrideRole) return;
     setOverrideSaving(true);
+    setOverrideSuccess('');
+    setOverrideError('');
     try {
-      await addOverride(deal.id, overrideEntityId, overrideRole, overrideNote || undefined);
+      const { override } = await addOverride(deal.id, overrideEntityId, overrideRole, overrideNote || undefined);
+      setOverridesList((prev) => [override, ...prev]);
       const data = await exportSnapshot(deal.id);
       setExportData(data);
+      setLastExportedAt(new Date());
       setOverrideEntityId('');
       setOverrideNote('');
+      setOverrideSuccess('Override saved — analysis updated.');
+      setTimeout(() => setOverrideSuccess(''), 4000);
     } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : 'Override failed');
+      setOverrideError(e instanceof Error ? e.message : 'Override failed');
     } finally {
       setOverrideSaving(false);
     }
@@ -154,12 +171,90 @@ export default function V1DealPage() {
   const handleReExport = async () => {
     if (!deal) return;
     setAnalysisState('exporting');
+    setExportSuccess('');
+    setExportError('');
     try {
+      // Server snapshot write happens here. PDF only generates after this resolves.
       const data = await exportSnapshot(deal.id);
       setExportData(data);
+      setLastExportedAt(new Date());
       setAnalysisState('done');
+
+      // Build entity breakdown from the freshly returned data to pass to PDF
+      const freshEntities = data.entities ?? [];
+      const freshTxnMap = data.txn_entity_map ?? [];
+      const byEntity: Record<string, { name: string; role: string; totalCents: number; count: number }> = {};
+      const txnById: Record<string, number> = {};
+      for (const t of rawTransactions) {
+        const amt = Math.abs(Number(t.signed_amount_cents ?? 0));
+        const tid = t.txn_id as string;
+        const id = t.id as string | undefined;
+        txnById[tid] = amt;
+        if (id) txnById[id] = amt;
+      }
+      for (const m of freshTxnMap) {
+        const eid = m.entity_id as string;
+        const ent = freshEntities.find((e) => e.entity_id === eid);
+        const absCents = txnById[m.txn_id as string] ?? 0;
+        if (!byEntity[eid]) {
+          byEntity[eid] = {
+            name: ent?.display_name ?? eid,
+            role: (m.role as string) ?? 'other',
+            totalCents: 0,
+            count: 0,
+          };
+        }
+        byEntity[eid].totalCents += absCents;
+        byEntity[eid].count += 1;
+      }
+      const grandTotal = Object.values(byEntity).reduce((s, v) => s + v.totalCents, 0);
+      const pdfBreakdown = Object.entries(byEntity)
+        .map(([entityId, v]) => ({
+          entityId,
+          entityName: v.name,
+          role: v.role,
+          totalAbsCents: v.totalCents,
+          pctOfTotal: grandTotal > 0 ? (v.totalCents / grandTotal) * 100 : 0,
+          txnCount: v.count,
+        }))
+        .sort((a, b) => b.totalAbsCents - a.totalAbsCents);
+
+      const pdfTotalOutflow = pdfBreakdown
+        .filter((r) => ['supplier', 'payroll'].includes(r.role))
+        .reduce((s, r) => s + r.totalAbsCents, 0);
+      const pdfPayrollTotal = pdfBreakdown
+        .filter((r) => r.role === 'payroll')
+        .reduce((s, r) => s + r.totalAbsCents, 0);
+      const pdfTopSuppliers = pdfBreakdown.filter((r) => r.role === 'supplier').slice(0, 5);
+      const pdfTopRevenue = pdfBreakdown
+        .filter((r) => ['revenue_operational', 'revenue_non_operational'].includes(r.role))
+        .slice(0, 5);
+      const pdfLargestRevenuePct = pdfBreakdown
+        .filter((r) => ['revenue_operational', 'revenue_non_operational'].includes(r.role))
+        .reduce((max, r) => Math.max(max, r.pctOfTotal), 0);
+
+      const { generateParityPdf } = await import('@/lib/generate-parity-pdf') as { generateParityPdf: GeneratePdfFn };
+      generateParityPdf({
+        deal,
+        run: data.analysis_run,
+        snapshot: data.snapshot,
+        entities: freshEntities,
+        entityBreakdown: pdfBreakdown,
+        overridesList,
+        txCount: rawTransactions.length,
+        currency,
+        topSuppliers: pdfTopSuppliers,
+        topRevenue: pdfTopRevenue,
+        totalOutflow: pdfTotalOutflow,
+        payrollTotal: pdfPayrollTotal,
+        largestRevenuePct: pdfLargestRevenuePct,
+      });
+
+      setExportSuccess('Snapshot saved. PDF downloading.');
+      setTimeout(() => setExportSuccess(''), 5000);
     } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : 'Export failed');
+      setExportError(e instanceof Error ? e.message : 'Export failed');
+      setAnalysisState('done');
     }
   };
 
@@ -524,22 +619,64 @@ export default function V1DealPage() {
                 {overrideSaving ? 'Saving...' : 'Save override'}
               </button>
             </div>
+            {overrideSuccess && (
+              <p className="mt-3 text-sm text-green-400">{overrideSuccess}</p>
+            )}
+            {overrideError && (
+              <p className="mt-3 text-sm text-red-400">{overrideError}</p>
+            )}
+            {overridesList.length > 0 && (
+              <div className="mt-4">
+                <h3 className="text-sm text-gray-400 mb-2">Applied overrides this session</h3>
+                <ul className="space-y-1">
+                  {overridesList.map((ov, i) => {
+                    const ent = entities.find((e) => e.entity_id === ov.entity_id);
+                    return (
+                      <li key={(ov.id as string) ?? i} className="text-sm font-mono bg-gray-900 rounded px-3 py-1">
+                        <span className="text-gray-300">{ent?.display_name ?? (ov.entity_id as string)}</span>
+                        <span className="text-gray-500 mx-2">→</span>
+                        <span className="text-blue-300">{ov.new_value as string}</span>
+                        {typeof ov.reason === 'string' && ov.reason && (
+                          <span className="text-gray-500 ml-2 italic">({ov.reason})</span>
+                        )}
+                        <span className="text-gray-600 ml-2">
+                          weight: {ov.weight as number}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
           </section>
 
-          {/* 6. Export Snapshot */}
+          {/* 6. Save & Export Snapshot */}
           <section className="bg-gray-800 rounded-lg p-6 mb-6">
-            <h2 className="text-lg font-semibold mb-4">Export Snapshot</h2>
-            <button
-              onClick={handleReExport}
-              disabled={analysisState === 'exporting'}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded mb-4"
-            >
-              Export Snapshot
-            </button>
-            <div className="font-mono text-sm space-y-1">
-              <p>snapshot_id: {snapshot.id}</p>
-              <p>sha256_hash: {snapshot.sha256_hash}</p>
-              <p>financial_state_hash: {snapshot.financial_state_hash}</p>
+            <h2 className="text-lg font-semibold mb-4">Save &amp; Export Snapshot</h2>
+            <div className="flex items-center gap-4 mb-4">
+              <button
+                onClick={handleReExport}
+                disabled={analysisState === 'exporting'}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded"
+              >
+                {analysisState === 'exporting' ? 'Saving...' : 'Save & Export Snapshot'}
+              </button>
+              {lastExportedAt && (
+                <span className="text-xs text-gray-400">
+                  Last exported: {lastExportedAt.toLocaleTimeString()}
+                </span>
+              )}
+            </div>
+            {exportSuccess && (
+              <p className="mb-3 text-sm text-green-400">{exportSuccess}</p>
+            )}
+            {exportError && (
+              <p className="mb-3 text-sm text-red-400">{exportError}</p>
+            )}
+            <div className="font-mono text-sm space-y-1 text-gray-300">
+              <p><span className="text-gray-500">snapshot_id:</span> {snapshot.id}</p>
+              <p><span className="text-gray-500">sha256_hash:</span> {snapshot.sha256_hash}</p>
+              <p><span className="text-gray-500">financial_state_hash:</span> {snapshot.financial_state_hash}</p>
             </div>
           </section>
 
