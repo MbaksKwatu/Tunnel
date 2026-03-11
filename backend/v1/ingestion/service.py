@@ -67,7 +67,9 @@ class IngestionService:
         # Parse deterministically
         parse_start = time.perf_counter()
         try:
-            rows, raw_hash, currency_detection = parse_file(file_bytes, file_type, document_id, deal_currency)
+            rows, raw_hash, currency_detection = parse_file(
+                file_bytes, file_type, document_id, deal_currency, file_name=file_name or ""
+            )
         except CurrencyMismatchError:
             raise
         except InvalidSchemaError:
@@ -187,7 +189,7 @@ class IngestionService:
             logger.info("[INGEST] stage=%s document_id=%s", stage, document_id)
             parse_start = time.perf_counter()
             rows, raw_hash, currency_detection = parse_file(
-                file_bytes, file_type, document_id, deal_currency
+                file_bytes, file_type, document_id, deal_currency, file_name=file_name or ""
             )
             parse_end = time.perf_counter()
             parse_ms = int((parse_end - parse_start) * 1000)

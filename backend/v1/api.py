@@ -185,7 +185,11 @@ async def upload_document(
     content = await file.read()
     document_id = str(uuid.uuid4())
     fname = file.filename or "upload.csv"
-    file_type = fname.rsplit(".", 1)[-1] if "." in fname else "csv"
+    ext = ("." + fname.rsplit(".", 1)[-1].lower()) if "." in fname else ".csv"
+    ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".pdf"}
+    if ext not in ALLOWED_EXTENSIONS:
+        _error("BAD_REQUEST", f"Unsupported file type '{ext}'. Accepted: .csv, .xlsx, .pdf")
+    file_type = ext.lstrip(".")
     created_by_val = created_by or deal.get("created_by") or str(uuid.uuid4())
 
     document = {
