@@ -7,7 +7,16 @@ from pydantic import BaseModel
 
 # ── Phase 1 models ──────────────────────────────────────────────────────────
 
-ExtractionMethod = Literal["scb_pdf", "mpesa_csv", "document_ai"]
+ExtractionMethod = Literal[
+    "scb_pdf",
+    "mpesa_csv",
+    "document_ai",
+    "coop_pdf",
+    "absa_pdf",
+    "mpesa_pdf",
+    "equity_pdf",
+    "kcb_pdf",
+]
 
 
 class DocType(str, Enum):
@@ -31,6 +40,7 @@ class RawTransaction(BaseModel):
     source_file: str
     extraction_confidence: float  # 1.0 = all fields present; <1.0 = partial row
     source_extraction_method: Optional[str] = None
+    balance_is_overdrawn: Optional[bool] = None
 
 
 # ── Phase 3 models ──────────────────────────────────────────────────────────

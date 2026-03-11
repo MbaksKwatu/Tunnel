@@ -8,7 +8,6 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import JSONResponse
 
 from app.models import ExtractionResult
-from app.extractors.pdf_extractor import extract_scb_pdf
 from app.extractors.mpesa_extractor import extract_mpesa_csv
 from app.extractors.pdf_type_detector import is_scanned_pdf
 from app.extractors.docai_extractor import extract_with_docai
@@ -54,7 +53,14 @@ async def upload(file: UploadFile = File(...)) -> ExtractionResult:
             if is_scanned_pdf(str(dest)):
                 result = extract_with_docai(str(dest), doc_id=result_id, filename=filename)
             else:
-                result = extract_scb_pdf(str(dest))
+                from app.extractors.router import route_extract
+
+                result = route_extract(str(dest))
+                if isinstance(result, dict) and result.get("status") == "UNSUPPORTED_FORMAT":
+                    raise HTTPException(
+                        status_code=415,
+                        detail=result.get("message", "Bank format not recognised."),
+                    )
         else:
             result = extract_mpesa_csv(str(dest))
         normalise_all(result)
