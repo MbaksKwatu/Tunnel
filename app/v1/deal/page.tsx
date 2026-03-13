@@ -36,8 +36,27 @@ interface EntityBreakdownRow {
   entityName: string;
   role: string;
   totalAbsCents: number;
-  pctOfTotal: number;
+  pctBps: number; // basis points, display as pctBps/100 + '%'
   txnCount: number;
+}
+
+/** Basis-point percentage: (entity_amount_cents * 10000) // total_category_cents. No floats. */
+function pctBpsFromCents(entityCents: number, totalCategoryCents: number): number {
+  if (totalCategoryCents <= 0) return 0;
+  return Math.floor((entityCents * 10000) / totalCategoryCents);
+}
+
+/** Ensure percentages sum to 10000 bps (100.0%). Apply residual to largest entity. */
+function normalizePctBpsTo100(
+  rows: Array<{ totalAbsCents: number; pctBps: number }>
+): number[] {
+  const totalBps = rows.reduce((s, r) => s + r.pctBps, 0);
+  const residual = 10000 - totalBps;
+  if (residual === 0) return rows.map((r) => r.pctBps);
+  const sorted = [...rows].map((r, i) => ({ ...r, i })).sort((a, b) => b.totalAbsCents - a.totalAbsCents);
+  const result = rows.map((r) => r.pctBps);
+  result[sorted[0].i] = result[sorted[0].i] + residual;
+  return result;
 }
 
 export default function V1DealPage() {
@@ -185,7 +204,7 @@ export default function V1DealPage() {
       setLastExportedAt(new Date());
       setAnalysisState('done');
 
-      // Build entity breakdown from the freshly returned data to pass to PDF
+      // Build entity breakdown from the freshly returned data to pass to PDF (same logic as entityBreakdownByCategory)
       const freshEntities = data.entities ?? [];
       const freshTxnMap = data.txn_entity_map ?? [];
       const byEntity: Record<string, { name: string; role: string; totalCents: number; count: number }> = {};
@@ -212,17 +231,40 @@ export default function V1DealPage() {
         byEntity[eid].totalCents += absCents;
         byEntity[eid].count += 1;
       }
-      const grandTotal = Object.values(byEntity).reduce((s, v) => s + v.totalCents, 0);
-      const pdfBreakdown = Object.entries(byEntity)
-        .map(([entityId, v]) => ({
+      const byRole = new Map<string, Array<{ entityId: string; entityName: string; role: string; totalAbsCents: number; txnCount: number }>>();
+      for (const [entityId, v] of Object.entries(byEntity)) {
+        const list = byRole.get(v.role) ?? [];
+        list.push({
           entityId,
           entityName: v.name,
           role: v.role,
           totalAbsCents: v.totalCents,
-          pctOfTotal: grandTotal > 0 ? (v.totalCents / grandTotal) * 100 : 0,
           txnCount: v.count,
-        }))
-        .sort((a, b) => b.totalAbsCents - a.totalAbsCents);
+        });
+        byRole.set(v.role, list);
+      }
+      const pdfBreakdown: Array<EntityBreakdownRow & { pctOfTotal: number }> = [];
+      for (const [, list] of byRole) {
+        const sorted = list.sort((a, b) => b.totalAbsCents - a.totalAbsCents);
+        const totalCategoryCents = sorted.reduce((s, r) => s + r.totalAbsCents, 0);
+        let pctBpsList: number[];
+        if (totalCategoryCents <= 0) {
+          pctBpsList = sorted.map(() => 0);
+        } else if (sorted.length === 1) {
+          pctBpsList = [10000];
+        } else {
+          const rawBps = sorted.map((r) => pctBpsFromCents(r.totalAbsCents, totalCategoryCents));
+          pctBpsList = normalizePctBpsTo100(sorted.map((r, i) => ({ totalAbsCents: r.totalAbsCents, pctBps: rawBps[i] })));
+        }
+        for (let i = 0; i < sorted.length; i++) {
+          pdfBreakdown.push({
+            ...sorted[i],
+            pctBps: pctBpsList[i],
+            pctOfTotal: pctBpsList[i] / 100,
+          });
+        }
+      }
+      pdfBreakdown.sort((a, b) => b.totalAbsCents - a.totalAbsCents);
 
       const pdfTotalOutflow = pdfBreakdown
         .filter((r) => ['supplier', 'payroll'].includes(r.role))
@@ -282,7 +324,11 @@ export default function V1DealPage() {
   const entities = exportData?.entities ?? [];
   const txnMap = exportData?.txn_entity_map ?? [];
 
-  const entityBreakdown: EntityBreakdownRow[] = (() => {
+  const entityBreakdownByCategory: Array<{
+    role: string;
+    rows: EntityBreakdownRow[];
+    totalCents: number;
+  }> = (() => {
     if (!exportData || rawTransactions.length === 0) return [];
     const byEntity: Record<
       string,
@@ -311,18 +357,42 @@ export default function V1DealPage() {
       byEntity[eid].totalCents += absCents;
       byEntity[eid].count += 1;
     }
-    const total = Object.values(byEntity).reduce((s, v) => s + v.totalCents, 0);
-    return Object.entries(byEntity)
-      .map(([entityId, v]) => ({
+    const byRole = new Map<string, Array<{ entityId: string; entityName: string; role: string; totalAbsCents: number; txnCount: number }>>();
+    for (const [entityId, v] of Object.entries(byEntity)) {
+      const list = byRole.get(v.role) ?? [];
+      list.push({
         entityId,
         entityName: v.name,
         role: v.role,
         totalAbsCents: v.totalCents,
-        pctOfTotal: total > 0 ? (v.totalCents / total) * 100 : 0,
         txnCount: v.count,
-      }))
-      .sort((a, b) => b.totalAbsCents - a.totalAbsCents);
+      });
+      byRole.set(v.role, list);
+    }
+    const result: Array<{ role: string; rows: EntityBreakdownRow[]; totalCents: number }> = [];
+    for (const [role, list] of byRole) {
+      const sorted = list.sort((a, b) => b.totalAbsCents - a.totalAbsCents);
+      const totalCategoryCents = sorted.reduce((s, r) => s + r.totalAbsCents, 0);
+      let pctBpsList: number[];
+      if (totalCategoryCents <= 0) {
+        pctBpsList = sorted.map(() => 0);
+      } else if (sorted.length === 1) {
+        pctBpsList = [10000];
+      } else {
+        const rawBps = sorted.map((r) => pctBpsFromCents(r.totalAbsCents, totalCategoryCents));
+        pctBpsList = normalizePctBpsTo100(sorted.map((r, i) => ({ totalAbsCents: r.totalAbsCents, pctBps: rawBps[i] })));
+      }
+      const rows: EntityBreakdownRow[] = sorted.map((r, i) => ({
+        ...r,
+        pctBps: pctBpsList[i],
+      }));
+      result.push({ role, rows, totalCents: totalCategoryCents });
+    }
+    result.sort((a, b) => b.totalCents - a.totalCents);
+    return result;
   })();
+
+  const entityBreakdown: EntityBreakdownRow[] = entityBreakdownByCategory.flatMap((c) => c.rows);
 
   const totalOutflow = entityBreakdown
     .filter((r) => ['supplier', 'payroll'].includes(r.role))
@@ -344,7 +414,7 @@ export default function V1DealPage() {
           .filter((r) =>
             ['revenue_operational', 'revenue_non_operational'].includes(r.role)
           )
-          .reduce((max, r) => Math.max(max, r.pctOfTotal), 0)
+          .reduce((max, r) => Math.max(max, r.pctBps / 100), 0)
       : 0;
 
   const formatCents = (c: number) =>
@@ -507,32 +577,42 @@ export default function V1DealPage() {
           </section>
 
           {/* 3. Entity Breakdown - need transactions */}
-          {entityBreakdown.length > 0 && (
+          {entityBreakdownByCategory.length > 0 && (
             <section className="bg-gray-800 rounded-lg p-6 mb-6">
               <h2 className="text-lg font-semibold mb-4">Entity Breakdown</h2>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left border-b border-gray-700">
-                      <th className="py-2">Entity</th>
-                      <th className="py-2">Role</th>
-                      <th className="py-2">Total</th>
-                      <th className="py-2">% of total</th>
-                      <th className="py-2">Count</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {entityBreakdown.map((r) => (
-                      <tr key={r.entityId} className="border-b border-gray-700/50">
-                        <td className="py-2">{r.entityName}</td>
-                        <td className="py-2">{r.role}</td>
-                        <td className="py-2 font-mono">{formatCents(r.totalAbsCents)}</td>
-                        <td className="py-2">{r.pctOfTotal.toFixed(1)}%</td>
-                        <td className="py-2">{r.txnCount}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="overflow-x-auto space-y-6">
+                {entityBreakdownByCategory.map(({ role, rows, totalCents }) => (
+                  <div key={role}>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left border-b border-gray-700">
+                          <th className="py-2">Entity</th>
+                          <th className="py-2">Role</th>
+                          <th className="py-2">Amount ({currency})</th>
+                          <th className="py-2">%</th>
+                          <th className="py-2">Count</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((r) => (
+                          <tr key={r.entityId} className="border-b border-gray-700/50">
+                            <td className="py-2">{r.entityName}</td>
+                            <td className="py-2 capitalize">{r.role.replace(/_/g, ' ')}</td>
+                            <td className="py-2 font-mono">{formatCents(r.totalAbsCents)}</td>
+                            <td className="py-2">{(r.pctBps / 100).toFixed(1)}%</td>
+                            <td className="py-2">{r.txnCount}</td>
+                          </tr>
+                        ))}
+                        <tr className="border-t-2 border-gray-600 font-medium">
+                          <td className="py-2" colSpan={2}>Total {role.replace(/_/g, ' ')}</td>
+                          <td className="py-2 font-mono">{formatCents(totalCents)}</td>
+                          <td className="py-2">100.0%</td>
+                          <td className="py-2">{rows.reduce((s, r) => s + r.txnCount, 0)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                ))}
               </div>
             </section>
           )}
@@ -547,7 +627,7 @@ export default function V1DealPage() {
                   <ul className="list-disc list-inside">
                     {topSuppliers.map((r) => (
                       <li key={r.entityId}>
-                        {r.entityName}: {r.pctOfTotal.toFixed(1)}%
+                        {r.entityName}: {(r.pctBps / 100).toFixed(1)}%
                       </li>
                     ))}
                   </ul>
@@ -566,7 +646,7 @@ export default function V1DealPage() {
                   Payroll % of total outflow:{' '}
                   {totalOutflow > 0 ? ((payrollTotal / totalOutflow) * 100).toFixed(1) : 0}%
                 </p>
-                <p>Largest revenue entity %: {largestRevenuePct.toFixed(1)}%</p>
+                <p>Largest revenue entity %: {(largestRevenuePct).toFixed(1)}%</p>
               </div>
             </section>
           )}
