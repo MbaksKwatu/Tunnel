@@ -10,6 +10,8 @@ Rules (non-negotiable):
 
 Supported date formats:
   SCB Kenya PDF  : DD/Mon/YYYY       e.g. "06/Jan/2022"     → strptime "%d/%b/%Y"
+  Equity/NCBA    : DD Mon YYYY       e.g. "03 Jan 2024"     → strptime "%d %b %Y"
+  NCBA           : DD/MM/YYYY        e.g. "20/07/2023"      → strptime "%d/%m/%Y"
   M-Pesa CSV     : YYYY-MM-DDT...    e.g. "2024-04-23T00:00:00 16:08:03.005000"
   M-Pesa legacy  : YYYY-MM-DD HH:MM  e.g. "2023-09-30 22:16:49"
 """
@@ -30,6 +32,7 @@ from app.models import (
 
 _FMT_SCB = "%d/%b/%Y"       # 06/Jan/2022
 _FMT_EQUITY = "%d %b %Y"    # 03 Jan 2024
+_FMT_NCBA_DDMMYYYY = "%d/%m/%Y"   # 20/07/2023
 _FMT_ISO_DATE = "%Y-%m-%d"  # 2024-04-23  (extracted from ISO prefix)
 
 
@@ -51,9 +54,16 @@ def _parse_date(raw: str) -> Tuple[Optional[str], Optional[str]]:
     except ValueError:
         pass
 
-    # Equity Bank Kenya: DD Mon YYYY
+    # Equity Bank Kenya / NCBA: DD Mon YYYY
     try:
         dt = datetime.strptime(s, _FMT_EQUITY)
+        return dt.strftime("%Y-%m-%d"), None
+    except ValueError:
+        pass
+
+    # NCBA: DD/MM/YYYY
+    try:
+        dt = datetime.strptime(s, _FMT_NCBA_DDMMYYYY)
         return dt.strftime("%Y-%m-%d"), None
     except ValueError:
         pass

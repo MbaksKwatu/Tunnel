@@ -1,13 +1,14 @@
 """
 Bank format detection and extraction router.
 
-Detection order (most specific first): KCB → Equity → ABSA → COOP → MPESA_PDF → SCB
+Detection order (most specific first): KCB → NCBA → Equity → ABSA → COOP → MPESA_PDF → SCB
 """
 from __future__ import annotations
 
 from typing import Union
 
 from app.extractors.kcb_extractor import detect_kcb, extract_kcb_pdf
+from app.extractors.ncba_extractor import detect_ncba, extract_ncba_pdf
 from app.extractors.equity_extractor import detect_equity, extract_equity_pdf
 from app.extractors.absa_extractor import detect_absa, extract_absa_pdf
 from app.extractors.coop_extractor import detect_coop, extract_coop_pdf
@@ -20,7 +21,7 @@ UNSUPPORTED_RESPONSE = {
     "status": "UNSUPPORTED_FORMAT",
     "message": (
         "Bank format not recognised. Supported formats: SCB, Co-op, ABSA, M-Pesa, "
-        "Equity Bank, KCB"
+        "Equity Bank, KCB, NCBA"
     ),
 }
 
@@ -32,6 +33,8 @@ def route_extract(file_path: str) -> Union[ExtractionResult, dict]:
     """
     if detect_kcb(file_path):
         return extract_kcb_pdf(file_path)
+    if detect_ncba(file_path):
+        return extract_ncba_pdf(file_path)
     if detect_equity(file_path):
         return extract_equity_pdf(file_path)
     if detect_absa(file_path):
