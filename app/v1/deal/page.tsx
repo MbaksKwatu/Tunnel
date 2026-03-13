@@ -244,7 +244,7 @@ export default function V1DealPage() {
         byRole.set(v.role, list);
       }
       const pdfBreakdown: Array<EntityBreakdownRow & { pctOfTotal: number }> = [];
-      for (const [, list] of byRole) {
+      for (const [, list] of Array.from(byRole.entries())) {
         const sorted = list.sort((a, b) => b.totalAbsCents - a.totalAbsCents);
         const totalCategoryCents = sorted.reduce((s, r) => s + r.totalAbsCents, 0);
         let pctBpsList: number[];
@@ -370,7 +370,7 @@ export default function V1DealPage() {
       byRole.set(v.role, list);
     }
     const result: Array<{ role: string; rows: EntityBreakdownRow[]; totalCents: number }> = [];
-    for (const [role, list] of byRole) {
+    for (const [role, list] of Array.from(byRole.entries())) {
       const sorted = list.sort((a, b) => b.totalAbsCents - a.totalAbsCents);
       const totalCategoryCents = sorted.reduce((s, r) => s + r.totalAbsCents, 0);
       let pctBpsList: number[];
