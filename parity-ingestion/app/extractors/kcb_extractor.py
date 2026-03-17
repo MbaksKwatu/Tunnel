@@ -72,6 +72,25 @@ def detect_kcb(file_path: str) -> bool:
         return False
 
 
+def derive_missing_debits(transactions: List[RawTransaction]) -> List[RawTransaction]:
+    """Derive missing debit/credit from balance movement when MONEY OUT/IN columns are empty."""
+    for i in range(1, len(transactions)):
+        t = transactions[i]
+        prev = transactions[i - 1]
+        if t.debit_raw == "" and t.credit_raw == "":
+            try:
+                prev_bal = float(prev.balance_raw.replace(",", ""))
+                curr_bal = float(t.balance_raw.replace(",", ""))
+                diff = prev_bal - curr_bal
+                if diff > 0:
+                    t.debit_raw = str(round(diff, 2))
+                elif diff < 0:
+                    t.credit_raw = str(round(abs(diff), 2))
+            except Exception:
+                pass
+    return transactions
+
+
 def _assign_kcb_column(w: dict) -> Optional[str]:
     text = w.get("text", "")
     x0 = w.get("x0", 0)
@@ -175,6 +194,8 @@ def extract_kcb_pdf(file_path: str) -> ExtractionResult:
             if pending:
                 _flush_kcb_pending(pending, transactions, warnings)
                 pending = None
+
+    transactions = derive_missing_debits(transactions)
 
     return ExtractionResult(
         source_file=file_path,
