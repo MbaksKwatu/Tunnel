@@ -32,7 +32,16 @@ def detect_coop(file_path: str) -> bool:
             )
             has_stmt = "STATEMENT OF ACCOUNT" in text_upper
             has_marker = "KCOOKENA" in text_upper or "WE ARE YOU" in text_upper
-            return bool(has_stmt and (has_bank or has_marker))
+            has_layout_b = (
+                "TRANS" in text_upper
+                and "CHANNEL" in text_upper
+                and "BOOK BALANCE" in text_upper
+                and "MSME" in text_upper
+            )
+            return bool(
+                (has_stmt and (has_bank or has_marker))
+                or has_layout_b
+            )
     except Exception:
         return False
 
