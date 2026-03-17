@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import JSONResponse
 
+from app.analytics import run_analytics
 from app.models import ExtractionResult
 from app.extractors.mpesa_extractor import extract_mpesa_csv
 from app.extractors.pdf_type_detector import is_scanned_pdf
@@ -31,8 +32,8 @@ def health() -> dict:
     return {"status": "ok", "service": "parity-ingestion", "version": "1.0.0-phase3"}
 
 
-@app.post("/v1/ingest/upload", response_model=ExtractionResult)
-async def upload(file: UploadFile = File(...)) -> ExtractionResult:
+@app.post("/v1/ingest/upload")
+async def upload(file: UploadFile = File(...)):
     filename = file.filename or "upload"
     ext = Path(filename).suffix.lower()
 
@@ -72,7 +73,9 @@ async def upload(file: UploadFile = File(...)) -> ExtractionResult:
     result.source_file = filename  # return original name, not temp path
     _results[result_id] = result
 
-    return result
+    result_dict = result.model_dump()
+    result_dict["analytics"] = run_analytics(result.raw_transactions)
+    return result_dict
 
 
 @app.get("/v1/ingest/result/{result_id}", response_model=ExtractionResult)
