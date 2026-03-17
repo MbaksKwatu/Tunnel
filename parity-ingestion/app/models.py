@@ -39,9 +39,11 @@ class RawTransaction(BaseModel):
     credit_raw: str      # raw string, e.g. "371,200.00" or ""
     balance_raw: str     # raw string, e.g. "1,733,938.24" or ""
     source_file: str
-    extraction_confidence: float  # 1.0 = all fields present; <1.0 = partial row
+    extraction_confidence: float = 1.0  # 1.0 = all fields present; <1.0 = partial row
     source_extraction_method: Optional[str] = None
     balance_is_overdrawn: Optional[bool] = None
+    classification_status: str = "AUTO_CLASSIFIED"
+    pattern_hint: str = ""
 
 
 # ── Phase 3 models ──────────────────────────────────────────────────────────
