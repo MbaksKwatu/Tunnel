@@ -63,7 +63,7 @@ def parse_pdf_via_parity_ingestion(
     url = f"{PARITY_INGESTION_URL}/v1/ingest/upload"
     files = {"file": (file_name or "upload.pdf", file_bytes, "application/pdf")}
 
-    with httpx.Client(timeout=60.0) as client:
+    with httpx.Client(timeout=120.0) as client:
         resp = client.post(url, files=files)
         if resp.status_code == 415:
             raise InvalidSchemaError(
