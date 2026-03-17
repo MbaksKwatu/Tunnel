@@ -134,7 +134,10 @@ def extract_kcb_pdf(file_path: str) -> ExtractionResult:
                 desc_str = " ".join(desc_parts).strip()
                 value_date_str = " ".join(value_date_parts).strip()
 
-                if "BALANCE AT PERIOD END" in desc_str.upper():
+                if any(phrase in desc_str.upper() for phrase in [
+                    "BALANCE AT PERIOD END",
+                    "PERIOD END"
+                ]):
                     continue
 
                 if not txn_date_str and not desc_str and not money_out and not money_in:
