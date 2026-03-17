@@ -134,7 +134,9 @@ export default function V1DealPage() {
 
       setAnalysisState('polling');
       const POLL_INTERVAL_MS = 2000;
+      const MAX_POLL_ATTEMPTS = 60; // ~2 min max, then timeout
       let status = await getDocumentStatus(ingestion.document_id);
+      let pollCount = 0;
       while (status.status !== 'completed') {
         if (status.status === 'failed') {
           const errType = status.error_type || 'UnknownError';
@@ -146,6 +148,12 @@ export default function V1DealPage() {
               ? `${errType}: ${errMsg} (stage: ${stage}, next: ${nextAction})`
               : `${errType}: ${errMsg}`
           );
+          setAnalysisState('error');
+          return;
+        }
+        pollCount += 1;
+        if (pollCount >= MAX_POLL_ATTEMPTS) {
+          setErrorMsg('Document processing timed out. The service may be overloaded — try again later.');
           setAnalysisState('error');
           return;
         }
