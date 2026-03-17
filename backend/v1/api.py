@@ -245,6 +245,7 @@ def get_document_status(request: Request, document_id: str):
         "status": doc.get("status"),
         "file_type": doc.get("file_type"),
         "currency_mismatch": doc.get("currency_mismatch", False),
+        "currency_detected": doc.get("currency_detected"),
         "created_at": doc.get("created_at"),
     }
     if doc.get("status") == "failed":

@@ -81,7 +81,11 @@ export async function createDeal(
 export async function uploadDocument(
   dealId: string,
   file: File
-): Promise<{ ingestion: { document_id: string; rows_count: number } }> {
+): Promise<{
+  ingestion: { document_id: string; rows_count: number };
+  analytics?: { monthly_cashflow?: Array<Record<string, unknown>> };
+  detectedCurrency?: string;
+}> {
   const form = new FormData()
   form.append('file', file)
   const res = await fetchApi(`${BASE}/deals/${dealId}/documents`, {
@@ -101,6 +105,7 @@ export interface DocumentStatusResponse {
   stage?: string
   next_action?: string
   traceback?: string
+  currency_detected?: string
 }
 
 export async function getDocumentStatus(

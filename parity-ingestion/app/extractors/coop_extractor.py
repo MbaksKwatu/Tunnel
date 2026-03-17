@@ -46,6 +46,29 @@ def detect_coop(file_path: str) -> bool:
         return False
 
 
+def _detect_currency(file_path: str) -> str:
+    """
+    Detect currency from Co-op statement header.
+    Looks for 'Currency KES', 'Currency USD' etc.
+    Returns ISO 4217 code. Defaults to KES.
+    """
+    try:
+        with pdfplumber.open(file_path) as pdf:
+            for page in pdf.pages[:2]:
+                text = page.extract_text() or ""
+                for line in text.split("\n"):
+                    line_stripped = line.strip()
+                    if line_stripped.upper().startswith("CURRENCY"):
+                        parts = line_stripped.split()
+                        if len(parts) >= 2:
+                            code = parts[1].upper().strip()
+                            if len(code) == 3 and code.isalpha():
+                                return code
+    except Exception:
+        pass
+    return "KES"
+
+
 def _parse_coop_date(raw: str) -> str | None:
     """Parse DD/MM/YYYY or DD-M-YYYY to ISO YYYY-MM-DD. Returns None on failure."""
     if not raw or not raw.strip():
@@ -307,6 +330,8 @@ def extract_coop_pdf(file_path: str) -> ExtractionResult:
     warnings: List[WarningItem] = []
     row_idx = 0
 
+    detected_currency = _detect_currency(file_path)
+
     if _is_layout_b(file_path):
         transactions, warnings = _extract_coop_layout_b(file_path)
     else:
@@ -394,6 +419,7 @@ def extract_coop_pdf(file_path: str) -> ExtractionResult:
         extraction_status="needs_review" if has_warnings else "success",
         warnings=warnings,
         raw_transactions=transactions,
+        currency=detected_currency,
     )
 
 

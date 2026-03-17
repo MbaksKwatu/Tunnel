@@ -11,6 +11,15 @@ export interface PdfEntityRow {
   txnCount: number;
 }
 
+export interface MonthlyCashflowRow {
+  month: string;
+  inflow_cents: number;
+  outflow_cents: number;
+  net_cents: number;
+  mom_change_bps: number | null;
+  mom_reliable: boolean;
+}
+
 export interface GeneratePdfInput {
   deal: Deal;
   run: AnalysisRun;
@@ -25,6 +34,7 @@ export interface GeneratePdfInput {
   totalOutflow: number;
   payrollTotal: number;
   largestRevenuePct: number;
+  monthlyCashflow?: MonthlyCashflowRow[];
 }
 
 function fmtCents(cents: number, currency: string): string {
@@ -81,6 +91,7 @@ export function generateParityPdf(input: GeneratePdfInput): void {
     totalOutflow,
     payrollTotal,
     largestRevenuePct,
+    monthlyCashflow,
   } = input;
 
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -218,6 +229,64 @@ export function generateParityPdf(input: GeneratePdfInput): void {
   y = bodyLine(doc, `Payroll % of total outflow:     ${payrollPct}%`, MARGIN, y);
   y = bodyLine(doc, `Largest revenue entity %:       ${largestRevenuePct.toFixed(1)}%`, MARGIN, y);
   y += 6;
+
+  // ── MONTHLY CASHFLOW ────────────────────────────────────────────────────────
+  if (monthlyCashflow && monthlyCashflow.length > 0) {
+    y = checkPageBreak(doc, y, 60, MARGIN);
+    y = sectionHeader(doc, 'MONTHLY CASHFLOW & CASH FLOW HABITS', MARGIN, y);
+
+    const cashflowRows = monthlyCashflow.map((m) => {
+      const momDisplay = !m.mom_reliable
+        ? 'N/A'
+        : m.mom_change_bps === null
+        ? 'N/A'
+        : (m.mom_change_bps >= 0 ? '+' : '') + (m.mom_change_bps / 100).toFixed(1) + '%';
+      return [
+        m.month,
+        fmtCents(m.inflow_cents, currency),
+        fmtCents(m.outflow_cents, currency),
+        fmtCents(m.net_cents, currency),
+        momDisplay,
+      ];
+    });
+
+    autoTable(doc, {
+      startY: y,
+      margin: { left: MARGIN, right: MARGIN },
+      head: [['Month', 'Inflow', 'Outflow', 'Net Position', 'MoM Change']],
+      body: cashflowRows,
+      styles: {
+        font: 'courier',
+        fontSize: 7,
+        cellPadding: 3,
+        textColor: [0, 0, 0] as [number, number, number],
+        lineColor: [0, 0, 0] as [number, number, number],
+        lineWidth: 0.3,
+      },
+      headStyles: {
+        font: 'courier',
+        fontStyle: 'bold',
+        fontSize: 7,
+        fillColor: [255, 255, 255] as [number, number, number],
+        textColor: [0, 0, 0] as [number, number, number],
+        lineWidth: 0.5,
+      },
+      alternateRowStyles: {
+        fillColor: [255, 255, 255] as [number, number, number],
+      },
+      columnStyles: {
+        0: { cellWidth: 70 },
+        1: { cellWidth: 110, halign: 'right' },
+        2: { cellWidth: 110, halign: 'right' },
+        3: { cellWidth: 110, halign: 'right' },
+        4: { cellWidth: 80, halign: 'right' },
+      },
+      theme: 'grid',
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    y = (doc as any).lastAutoTable.finalY + 14;
+  }
 
   // ── OVERRIDES ───────────────────────────────────────────────────────────────
   y = checkPageBreak(doc, y, 40, MARGIN);

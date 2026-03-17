@@ -95,3 +95,5 @@ class ExtractionResult(BaseModel):
     result_id: Optional[str] = None
     # Phase 2 additions
     doc_type: Optional[DocType] = None
+    # Currency — ISO 4217 code detected from statement header
+    currency: str = "KES"

@@ -90,6 +90,7 @@ export default function V1DealPage() {
   const [exportError, setExportError] = useState('');
   const [lastExportedAt, setLastExportedAt] = useState<Date | null>(null);
   const [rawTransactions, setRawTransactions] = useState<Array<Record<string, unknown>>>([]);
+  const [monthlyCashflow, setMonthlyCashflow] = useState<Array<Record<string, unknown>>>([]);
   const [reviewQuestion, setReviewQuestion] = useState('');
   const [reviewAnswer, setReviewAnswer] = useState('');
   const [reviewLoading, setReviewLoading] = useState(false);
@@ -129,8 +130,14 @@ export default function V1DealPage() {
       const { deal: d } = await createDeal(currency, dealName || undefined, accrual);
       setDeal(d);
 
-      const { ingestion } = await uploadDocument(d.id, file);
+      const { ingestion, analytics, detectedCurrency } = await uploadDocument(d.id, file);
       setDocumentId(ingestion.document_id);
+      if (analytics?.monthly_cashflow) {
+        setMonthlyCashflow(analytics.monthly_cashflow);
+      }
+      if (detectedCurrency) {
+        setCurrency(detectedCurrency);
+      }
 
       setAnalysisState('polling');
       const POLL_INTERVAL_MS = 2000;
@@ -159,6 +166,9 @@ export default function V1DealPage() {
         }
         await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
         status = await getDocumentStatus(ingestion.document_id);
+      }
+      if ((status as any).currency_detected) {
+        setCurrency((status as any).currency_detected);
       }
 
       setAnalysisState('exporting');
@@ -303,6 +313,7 @@ export default function V1DealPage() {
         totalOutflow: pdfTotalOutflow,
         payrollTotal: pdfPayrollTotal,
         largestRevenuePct: pdfLargestRevenuePct,
+        monthlyCashflow: monthlyCashflow.length > 0 ? (monthlyCashflow as import('@/lib/generate-parity-pdf').MonthlyCashflowRow[]) : undefined,
       });
 
       setExportSuccess('Snapshot saved. PDF downloading.');
