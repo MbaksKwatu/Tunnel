@@ -27,7 +27,7 @@ def detect_mpesa_pdf(file_path: str) -> bool:
                 if t:
                     text += t + " "
             return (
-                "MPESA FULL STATEMENT" in text
+                ("MPESA FULL STATEMENT" in text or "M-PESA STATEMENT" in text)
                 and "Safaricom" in text
                 and "Receipt No" in text
             )
@@ -42,10 +42,33 @@ def _parse_mpesa_date(completion_time: str) -> str:
     return completion_time.strip()[:10]
 
 
+def _to_float(s: str) -> float:
+    try:
+        return float(str(s).replace(",", "")) if s else 0.0
+    except Exception:
+        return 0.0
+
+
+def _deduplicate_by_receipt(records: List[dict]) -> List[dict]:
+    """Keep only the row with positive amount per receipt. If both positive, keep first."""
+    from collections import defaultdict
+    by_receipt: dict[str, List[dict]] = defaultdict(list)
+    for r in records:
+        receipt = r.get("receipt", "") or ""
+        by_receipt[receipt or f"_no_receipt_{id(r)}"].append(r)
+    kept: List[dict] = []
+    for receipt, rows in by_receipt.items():
+        positive = [r for r in rows if _to_float(r.get("credit_raw", "")) > 0 or _to_float(r.get("debit_raw", "")) > 0]
+        if positive:
+            kept.append(positive[0])
+        else:
+            kept.append(rows[0])
+    return kept
+
+
 def extract_mpesa_pdf(file_path: str) -> ExtractionResult:
-    transactions: List[RawTransaction] = []
+    records: List[dict] = []
     warnings: List[WarningItem] = []
-    row_idx = 0
 
     try:
         with pdfplumber.open(file_path) as pdf:
@@ -97,19 +120,31 @@ def extract_mpesa_pdf(file_path: str) -> ExtractionResult:
                             debit_raw = ""
                             credit_raw = ""
 
-                        transactions.append(
-                            RawTransaction(
-                                row_index=row_idx,
-                                date_raw=date_raw,
-                                description=details,
-                                debit_raw=debit_raw,
-                                credit_raw=credit_raw,
-                                balance_raw=balance,
-                                source_file=file_path,
-                                extraction_confidence=1.0,
-                            )
-                        )
-                        row_idx += 1
+                        records.append({
+                            "receipt": receipt,
+                            "date_raw": date_raw,
+                            "description": details,
+                            "debit_raw": debit_raw,
+                            "credit_raw": credit_raw,
+                            "balance_raw": balance,
+                        })
+
+        before_count = len(records)
+        records = _deduplicate_by_receipt(records)
+        transactions = [
+            RawTransaction(
+                row_index=i,
+                date_raw=r["date_raw"],
+                description=r["description"],
+                debit_raw=r["debit_raw"],
+                credit_raw=r["credit_raw"],
+                balance_raw=r["balance_raw"],
+                source_file=file_path,
+                extraction_confidence=1.0,
+            )
+            for i, r in enumerate(records)
+        ]
+        setattr(extract_mpesa_pdf, "_last_before_dedup", before_count)
 
     except Exception as e:
         return ExtractionResult(
