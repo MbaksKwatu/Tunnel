@@ -313,7 +313,7 @@ export default function V1DealPage() {
         totalOutflow: pdfTotalOutflow,
         payrollTotal: pdfPayrollTotal,
         largestRevenuePct: pdfLargestRevenuePct,
-        monthlyCashflow: monthlyCashflow.length > 0 ? (monthlyCashflow as import('@/lib/generate-parity-pdf').MonthlyCashflowRow[]) : undefined,
+        monthlyCashflow: monthlyCashflow.length > 0 ? (monthlyCashflow as unknown as import('@/lib/generate-parity-pdf').MonthlyCashflowRow[]) : undefined,
       });
 
       setExportSuccess('Snapshot saved. PDF downloading.');
