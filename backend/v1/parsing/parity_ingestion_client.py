@@ -55,10 +55,10 @@ def parse_pdf_via_parity_ingestion(
     file_name: str,
     document_id: str,
     deal_currency: str,
-) -> Tuple[List[Dict[str, Any]], str, str]:
+) -> Tuple[List[Dict[str, Any]], str, str, Dict[str, Any]]:
     """
     POST PDF to parity-ingestion, convert result to backend rows.
-    Returns (rows, raw_transaction_hash, currency_detection).
+    Returns (rows, raw_transaction_hash, currency_detection, analytics).
     """
     url = f"{PARITY_INGESTION_URL}/v1/ingest/upload"
     files = {"file": (file_name or "upload.pdf", file_bytes, "application/pdf")}
@@ -82,4 +82,6 @@ def parse_pdf_via_parity_ingestion(
         raise InvalidSchemaError("No valid transactions extracted from PDF")
     rows_sorted = sort_rows(rows)
     raw_hash = canonical_hash(rows_sorted)
-    return rows_sorted, raw_hash, "unknown"
+    currency_detection = result.get("currency") or "unknown"
+    analytics = result.get("analytics") or {}
+    return rows_sorted, raw_hash, currency_detection, analytics

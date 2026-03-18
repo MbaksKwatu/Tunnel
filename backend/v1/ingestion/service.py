@@ -67,7 +67,7 @@ class IngestionService:
         # Parse deterministically
         parse_start = time.perf_counter()
         try:
-            rows, raw_hash, currency_detection = parse_file(
+            rows, raw_hash, currency_detection, analytics = parse_file(
                 file_bytes, file_type, document_id, deal_currency, file_name=file_name or ""
             )
         except CurrencyMismatchError:
@@ -188,9 +188,14 @@ class IngestionService:
             stage = STAGE_PARSE_START
             logger.info("[INGEST] stage=%s document_id=%s", stage, document_id)
             parse_start = time.perf_counter()
-            rows, raw_hash, currency_detection = parse_file(
+            parse_result = parse_file(
                 file_bytes, file_type, document_id, deal_currency, file_name=file_name or ""
             )
+            if len(parse_result) == 4:
+                rows, raw_hash, currency_detection, analytics = parse_result
+            else:
+                rows, raw_hash, currency_detection = parse_result
+                analytics = {}
             parse_end = time.perf_counter()
             parse_ms = int((parse_end - parse_start) * 1000)
             stage = STAGE_PARSE_DONE
@@ -218,6 +223,8 @@ class IngestionService:
                 document_id,
                 "completed",
                 currency_mismatch=False,
+                analytics=analytics if analytics else None,
+                currency_detected=currency_detection if currency_detection != "unknown" else None,
             )
             stage = STAGE_STATUS_COMPLETED
 

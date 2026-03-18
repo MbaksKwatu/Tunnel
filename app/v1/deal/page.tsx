@@ -130,14 +130,8 @@ export default function V1DealPage() {
       const { deal: d } = await createDeal(currency, dealName || undefined, accrual);
       setDeal(d);
 
-      const { ingestion, analytics, detectedCurrency } = await uploadDocument(d.id, file);
+      const { ingestion } = await uploadDocument(d.id, file);
       setDocumentId(ingestion.document_id);
-      if (analytics?.monthly_cashflow) {
-        setMonthlyCashflow(analytics.monthly_cashflow);
-      }
-      if (detectedCurrency) {
-        setCurrency(detectedCurrency);
-      }
 
       setAnalysisState('polling');
       const POLL_INTERVAL_MS = 2000;
@@ -167,8 +161,11 @@ export default function V1DealPage() {
         await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
         status = await getDocumentStatus(ingestion.document_id);
       }
-      if ((status as any).currency_detected) {
-        setCurrency((status as any).currency_detected);
+      if (status.currency_detected) {
+        setCurrency(status.currency_detected);
+      }
+      if (status.analytics?.monthly_cashflow) {
+        setMonthlyCashflow(status.analytics.monthly_cashflow);
       }
 
       setAnalysisState('exporting');

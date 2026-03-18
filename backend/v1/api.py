@@ -248,6 +248,9 @@ def get_document_status(request: Request, document_id: str):
         "currency_detected": doc.get("currency_detected"),
         "created_at": doc.get("created_at"),
     }
+    if doc.get("status") == "completed":
+        if doc.get("analytics"):
+            out["analytics"] = doc.get("analytics")
     if doc.get("status") == "failed":
         out["error_type"] = doc.get("error_type") or "UnknownError"
         out["error_message"] = doc.get("error_message") or "Document processing failed"

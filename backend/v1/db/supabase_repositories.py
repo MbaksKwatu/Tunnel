@@ -69,6 +69,8 @@ class DocumentsRepo(DocumentsRepository, BaseRepo):
         error_type: Optional[str] = None,
         error_stage: Optional[str] = None,
         next_action: Optional[str] = None,
+        analytics: Optional[Dict[str, Any]] = None,
+        currency_detected: Optional[str] = None,
     ) -> None:
         data: Dict[str, Any] = {"status": status, "currency_mismatch": currency_mismatch}
         if error_message is not None:
@@ -79,6 +81,10 @@ class DocumentsRepo(DocumentsRepository, BaseRepo):
             data["error_stage"] = error_stage
         if next_action is not None:
             data["next_action"] = next_action
+        if analytics is not None:
+            data["analytics"] = analytics
+        if currency_detected is not None:
+            data["currency_detected"] = currency_detected
         self.client.table(self.table).update(data).eq("id", document_id).execute()
 
     def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:

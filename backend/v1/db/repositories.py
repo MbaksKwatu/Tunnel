@@ -38,6 +38,8 @@ class DocumentsRepository:
         error_type: Optional[str] = None,
         error_stage: Optional[str] = None,
         next_action: Optional[str] = None,
+        analytics: Optional[Dict[str, Any]] = None,
+        currency_detected: Optional[str] = None,
     ) -> None:
         """Update document status (and optional error taxonomy fields)."""
         raise NotImplementedError

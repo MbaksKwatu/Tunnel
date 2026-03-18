@@ -83,7 +83,6 @@ export async function uploadDocument(
   file: File
 ): Promise<{
   ingestion: { document_id: string; rows_count: number };
-  analytics?: { monthly_cashflow?: Array<Record<string, unknown>> };
   detectedCurrency?: string;
 }> {
   const form = new FormData()
@@ -106,6 +105,10 @@ export interface DocumentStatusResponse {
   next_action?: string
   traceback?: string
   currency_detected?: string
+  analytics?: {
+    monthly_cashflow?: Array<Record<string, unknown>>
+    [key: string]: unknown
+  }
 }
 
 export async function getDocumentStatus(
