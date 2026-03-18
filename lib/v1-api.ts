@@ -107,6 +107,7 @@ export interface DocumentStatusResponse {
   currency_detected?: string
   analytics?: {
     monthly_cashflow?: Array<Record<string, unknown>>
+    credit_scoring_inputs?: Record<string, unknown>
     [key: string]: unknown
   }
 }
