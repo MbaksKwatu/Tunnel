@@ -20,6 +20,24 @@ export interface MonthlyCashflowRow {
   mom_reliable: boolean;
 }
 
+export interface CreditScoringInputs {
+  average_monthly_inflow_cents: number;
+  median_monthly_inflow_cents: number;
+  average_monthly_outflow_cents: number;
+  average_net_monthly_cents: number;
+  peak_net_position_cents: number;
+  trough_net_position_cents: number;
+  revenue_growth_bps: number;
+  loan_repayment_burden_bps: number;
+  payroll_stability: string;
+  payroll_months_detected: number;
+  kra_compliance: string;
+  kra_note: string;
+  tax_total_cents: number;
+  statement_months: number;
+  month_count_with_inflow: number;
+}
+
 export interface GeneratePdfInput {
   deal: Deal;
   run: AnalysisRun;
@@ -35,6 +53,7 @@ export interface GeneratePdfInput {
   payrollTotal: number;
   largestRevenuePct: number;
   monthlyCashflow?: MonthlyCashflowRow[];
+  creditScoringInputs?: CreditScoringInputs;
 }
 
 function fmtCents(cents: number, currency: string): string {
@@ -92,6 +111,7 @@ export function generateParityPdf(input: GeneratePdfInput): void {
     payrollTotal,
     largestRevenuePct,
     monthlyCashflow,
+    creditScoringInputs,
   } = input;
 
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -118,6 +138,58 @@ export function generateParityPdf(input: GeneratePdfInput): void {
   doc.setLineWidth(0.5);
   doc.line(MARGIN, y, PAGE_W - MARGIN, y);
   y += 16;
+
+  // ── CREDIT SCORING INPUTS ───────────────────────────────────────────────────
+  if (creditScoringInputs) {
+    y = sectionHeader(doc, '01  CREDIT SCORING INPUTS', MARGIN, y);
+
+    const csiRows: [string, string, string][] = [
+      ['Average Monthly Inflow', fmtCents(creditScoringInputs.average_monthly_inflow_cents, currency), `${creditScoringInputs.month_count_with_inflow}-month arithmetic mean`],
+      ['Median Monthly Inflow', fmtCents(creditScoringInputs.median_monthly_inflow_cents, currency), `${creditScoringInputs.month_count_with_inflow}-month median`],
+      ['Average Monthly Outflow', fmtCents(creditScoringInputs.average_monthly_outflow_cents, currency), '12-month arithmetic mean'],
+      ['Average Net Monthly Position', fmtCents(creditScoringInputs.average_net_monthly_cents, currency), 'Inflow minus outflow mean'],
+      ['Peak Net Position', fmtCents(creditScoringInputs.peak_net_position_cents, currency), 'Best single month'],
+      ['Trough Net Position', fmtCents(creditScoringInputs.trough_net_position_cents, currency), 'Worst single month'],
+      ['Revenue Growth', (creditScoringInputs.revenue_growth_bps >= 0 ? '+' : '') + (creditScoringInputs.revenue_growth_bps / 100).toFixed(1) + '%', 'First vs last month with inflow'],
+      ['Loan Repayment Burden', (creditScoringInputs.loan_repayment_burden_bps / 100).toFixed(1) + '%', '% of total outflows'],
+      ['Payroll Stability', creditScoringInputs.payroll_stability, `${creditScoringInputs.payroll_months_detected} months detected`],
+      ['KRA Compliance', creditScoringInputs.kra_compliance, creditScoringInputs.kra_note],
+    ];
+
+    autoTable(doc, {
+      startY: y,
+      margin: { left: MARGIN, right: MARGIN },
+      head: [['Scoring Metric', 'Value', 'Basis']],
+      body: csiRows,
+      styles: {
+        font: 'courier',
+        fontSize: 7,
+        cellPadding: 3,
+        textColor: [0, 0, 0] as [number, number, number],
+        lineColor: [0, 0, 0] as [number, number, number],
+        lineWidth: 0.3,
+      },
+      headStyles: {
+        font: 'courier',
+        fontStyle: 'bold',
+        fontSize: 7,
+        fillColor: [255, 255, 255] as [number, number, number],
+        textColor: [0, 0, 0] as [number, number, number],
+        lineWidth: 0.5,
+      },
+      alternateRowStyles: {
+        fillColor: [255, 255, 255] as [number, number, number],
+      },
+      columnStyles: {
+        0: { cellWidth: 160 },
+        1: { cellWidth: 120, halign: 'right' },
+        2: { cellWidth: 200 },
+      },
+      theme: 'grid',
+    });
+
+    y = (doc as any).lastAutoTable.finalY + 20;
+  }
 
   // ── DEAL SUMMARY ────────────────────────────────────────────────────────────
   y = sectionHeader(doc, 'DEAL SUMMARY', MARGIN, y);

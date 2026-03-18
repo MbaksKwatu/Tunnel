@@ -58,10 +58,11 @@ def compute_metrics(transactions: List[Dict], accrual: Dict) -> Dict:
 
     coverage_bp = classified_abs_total * 10000 // non_transfer_abs_total
 
+    _OPERATIONAL_INFLOW_ROLES = frozenset({"revenue_operational", "mpesa_inflow"})
     bank_operational_inflow_cents = sum(
         int(t["signed_amount_cents"])
         for t in non_transfer
-        if t["signed_amount_cents"] > 0 and t.get("role") == "revenue_operational"
+        if int(t["signed_amount_cents"]) > 0 and t.get("role") in _OPERATIONAL_INFLOW_ROLES
     )
 
     missing_month_count = _missing_months([t["txn_date"] for t in transactions])

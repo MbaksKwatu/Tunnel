@@ -91,6 +91,7 @@ export default function V1DealPage() {
   const [lastExportedAt, setLastExportedAt] = useState<Date | null>(null);
   const [rawTransactions, setRawTransactions] = useState<Array<Record<string, unknown>>>([]);
   const [monthlyCashflow, setMonthlyCashflow] = useState<Array<Record<string, unknown>>>([]);
+  const [creditScoringInputs, setCreditScoringInputs] = useState<Record<string, unknown> | null>(null);
   const [reviewQuestion, setReviewQuestion] = useState('');
   const [reviewAnswer, setReviewAnswer] = useState('');
   const [reviewLoading, setReviewLoading] = useState(false);
@@ -166,6 +167,9 @@ export default function V1DealPage() {
       }
       if (status.analytics?.monthly_cashflow) {
         setMonthlyCashflow(status.analytics.monthly_cashflow);
+      }
+      if (status.analytics?.credit_scoring_inputs) {
+        setCreditScoringInputs(status.analytics.credit_scoring_inputs);
       }
 
       setAnalysisState('exporting');
@@ -311,6 +315,7 @@ export default function V1DealPage() {
         payrollTotal: pdfPayrollTotal,
         largestRevenuePct: pdfLargestRevenuePct,
         monthlyCashflow: monthlyCashflow.length > 0 ? (monthlyCashflow as unknown as import('@/lib/generate-parity-pdf').MonthlyCashflowRow[]) : undefined,
+        creditScoringInputs: creditScoringInputs ? (creditScoringInputs as unknown as import('@/lib/generate-parity-pdf').CreditScoringInputs) : undefined,
       });
 
       setExportSuccess('Snapshot saved. PDF downloading.');
