@@ -302,6 +302,61 @@ export function generateParityPdf(input: GeneratePdfInput): void {
   y = bodyLine(doc, `Largest revenue entity %:       ${largestRevenuePct.toFixed(1)}%`, MARGIN, y);
   y += 6;
 
+  // ── ITEMS REQUIRING REVIEW ──────────────────────────────────────────────────
+  const needsReviewEntities = entityBreakdown.filter(
+    (r) => r.role === 'needs_review' || r.role === 'capital_injection' || r.role === 'loan_inflow'
+  );
+  if (needsReviewEntities.length > 0) {
+    y = checkPageBreak(doc, y, 60, MARGIN);
+    y = sectionHeader(doc, 'ITEMS REQUIRING REVIEW', MARGIN, y);
+    y = bodyLine(doc, `${needsReviewEntities.length} transaction${needsReviewEntities.length > 1 ? 's' : ''} flagged for analyst review before finalising this record.`, MARGIN, y);
+    y += 4;
+
+    const reviewRows = needsReviewEntities.map((r) => {
+      const label = r.entityName.length > 32 ? r.entityName.slice(0, 31) + '\u2026' : r.entityName;
+      const action =
+        r.role === 'loan_inflow' ? 'VERIFY — possible loan disbursement'
+        : r.role === 'capital_injection' ? 'VERIFY — possible capital injection'
+        : 'CLASSIFY — large or unidentified inflow/outflow';
+      return [label, r.role, fmtCents(r.totalAbsCents, currency), action];
+    });
+
+    autoTable(doc, {
+      startY: y,
+      margin: { left: MARGIN, right: MARGIN },
+      head: [['Entity', 'Flagged As', 'Amount', 'Action Required']],
+      body: reviewRows,
+      styles: {
+        font: 'courier',
+        fontSize: 7,
+        cellPadding: 3,
+        textColor: [0, 0, 0] as [number, number, number],
+        lineColor: [0, 0, 0] as [number, number, number],
+        lineWidth: 0.3,
+      },
+      headStyles: {
+        font: 'courier',
+        fontStyle: 'bold',
+        fontSize: 7,
+        fillColor: [255, 255, 255] as [number, number, number],
+        textColor: [0, 0, 0] as [number, number, number],
+        lineWidth: 0.5,
+      },
+      alternateRowStyles: {
+        fillColor: [255, 255, 255] as [number, number, number],
+      },
+      columnStyles: {
+        0: { cellWidth: 140 },
+        1: { cellWidth: 90 },
+        2: { cellWidth: 90, halign: 'right' },
+        3: { cellWidth: 176 },
+      },
+      theme: 'grid',
+    });
+
+    y = (doc as any).lastAutoTable.finalY + 14;
+  }
+
   // ── MONTHLY CASHFLOW ────────────────────────────────────────────────────────
   if (monthlyCashflow && monthlyCashflow.length > 0) {
     y = checkPageBreak(doc, y, 60, MARGIN);
