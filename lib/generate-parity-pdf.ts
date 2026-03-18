@@ -235,12 +235,17 @@ export function generateParityPdf(input: GeneratePdfInput): void {
     y = checkPageBreak(doc, y, 60, MARGIN);
     y = sectionHeader(doc, 'MONTHLY CASHFLOW & CASH FLOW HABITS', MARGIN, y);
 
+    let hasUnreliable = false;
     const cashflowRows = monthlyCashflow.map((m) => {
-      const momDisplay = !m.mom_reliable
-        ? 'N/A'
-        : m.mom_change_bps === null
-        ? 'N/A'
-        : (m.mom_change_bps >= 0 ? '+' : '') + (m.mom_change_bps / 100).toFixed(1) + '%';
+      let momDisplay: string;
+      if (m.mom_change_bps === null || m.month === monthlyCashflow[0].month) {
+        momDisplay = '—';
+      } else if (!m.mom_reliable) {
+        hasUnreliable = true;
+        momDisplay = (m.mom_change_bps >= 0 ? '+' : '') + (m.mom_change_bps / 100).toFixed(1) + '%*';
+      } else {
+        momDisplay = (m.mom_change_bps >= 0 ? '+' : '') + (m.mom_change_bps / 100).toFixed(1) + '%';
+      }
       return [
         m.month,
         fmtCents(m.inflow_cents, currency),
