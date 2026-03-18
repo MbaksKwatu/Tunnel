@@ -29,10 +29,20 @@ _LOAN_REPAYMENT_PATTERNS = frozenset({
     "rafiki microfinance", "century microfinance", "uwezo"
 })
 
-# Capital injection — positive only
+# Capital injection (positive only)
+# Note: "capital" as a standalone word matches company names (e.g. "Fourth Generation Capital Ltd")
+# Only match multi-word phrases that unambiguously indicate an equity injection
 _CAPITAL_KEYWORDS = frozenset({
-    "capital", "equity injection", "shareholder", "investment",
-    "director contribution", "owner contribution"
+    "equity injection", "shareholder contribution", "director contribution",
+    "owner contribution", "capital injection", "share capital"
+})
+
+# Company name suffixes that contain capital/investment keywords but are NOT injections
+_COMPANY_SUFFIXES = frozenset({
+    "capital limited", "capital ltd", "capital llp", "capital plc",
+    "investment limited", "investment ltd", "investment trust",
+    "investments limited", "investments ltd",
+    "trust registered", "africa trust",
 })
 
 # Reversal and refund credits — auto-excluded from revenue
@@ -230,11 +240,13 @@ def _keyword_classify(descriptor: str, amount_cents: int) -> Optional[Tuple[str,
             else:
                 return ("mpesa_inflow", f"keyword_match:{kw}:mobile_transfer_keywords_inbound")
 
-    # 14. PesaLink inflow
+    # 14. PesaLink
     for kw in _PESALINK_INFLOW_KEYWORDS:
         if kw in d:
             if amt > 0:
                 return ("pesalink_inflow", f"keyword_match:{kw}:pesalink_keywords")
+            elif amt <= -_LARGE_POSITIVE_THRESHOLD_CENTS:
+                return ("needs_review", f"keyword_match:{kw}:pesalink_large_outbound")
             else:
                 return ("bill_payment", f"keyword_match:{kw}:pesalink_keywords_outbound")
 

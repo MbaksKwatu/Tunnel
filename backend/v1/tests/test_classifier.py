@@ -194,8 +194,15 @@ def test_pesalink_inflow():
     assert role == "pesalink_inflow"
     assert "keyword_match" in reason
 
-def test_pesalink_outbound():
+def test_pesalink_outbound_large():
+    """Large PesaLink outbound (>= KES 100,000) routes to needs_review."""
     role, reason = classify_with_reason(txn("pesalink 16958003230901 payment", -40000000))
+    assert role == "needs_review"
+    assert "keyword_match" in reason
+
+def test_pesalink_outbound_small():
+    """Small PesaLink outbound (< KES 100,000) routes to bill_payment."""
+    role, reason = classify_with_reason(txn("pesalink transfer outbound small amount", -500000))
     assert role == "bill_payment"
     assert "keyword_match" in reason
 
