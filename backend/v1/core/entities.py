@@ -47,6 +47,10 @@ def _clean_display_name(raw_descriptor: str, parsed_descriptor: str) -> str:
     if safeways_match:
         return safeways_match.group(1).strip().title()
 
+    # Rule 4b: PesaLink outbound — must check before slash rule fires
+    if "BP:PESALINK" in d or "MB BP:PESALINK" in d:
+        return "PesaLink Transfer"
+
     # Rule 4: Slash-separated institutional names
     # e.g. KE1OL250811002TB,1/THE SOMO AFRICA TRUST REGISTERED/Investment...
     # e.g. FT2509359FHJ,1/FOURTH GENERATION CAPITAL LIMITED/JGP MAUCA...
@@ -60,8 +64,14 @@ def _clean_display_name(raw_descriptor: str, parsed_descriptor: str) -> str:
             if len(candidate) > 3 and not candidate.replace(" ", "").isdigit():
                 return candidate.title()
 
+    # Rule 4b: REVERSAL prefix — must run before bill payment rules
+    if raw.upper().startswith("REVERSAL:") or raw.upper().startswith("AIRTELMONEYKE-REVERSAL:"):
+        return "Reversal — Bill Payment"
+
     # Rule 5: PesaLink large transfer
-    if "PESALINK" in d and ("SENT TO" in d or "TRANSFER" in d):
+    if "PESALINK" in d and ("SENT TO" in d or "TRANSFER" in d or "FUNDS TRANSFER" in d):
+        return "PesaLink Transfer"
+    if "BP:PESALINK" in d or "MB BP:PESALINK" in d:
         return "PesaLink Transfer"
 
     # Rule 6: MPESA B2C bill payment
@@ -84,14 +94,66 @@ def _clean_display_name(raw_descriptor: str, parsed_descriptor: str) -> str:
     if "INT.COLL" in d or "INTEREST RUN" in d:
         return "Interest Charge"
 
-    # Rule 10: ATM/Cash withdrawals
+    # Rule 10: ATM/Cash withdrawals and charges
     if "ATM CASH" in d:
         return "ATM Withdrawal"
     if "AGENT WDL" in d:
         return "Agent Withdrawal"
+    if "ATM CHARGE" in d or "ATM CHRG" in d:
+        return "ATM Charge"
+    if "CHEQUE WITHDRAWAL" in d:
+        return "Cheque Withdrawal"
+    if "CASH DEPOSIT" in d:
+        return "Cash Deposit"
 
-    # Rule 11: Excise duty
-    if "EXCISE DUTY" in d or "EXCISE CHARGES" in d:
+    # Rule 10b: KCB-specific patterns
+    # InHouse CHQ — internal cheque payment
+    if "INHOUSE CHQ" in d or "INHOUSE CHEQUE" in d:
+        return "InHouse Cheque"
+    # Mobile Money Transfer outbound (KCB format)
+    if "MOBILE MONEY TR " in d or "MOBILE MONEY TR MM" in d:
+        return "Mobile Money Transfer"
+    # Mobile Payment inbound (KCB format)
+    if d.startswith("MOBILE PAYMENT"):
+        return "Mobile Payment"
+    # POS transaction — try to extract merchant name
+    if d.startswith("POS TXN"):
+        parts = raw.split()
+        # Last word is often merchant name if it's alphabetic
+        if parts and re.match(r'^[A-Za-z]{3,}$', parts[-1]):
+            return f"POS — {parts[-1].title()}"
+        return "POS Purchase"
+    # Airtime purchase (KCB format)
+    if "AIR TIME PURCHA" in d or "AIRTIME PURCHA" in d:
+        return "Airtime Purchase"
+    # Tax amount due (KCB format)
+    if "TAX AMOUNT DUE" in d:
+        return "Tax Payment"
+    # Agency transaction charge (KCB format)
+    if "AGENCY TRANSACTION CHARGE" in d:
+        return "Agency Charge"
+    # Ltd 999999 pattern — unknown company inflow/outflow
+    if "999999" in d:
+        # Try to extract company name before 999999
+        match = re.search(r'^([A-Za-z][A-Za-z\s]{3,}?)\s+999999', raw)
+        if match:
+            name = match.group(1).strip().title()
+            # Reject generic words that aren't real names
+            if name.lower() not in ("ltd", "limited", "co", "company"):
+                return name
+        return "Company Transfer"
+
+    # Rule 10c: ABSA-specific patterns
+    # Phone number patterns — M-Pesa inbound from phone number
+    if re.match(r'^[A-Z0-9]{8,12}\s+07\d{8}', raw) or re.match(r'^[A-Z0-9]{8,12}\s+2547\d{8}', raw):
+        return "M-Pesa Inbound Transfer"
+    # Transaction ref + name pattern (e.g. 00010003202308181102417866XTV5 Rashka)
+    ref_name = re.match(r'^[0-9A-Z]{15,}\s+([A-Za-z][A-Za-z\s]{3,30})$', raw.strip())
+    if ref_name:
+        return ref_name.group(1).strip().title()
+
+    # Rule 11: Excise duty and related fees
+    if "EXCISE DUTY" in d or "EXCISE CHARGES" in d or d.startswith("EXCISE "):
         return "Excise Duty"
 
     # Rule 12: Short clean names (likely person names) — return as-is title-cased
