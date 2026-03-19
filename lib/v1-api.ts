@@ -108,6 +108,7 @@ export interface DocumentStatusResponse {
   analytics?: {
     monthly_cashflow?: Array<Record<string, unknown>>
     credit_scoring_inputs?: Record<string, unknown>
+    monthly_entity_breakdown?: Array<Record<string, unknown>>
     [key: string]: unknown
   }
 }

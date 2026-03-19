@@ -302,6 +302,68 @@ export function generateParityPdf(input: GeneratePdfInput): void {
   y = bodyLine(doc, `Largest revenue entity %:       ${largestRevenuePct.toFixed(1)}%`, MARGIN, y);
   y += 6;
 
+  // ── MONTHLY ENTITY BREAKDOWN ────────────────────────────────────────────────
+  if ((monthlyCashflow && monthlyCashflow.length > 0) && (input as any).monthlyEntityBreakdown) {
+    const breakdown = (input as any).monthlyEntityBreakdown as Array<{
+      month: string;
+      revenue_in_cents: number;
+      suppliers_cents: number;
+      payroll_cents: number;
+      loan_repayment_cents: number;
+      tax_cents: number;
+    }>;
+    if (breakdown.length > 0) {
+      y = checkPageBreak(doc, y, 60, MARGIN);
+      y = sectionHeader(doc, '03  MONTHLY ENTITY BREAKDOWN', MARGIN, y);
+
+      const breakdownRows = breakdown.map((row) => [
+        row.month,
+        fmtCents(row.revenue_in_cents, currency),
+        fmtCents(row.suppliers_cents, currency),
+        row.payroll_cents > 0 ? fmtCents(row.payroll_cents, currency) : '—',
+        row.loan_repayment_cents > 0 ? fmtCents(row.loan_repayment_cents, currency) : '—',
+        row.tax_cents > 0 ? fmtCents(row.tax_cents, currency) : '—',
+      ]);
+
+      autoTable(doc, {
+        startY: y,
+        margin: { left: MARGIN, right: MARGIN },
+        head: [['Month', 'Revenue In', 'Suppliers', 'Payroll', 'Loan Repmt', 'Tax']],
+        body: breakdownRows,
+        styles: {
+          font: 'courier',
+          fontSize: 7,
+          cellPadding: 3,
+          textColor: [0, 0, 0] as [number, number, number],
+          lineColor: [0, 0, 0] as [number, number, number],
+          lineWidth: 0.3,
+        },
+        headStyles: {
+          font: 'courier',
+          fontStyle: 'bold',
+          fontSize: 7,
+          fillColor: [255, 255, 255] as [number, number, number],
+          textColor: [0, 0, 0] as [number, number, number],
+          lineWidth: 0.5,
+        },
+        alternateRowStyles: {
+          fillColor: [255, 255, 255] as [number, number, number],
+        },
+        columnStyles: {
+          0: { cellWidth: 60 },
+          1: { cellWidth: 95, halign: 'right' },
+          2: { cellWidth: 95, halign: 'right' },
+          3: { cellWidth: 80, halign: 'right' },
+          4: { cellWidth: 80, halign: 'right' },
+          5: { cellWidth: 86, halign: 'right' },
+        },
+        theme: 'grid',
+      });
+
+      y = (doc as any).lastAutoTable.finalY + 14;
+    }
+  }
+
   // ── ITEMS REQUIRING REVIEW ──────────────────────────────────────────────────
   const needsReviewEntities = entityBreakdown.filter(
     (r) => r.role === 'needs_review' || r.role === 'capital_injection' || r.role === 'loan_inflow'
