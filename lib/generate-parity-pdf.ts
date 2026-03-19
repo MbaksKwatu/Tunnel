@@ -54,6 +54,7 @@ export interface GeneratePdfInput {
   largestRevenuePct: number;
   monthlyCashflow?: MonthlyCashflowRow[];
   creditScoringInputs?: CreditScoringInputs;
+  monthlyEntityBreakdown?: Array<Record<string, unknown>>;
 }
 
 function fmtCents(cents: number, currency: string): string {
