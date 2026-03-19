@@ -472,6 +472,130 @@ _CATEGORY_MAP = {
 }
 
 
+_MOM_RELIABLE_THRESHOLD_CENTS = 1000000
+
+
+def _mom_change_bps(prev: int, curr: int) -> int:
+    """Month-on-month change in basis points. Returns 0 if prev is zero."""
+    if prev == 0:
+        return 0
+    return int((curr - prev) * 10000 // prev)
+
+
+def monthly_cashflow(transactions: List[RawTransaction]) -> List[Dict[str, Any]]:
+    """
+    Month-on-month cash flow with MoM % change.
+    Includes mom_reliable flag — False when previous month net is below
+    threshold and ratio is not meaningful.
+    Returns list sorted by month ascending.
+    """
+    monthly_in: Dict[str, int] = defaultdict(int)
+    monthly_out: Dict[str, int] = defaultdict(int)
+
+    for t in transactions:
+        if t.pattern_hint == "REVERSAL_PAIR":
+            continue
+        month = _month_key(t.date_raw)
+        if not month:
+            continue
+        credit = _parse_amount(t.credit_raw)
+        debit = _parse_amount(t.debit_raw)
+        if credit > 0:
+            monthly_in[month] += credit
+        if debit > 0:
+            monthly_out[month] += debit
+
+    all_months = sorted(set(list(monthly_in.keys()) + list(monthly_out.keys())))
+    result = []
+    prev_net = 0
+    for i, month in enumerate(all_months):
+        inflow = monthly_in.get(month, 0)
+        outflow = monthly_out.get(month, 0)
+        net = inflow - outflow
+        if i == 0:
+            mom_bps = 0
+            mom_reliable = False
+        else:
+            mom_bps = _mom_change_bps(prev_net, net)
+            mom_reliable = abs(prev_net) >= _MOM_RELIABLE_THRESHOLD_CENTS
+        result.append({
+            "month": month,
+            "inflow_cents": inflow,
+            "outflow_cents": outflow,
+            "net_cents": net,
+            "mom_change_bps": mom_bps,
+            "mom_reliable": mom_reliable,
+        })
+        prev_net = net
+
+    return result
+
+
+def entity_discovery_flags(transactions: List[RawTransaction]) -> List[Dict[str, Any]]:
+    """
+    Surface findings not typically declared in loan applications.
+    Mirrors Sayuni Capital Section 05 format.
+    """
+    flags = []
+
+    fund_inflows = [t for t in transactions if t.pattern_hint == "FUND_INFLOW"]
+    for t in fund_inflows:
+        amount = _parse_amount(t.credit_raw)
+        counterparty = _extract_counterparty(t.description, t.pattern_hint)
+        flags.append({
+            "finding": f"{counterparty} — undeclared fund inflow",
+            "category": "UNDISCLOSED_LOAN_OR_INVESTMENT",
+            "value_cents": amount,
+            "date": t.date_raw,
+            "action": "CONFIRM WITH APPLICANT",
+        })
+
+    named_person = [t for t in transactions if t.pattern_hint == "NAMED_PERSON_TRANSFER"]
+    for t in named_person:
+        amount = _parse_amount(t.debit_raw)
+        flags.append({
+            "finding": f"{t.description[:60]} — large named person transfer",
+            "category": "POSSIBLE_OWNER_DISTRIBUTION",
+            "value_cents": amount,
+            "date": t.date_raw,
+            "action": "VERIFY RELATIONSHIP TO BUSINESS",
+        })
+
+    pesalink = [t for t in transactions if t.pattern_hint == "PESALINK_TRANSFER"]
+    for t in pesalink:
+        amount = _parse_amount(t.debit_raw)
+        flags.append({
+            "finding": "PesaLink transfer — possible intercompany obligation",
+            "category": "POSSIBLE_INTERCOMPANY_TRANSFER",
+            "value_cents": amount,
+            "date": t.date_raw,
+            "action": "CONFIRM BENEFICIARY AND PURPOSE",
+        })
+
+    reversals = [t for t in transactions if t.pattern_hint == "REVERSAL_PAIR"]
+    if reversals:
+        flags.append({
+            "finding": f"{len(reversals)} reversed transactions detected",
+            "category": "REVERSAL_PATTERN",
+            "value_cents": sum(_parse_amount(t.debit_raw) for t in reversals),
+            "date": reversals[0].date_raw,
+            "action": "REVIEW FOR FAILED PAYMENTS OR DISPUTES",
+        })
+
+    pending = [t for t in transactions if t.classification_status == "PENDING_CLASSIFICATION"
+               and t.pattern_hint not in {"POS_RECEIPT", "REVERSAL_PAIR"}]
+    if pending:
+        flags.append({
+            "finding": f"{len(pending)} transactions require analyst classification",
+            "category": "PENDING_CLASSIFICATION",
+            "value_cents": 0,
+            "date": "",
+            "action": "CLASSIFY BEFORE FINALISING REPORT",
+        })
+
+    return flags
+
+
 def monthly_entity_breakdown(transactions: List[RawTransaction]) -> List[Dict[str, Any]]:
     """
     Sayuni Capital Section 03 — Monthly Entity Breakdown by Category.
@@ -582,8 +706,10 @@ def run_analytics(transactions: List[RawTransaction], threshold_cents: int = 500
             "analyst_classified": sum(1 for t in transactions if t.classification_status == "ANALYST_CLASSIFIED"),
         },
         "credit_scoring_inputs": credit_scoring_inputs(transactions),
+        "monthly_cashflow": monthly_cashflow(transactions),
         "monthly_entity_breakdown": monthly_entity_breakdown(transactions),
         "revenue_quality": revenue_quality(transactions),
         "expense_patterns": expense_patterns(transactions),
         "cash_position": cash_position(transactions, threshold_cents),
+        "entity_discovery_flags": entity_discovery_flags(transactions),
     }
