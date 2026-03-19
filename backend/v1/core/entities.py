@@ -16,11 +16,17 @@ def _clean_display_name(raw_descriptor: str, parsed_descriptor: str) -> str:
 
     # Rule 1: MPESA C2B — extract name after last ~ separator
     # e.g. TDF6WQOFHC~254728056542~01192248207900~MPESAC2B_400200~Mourine Catherine
+    # Note: some descriptors are truncated and end at MPESAC2B_4 without the person name
     if "MPESAC2B" in d or "MPESA C2B" in d:
         parts = raw.split("~")
         if len(parts) >= 2:
             name = parts[-1].strip()
-            if name and not name.replace(" ", "").isdigit():
+            # Valid person name: not empty, not digits only, not a MPESAC2B token
+            if (name
+                and not name.replace(" ", "").isdigit()
+                and "MPESAC2B" not in name.upper()
+                and not name.upper().startswith("MPESA")
+                and len(name) > 3):
                 return name.title()
         return "M-Pesa C2B"
 
@@ -100,8 +106,10 @@ def _clean_display_name(raw_descriptor: str, parsed_descriptor: str) -> str:
 
 def build_entities(deal_id: str, transactions: List[Dict]) -> Tuple[List[Dict], Dict[str, str], str]:
     """
-    Deterministically derive entities from normalized descriptors.
-    entity_id = sha256(deal_id + "|" + normalized_name)
+    Deterministically derive entities from clean display names.
+    entity_id = sha256(deal_id + "|" + clean_display_name.lower())
+    Transactions with the same clean display name share an entity_id.
+    This collapses repeated counterparties (e.g. 46 Safeways Express rows → 1 entity).
     Returns (entities, txn_entity_map, entities_hash)
     txn_entity_map: txn_id -> entity_id
     """
@@ -110,23 +118,26 @@ def build_entities(deal_id: str, transactions: List[Dict]) -> Tuple[List[Dict], 
     txn_entity_map: Dict[str, str] = {}
 
     for tx in transactions:
-        normalized_name = normalize_descriptor(tx.get("normalized_descriptor", ""))
-        if normalized_name not in name_to_entity:
-            eid = hashlib.sha256(f"{deal_id}|{normalized_name}".encode("utf-8")).hexdigest()
-            name_to_entity[normalized_name] = eid
+        display_name = _clean_display_name(
+            tx.get("raw_descriptor", ""),
+            tx.get("parsed_descriptor", "")
+        )
+        # Use lower-cased display name as grouping key for deduplication
+        group_key = display_name.lower().strip()
+        if group_key not in name_to_entity:
+            eid = hashlib.sha256(f"{deal_id}|{group_key}".encode("utf-8")).hexdigest()
+            name_to_entity[group_key] = eid
+            normalized_name = normalize_descriptor(tx.get("normalized_descriptor", ""))
             entities.append(
                 {
                     "entity_id": eid,
                     "deal_id": deal_id,
                     "normalized_name": normalized_name,
-                    "display_name": _clean_display_name(
-                        tx.get("raw_descriptor", ""),
-                        tx.get("parsed_descriptor", "")
-                    ),
+                    "display_name": display_name,
                     "strong_identifiers": {},
                 }
             )
-        txn_entity_map[tx["txn_id"]] = name_to_entity[normalized_name]
+        txn_entity_map[tx["txn_id"]] = name_to_entity[group_key]
 
     entities_sorted = sorted(entities, key=lambda e: e["entity_id"])
     entities_hash = canonical_hash(entities_sorted)
