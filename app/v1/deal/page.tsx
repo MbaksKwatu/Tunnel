@@ -157,10 +157,12 @@ export default function V1DealPage() {
       setDocumentId(ingestion.document_id);
 
       setAnalysisState('polling');
-      const POLL_INTERVAL_MS = 2000;
-      const MAX_POLL_ATTEMPTS = 60; // ~2 min max, then timeout
+      // Wall-clock cap: status polls can each take several seconds on Render; fixed attempt counts
+      // falsely timed out around ~5–8 min. Large bank PDFs often need 15–25+ min to ingest.
+      const POLL_INTERVAL_MS = 3000;
+      const MAX_WAIT_MS = 30 * 60 * 1000;
+      const pollDeadline = Date.now() + MAX_WAIT_MS;
       let status = await getDocumentStatus(ingestion.document_id);
-      let pollCount = 0;
       while (status.status !== 'completed') {
         if (status.status === 'failed') {
           const errType = status.error_type || 'UnknownError';
@@ -175,9 +177,10 @@ export default function V1DealPage() {
           setAnalysisState('error');
           return;
         }
-        pollCount += 1;
-        if (pollCount >= MAX_POLL_ATTEMPTS) {
-          setErrorMsg('Document processing timed out. The service may be overloaded — try again later.');
+        if (Date.now() >= pollDeadline) {
+          setErrorMsg(
+            'Still processing after 30 minutes. Large PDFs can be slow on a cold server—try again in a few minutes, or use Batch upload for monthly statements. The document may still complete in the background.'
+          );
           setAnalysisState('error');
           return;
         }
