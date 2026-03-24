@@ -481,6 +481,16 @@ export default function V1DealPage() {
         <p className="text-sm text-gray-400 mb-3">
           Upload a bank-export CSV or XLSX (must include <code className="text-gray-300">date</code>,{' '}
           <code className="text-gray-300">description</code>, <code className="text-gray-300">amount</code> columns).
+          {deal && (
+            <>
+              {' '}
+              <span className="text-gray-500">
+                This zone is <strong className="text-gray-400">one file at a time</strong> for the initial
+                analysis. To merge <strong className="text-gray-400">2–3 PDFs</strong> at once, use{' '}
+                <strong className="text-gray-400">Batch upload</strong> below.
+              </span>
+            </>
+          )}
         </p>
         <div
           {...getRootProps()}
@@ -489,7 +499,7 @@ export default function V1DealPage() {
           }`}
         >
           <input {...getInputProps()} />
-          {file ? file.name : 'Drop CSV or XLSX here, or click to select'}
+          {file ? file.name : 'Drop one CSV or XLSX here, or click to select'}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <div>

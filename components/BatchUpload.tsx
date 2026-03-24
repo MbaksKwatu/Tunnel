@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
+import { useDropzone } from 'react-dropzone';
 import { Upload, FileText, X, AlertCircle, CheckCircle } from 'lucide-react';
 import { uploadDocumentsBatch } from '@/lib/v1-api';
 
@@ -20,11 +21,9 @@ export function BatchUpload({ dealId, batchesUsed, onUploadComplete }: BatchUplo
   const batchesRemaining = Math.max(0, 4 - batchesUsed);
   const canUpload = batchesRemaining > 0;
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-
+  const applyPickedFiles = useCallback((files: File[]) => {
     if (files.length < 2) {
-      setError('Please select at least 2 files');
+      setError('Please add at least 2 PDFs (drop or select 2–3 at once)');
       return;
     }
 
@@ -42,7 +41,23 @@ export function BatchUpload({ dealId, batchesUsed, onUploadComplete }: BatchUplo
     setSelectedFiles(files);
     setError(null);
     setSuccess(false);
-  };
+  }, []);
+
+  const onDropBatch = useCallback(
+    (accepted: File[]) => {
+      if (accepted.length) applyPickedFiles(accepted);
+    },
+    [applyPickedFiles]
+  );
+
+  const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
+    onDrop: onDropBatch,
+    accept: { 'application/pdf': ['.pdf'] },
+    maxFiles: 3,
+    disabled: uploading,
+    noClick: true,
+    noKeyboard: true,
+  });
 
   const handleUpload = async () => {
     if (selectedFiles.length < 2 || selectedFiles.length > 3) {
@@ -112,22 +127,30 @@ export function BatchUpload({ dealId, batchesUsed, onUploadComplete }: BatchUplo
         </div>
 
         {selectedFiles.length === 0 && !success && (
-          <div className="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center hover:border-gray-500 transition-colors">
+          <div
+            {...getRootProps({
+              className: `border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+                isDragActive
+                  ? 'border-blue-500 bg-blue-500/10'
+                  : 'border-gray-600 hover:border-gray-500'
+              }`,
+            })}
+          >
+            <input {...getInputProps()} />
             <Upload className="h-12 w-12 mx-auto text-gray-500 mb-3" />
-            <label className="cursor-pointer">
-              <span className="text-sm font-medium text-blue-400 hover:underline">
-                Click to select 2–3 PDF files
-              </span>
-              <input
-                type="file"
-                multiple
-                accept=".pdf,application/pdf"
-                onChange={handleFileSelect}
-                className="hidden"
+            <p className="text-sm text-gray-300 mb-2">
+              <span className="font-medium text-white">Drop 2–3 PDFs here</span>
+              <span className="text-gray-500"> · </span>
+              <button
+                type="button"
+                onClick={() => open()}
                 disabled={uploading}
-              />
-            </label>
-            <p className="text-xs text-gray-500 mt-2">e.g. Jan, Feb, Mar statements</p>
+                className="text-sm font-medium text-blue-400 hover:underline disabled:opacity-50"
+              >
+                or click to select
+              </button>
+            </p>
+            <p className="text-xs text-gray-500">e.g. Jan, Feb, Mar statements (merged as one document)</p>
           </div>
         )}
 
