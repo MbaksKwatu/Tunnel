@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from .repositories import (
@@ -12,6 +13,8 @@ from .repositories import (
     OverridesRepository,
 )
 from .supabase_client import get_supabase
+
+logger = logging.getLogger(__name__)
 
 
 class BaseRepo:
@@ -58,6 +61,37 @@ class DocumentsRepo(DocumentsRepository, BaseRepo):
 
     def create_document(self, document: Dict[str, Any]) -> Dict[str, Any]:
         return self.insert(document)
+
+    def get_batch_upload_count(self, deal_id: str) -> int:
+        """Distinct batch_number count for a deal (RPC when available, else local count)."""
+        try:
+            res = self.client.rpc(
+                "get_deal_batch_count", {"p_deal_id": deal_id}
+            ).execute()
+            d = res.data
+            if d is None:
+                return 0
+            if isinstance(d, int):
+                return d
+            if isinstance(d, list):
+                if not d:
+                    return 0
+                x = d[0]
+                if isinstance(x, dict):
+                    return int(next(iter(x.values())))
+                return int(x)
+            return int(d)
+        except Exception as exc:
+            logger.warning(
+                "get_deal_batch_count RPC failed for deal %s: %s", deal_id, exc
+            )
+            rows = self.list_by_deal(deal_id)
+            batches = {
+                r.get("batch_number")
+                for r in rows
+                if r.get("batch_number") is not None
+            }
+            return len(batches)
 
     def update_status(
         self,

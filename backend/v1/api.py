@@ -4,12 +4,16 @@ All money fields: integer cents.  All ratios: integer basis points.
 Snapshot only on explicit POST /v1/deals/{deal_id}/export.
 """
 
+import io
 import logging
 import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request, BackgroundTasks, Body
+from pypdf import PdfWriter
+
+from .utils.pdf_merge import validate_pdf_count
 
 logger = logging.getLogger(__name__)
 from datetime import datetime, timezone
@@ -91,6 +95,16 @@ def _error(code: str, message: str, *, status: int = 0, next_action: Optional[st
 # ---------------------------------------------------------------------------
 # Repository provider — overridable for tests via app.state
 # ---------------------------------------------------------------------------
+
+def _merge_pdf_bytes_parts(parts: List[bytes]) -> bytes:
+    """Merge PDF byte blobs in order (upload order)."""
+    writer = PdfWriter()
+    for blob in parts:
+        writer.append(io.BytesIO(blob))
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
 
 def _repos(request: Optional[Request] = None) -> Dict[str, Any]:
     if request and hasattr(request.app.state, "repos_factory"):
@@ -221,6 +235,141 @@ async def upload_document(
     )
 
     return {"ingestion": {"document_id": document_id, "status": "processing", "rows_count": 0}}
+
+
+@router.post(
+    "/deals/{deal_id}/documents/batch",
+    summary="Upload multiple PDFs at once (batch upload)",
+    description=(
+        "Upload 2–3 PDFs; they are merged in upload order and processed as one document. "
+        "Limit: 4 batch uploads per deal (tracked via batch_number)."
+    ),
+)
+async def upload_documents_batch(
+    request: Request,
+    deal_id: str,
+    background_tasks: BackgroundTasks,
+    files: List[UploadFile] = File(..., description="2–3 PDF files to merge"),
+    created_by: Optional[str] = Form(None),
+):
+    """
+    Batch upload: merge multiple PDFs in memory, one document row, background ingest.
+    """
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    try:
+        validate_pdf_count(len(files), max_files=3)
+    except ValueError as exc:
+        _error("BAD_REQUEST", str(exc))
+
+    if len(files) < 2:
+        _error("BAD_REQUEST", "Minimum 2 files required for batch upload")
+
+    docs_repo = repos["documents"]
+    batch_count_fn = getattr(docs_repo, "get_batch_upload_count", None)
+    batch_count = batch_count_fn(deal_id) if batch_count_fn else 0
+
+    if batch_count >= 4:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error_code": "BATCH_LIMIT_REACHED",
+                "error_message": (
+                    "Batch upload limit reached. This deal has used all 4 batch uploads. "
+                    "Use single-file uploads or contact support."
+                ),
+            },
+        )
+
+    next_batch_number = batch_count + 1
+    created_by_val = created_by or deal.get("created_by") or str(uuid.uuid4())
+
+    pdf_parts: List[bytes] = []
+    source_names: List[str] = []
+
+    for i, up in enumerate(files, start=1):
+        fname = up.filename or f"file{i}.pdf"
+        ext = ("." + fname.rsplit(".", 1)[-1].lower()) if "." in fname else ".pdf"
+        if ext != ".pdf":
+            _error("BAD_REQUEST", f"Batch upload accepts PDF only; got '{ext}' for {fname}")
+        content = await up.read()
+        if not content:
+            _error("BAD_REQUEST", f"Empty file: {fname}")
+        pdf_parts.append(content)
+        source_names.append(fname)
+        logger.info(
+            "Batch upload: received part %d/%d name=%s bytes=%d",
+            i,
+            len(files),
+            fname,
+            len(content),
+        )
+
+    try:
+        merged_bytes = _merge_pdf_bytes_parts(pdf_parts)
+    except Exception as exc:
+        logger.exception("PDF merge failed for deal %s", deal_id)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error_code": "MERGE_FAILED",
+                "error_message": f"Failed to merge PDFs: {exc}",
+            },
+        ) from exc
+
+    document_id = str(uuid.uuid4())
+    merged_label = f"batch_{next_batch_number}_merged.pdf"
+
+    document: Dict[str, Any] = {
+        "id": document_id,
+        "deal_id": deal_id,
+        "storage_url": f"inline://{merged_label}",
+        "file_type": "pdf",
+        "status": "processing",
+        "currency_detected": None,
+        "currency_mismatch": False,
+        "created_by": created_by_val,
+        "batch_number": next_batch_number,
+        "source_files": source_names,
+        "is_batch_upload": True,
+    }
+    repos["documents"].create_document(document)
+
+    ingestion = IngestionService(
+        documents_repo=repos["documents"],
+        raw_tx_repo=repos["raw"],
+        analysis_repo=repos["runs"],
+    )
+    background_tasks.add_task(
+        ingestion.process_document_background,
+        document_id=document_id,
+        deal_id=deal_id,
+        created_by=created_by_val,
+        file_bytes=merged_bytes,
+        file_name=merged_label,
+        file_type="pdf",
+        deal_currency=deal["currency"],
+    )
+
+    batches_remaining = max(0, 4 - next_batch_number)
+
+    return {
+        "document_id": document_id,
+        "batch_number": next_batch_number,
+        "batches_remaining": batches_remaining,
+        "files_merged": len(files),
+        "source_files": source_names,
+        "status": "processing",
+        "message": f"Batch upload {next_batch_number}/4 submitted successfully",
+        "ingestion": {
+            "document_id": document_id,
+            "status": "processing",
+            "rows_count": 0,
+        },
+    }
 
 
 @router.get("/deals/{deal_id}/documents")
