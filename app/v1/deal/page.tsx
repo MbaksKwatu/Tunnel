@@ -15,6 +15,7 @@ import {
   listDocuments,
   askParity,
 } from '@/lib/v1-api';
+import { BatchUpload } from '@/components/BatchUpload';
 import type {
   Deal,
   AnalysisRun,
@@ -75,6 +76,7 @@ export default function V1DealPage() {
   const [accrualPeriodStart, setAccrualPeriodStart] = useState('');
   const [accrualPeriodEnd, setAccrualPeriodEnd] = useState('');
   const [deal, setDeal] = useState<Deal | null>(null);
+  const [batchesUsed, setBatchesUsed] = useState(0);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [analysisState, setAnalysisState] = useState<AnalysisState>('idle');
   const [errorMsg, setErrorMsg] = useState('');
@@ -111,6 +113,25 @@ export default function V1DealPage() {
     },
     maxFiles: 1,
   });
+
+  const refreshBatchUploadCount = useCallback(async () => {
+    if (!deal) return;
+    try {
+      const { documents } = await listDocuments(deal.id);
+      const nums = new Set<number>();
+      for (const d of documents) {
+        const bn = d.batch_number;
+        if (bn != null && typeof bn === 'number') nums.add(bn);
+      }
+      setBatchesUsed(nums.size);
+    } catch {
+      setBatchesUsed(0);
+    }
+  }, [deal]);
+
+  useEffect(() => {
+    void refreshBatchUploadCount();
+  }, [deal?.id, refreshBatchUploadCount]);
 
   const runAnalysis = async () => {
     if (!file) {
@@ -536,6 +557,16 @@ export default function V1DealPage() {
             'Analyze'}
         </button>
         {errorMsg && <p className="mt-2 text-red-400 text-sm">{errorMsg}</p>}
+
+        {deal && (
+          <div className="mt-6 pt-6 border-t border-gray-700">
+            <BatchUpload
+              dealId={deal.id}
+              batchesUsed={deal.batch_upload_count ?? batchesUsed}
+              onUploadComplete={refreshBatchUploadCount}
+            />
+          </div>
+        )}
       </section>
 
       {run && snapshot && (

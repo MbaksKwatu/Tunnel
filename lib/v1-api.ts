@@ -16,6 +16,8 @@ export interface Deal {
   accrual_revenue_cents?: number
   accrual_period_start?: string
   accrual_period_end?: string
+  /** Distinct batch uploads used (1–4); usually derived client-side from documents if not on deal row */
+  batch_upload_count?: number
 }
 
 export interface AnalysisRun {
@@ -139,12 +141,64 @@ export async function getDocumentTransactions(
   return res.json()
 }
 
+export interface DocumentListItem {
+  id: string
+  status: string
+  batch_number?: number | null
+  is_batch_upload?: boolean | null
+  [key: string]: unknown
+}
+
 export async function listDocuments(
   dealId: string
-): Promise<{ documents: Array<{ id: string; status: string }> }> {
+): Promise<{ documents: DocumentListItem[] }> {
   const res = await fetchApi(`${BASE}/deals/${dealId}/documents`)
   if (!res.ok) throw new Error(await res.text())
   return res.json()
+}
+
+export interface BatchUploadResponse {
+  document_id: string
+  batch_number: number
+  batches_remaining: number
+  files_merged: number
+  source_files: string[]
+  status: string
+  message: string
+  ingestion: { document_id: string; status: string; rows_count: number }
+}
+
+export async function uploadDocumentsBatch(
+  dealId: string,
+  files: File[]
+): Promise<BatchUploadResponse> {
+  const form = new FormData()
+  for (const f of files) {
+    form.append('files', f)
+  }
+  const res = await fetchApi(`${BASE}/deals/${dealId}/documents/batch`, {
+    method: 'POST',
+    body: form,
+  })
+  const text = await res.text()
+  if (!res.ok) {
+    let msg = text?.slice(0, 500) || `Upload failed (${res.status})`
+    try {
+      const j = JSON.parse(text) as { detail?: string | { error_message?: string } }
+      const d = j.detail
+      if (typeof d === 'string') msg = d
+      else if (d && typeof d === 'object' && 'error_message' in d && d.error_message)
+        msg = String(d.error_message)
+    } catch {
+      /* keep msg */
+    }
+    throw new Error(msg)
+  }
+  try {
+    return JSON.parse(text) as BatchUploadResponse
+  } catch {
+    throw new Error('Invalid response from batch upload')
+  }
 }
 
 export async function addOverride(
