@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 from ..config import SCHEMA_VERSION, CONFIG_VERSION
 from ..parsing import parse_file
 from ..parsing.errors import InvalidSchemaError, CurrencyMismatchError
+from ..parsing.parity_ingestion_client import IngestionTimeoutError
 from ..parsing.common import canonical_hash, sort_rows
 from ..errors import is_dev_diagnostics
 from ..db.repositories import (
@@ -278,6 +279,17 @@ class IngestionService:
                 stage=stage,
                 next_action="fix_csv_header",
                 currency_mismatch=currency_mismatch,
+                exc=exc,
+            )
+        except IngestionTimeoutError as exc:
+            logger.error("Ingestion timeout for document %s after 300s", document_id)
+            self._update_failed(
+                document_id,
+                error_type="ingestion_timeout",
+                error_message=str(exc),
+                stage=stage,
+                next_action="retry_or_contact_support",
+                currency_mismatch=False,
                 exc=exc,
             )
         except Exception as exc:

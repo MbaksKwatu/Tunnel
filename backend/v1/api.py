@@ -45,6 +45,34 @@ _METRICS_TEMPLATE = {
     "last_export_at": None,
 }
 
+# Read-only lease: if status stays "processing" longer than this, status endpoint reports failed.
+PROCESSING_LEASE_SECONDS = 600
+
+
+def _parse_document_timestamp(value: Any) -> Optional[datetime]:
+    """Parse created_at / updated_at from DB (ISO string or datetime). Returns timezone-aware UTC."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    s = str(value).strip()
+    if not s:
+        return None
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt
+
 
 @router.get("/system/health")
 def system_health():
@@ -388,23 +416,45 @@ def get_document_status(request: Request, document_id: str):
     doc = repos["documents"].get_document(document_id)
     if not doc:
         _error("NOT_FOUND", f"Document {document_id} not found")
+
+    db_status = doc.get("status")
+    processing_timed_out = False
+    if db_status == "processing":
+        lease_ref = doc.get("updated_at") or doc.get("created_at")
+        ref_dt = _parse_document_timestamp(lease_ref)
+        if ref_dt is not None:
+            age_s = (datetime.now(timezone.utc) - ref_dt).total_seconds()
+            if age_s > PROCESSING_LEASE_SECONDS:
+                processing_timed_out = True
+
+    effective_status = "failed" if processing_timed_out else db_status
+
     out = {
         "document_id": doc["id"],
         "deal_id": doc.get("deal_id"),
-        "status": doc.get("status"),
+        "status": effective_status,
         "file_type": doc.get("file_type"),
         "currency_mismatch": doc.get("currency_mismatch", False),
         "currency_detected": doc.get("currency_detected"),
         "created_at": doc.get("created_at"),
     }
-    if doc.get("status") == "completed":
+    if effective_status == "completed":
         if doc.get("analytics"):
             out["analytics"] = doc.get("analytics")
-    if doc.get("status") == "failed":
-        out["error_type"] = doc.get("error_type") or "UnknownError"
-        out["error_message"] = doc.get("error_message") or "Document processing failed"
-        out["stage"] = doc.get("error_stage") or "UNKNOWN"
-        out["next_action"] = doc.get("next_action") or "retry_or_contact_support"
+    if effective_status == "failed":
+        if processing_timed_out:
+            out["reason"] = "processing_timeout"
+            out["error_type"] = "ProcessingTimeout"
+            out["error_message"] = (
+                f"Document remained in processing for more than {PROCESSING_LEASE_SECONDS} seconds"
+            )
+            out["stage"] = "PROCESSING"
+            out["next_action"] = "retry_or_contact_support"
+        else:
+            out["error_type"] = doc.get("error_type") or "UnknownError"
+            out["error_message"] = doc.get("error_message") or "Document processing failed"
+            out["stage"] = doc.get("error_stage") or "UNKNOWN"
+            out["next_action"] = doc.get("next_action") or "retry_or_contact_support"
         # Legacy: keep "error" for backward compat
         out["error"] = out["error_message"]
     return out

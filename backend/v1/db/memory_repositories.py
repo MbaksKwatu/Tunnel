@@ -58,6 +58,8 @@ class MemoryDocumentsRepo(DocumentsRepository):
         error_type: Optional[str] = None,
         error_stage: Optional[str] = None,
         next_action: Optional[str] = None,
+        analytics: Optional[Dict[str, Any]] = None,
+        currency_detected: Optional[str] = None,
     ) -> None:
         for d in self._store:
             if d["id"] == document_id:
@@ -71,6 +73,10 @@ class MemoryDocumentsRepo(DocumentsRepository):
                     d["error_stage"] = error_stage
                 if next_action is not None:
                     d["next_action"] = next_action
+                if analytics is not None:
+                    d["analytics"] = analytics
+                if currency_detected is not None:
+                    d["currency_detected"] = currency_detected
                 break
 
     def list_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:

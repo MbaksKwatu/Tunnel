@@ -6,9 +6,14 @@ extraction (KCB, Equity, ABSA, Co-op, M-Pesa, SCB). Falls back to built-in parse
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Dict, List, Tuple
 
 import httpx
+
+
+class IngestionTimeoutError(Exception):
+    """Raised when the HTTP client times out waiting for parity-ingestion."""
 
 from .common import canonical_hash, compute_txn_id, normalize_descriptor, sort_rows
 from .errors import InvalidSchemaError
@@ -63,8 +68,22 @@ def parse_pdf_via_parity_ingestion(
     url = f"{PARITY_INGESTION_URL}/v1/ingest/upload"
     files = {"file": (file_name or "upload.pdf", file_bytes, "application/pdf")}
 
-    with httpx.Client(timeout=120.0) as client:
-        resp = client.post(url, files=files)
+    t0 = time.perf_counter()
+    with httpx.Client(timeout=300.0) as client:
+        try:
+            resp = client.post(url, files=files)
+        except httpx.ReadTimeout as exc:
+            elapsed = time.perf_counter() - t0
+            raise IngestionTimeoutError(
+                f"Read timeout calling parity-ingestion for document_id={document_id} "
+                f"after {elapsed:.2f}s"
+            ) from exc
+        except httpx.TimeoutException as exc:
+            elapsed = time.perf_counter() - t0
+            raise IngestionTimeoutError(
+                f"Timeout calling parity-ingestion for document_id={document_id} "
+                f"after {elapsed:.2f}s"
+            ) from exc
         if resp.status_code == 415:
             raise InvalidSchemaError(
                 resp.json().get("detail", "Bank format not recognised by parity-ingestion.")
