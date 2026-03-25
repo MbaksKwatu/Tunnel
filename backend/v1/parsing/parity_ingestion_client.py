@@ -5,6 +5,7 @@ extraction (KCB, Equity, ABSA, Co-op, M-Pesa, SCB). Falls back to built-in parse
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import Any, Dict, List, Tuple
@@ -13,7 +14,19 @@ import httpx
 
 
 class IngestionTimeoutError(Exception):
-    """Raised when the HTTP client times out waiting for parity-ingestion."""
+    """Raised when the HTTP client times out waiting for parity-ingestion.
+
+    partial_data, if present, contains a JSON result payload (or a best-effort
+    partial payload) returned by parity-ingestion that we can attempt to
+    convert into rows.
+    """
+
+    def __init__(self, message: str, *, partial_data: Any = None):
+        super().__init__(message)
+        self.partial_data = partial_data
+
+
+logger = logging.getLogger(__name__)
 
 from .common import canonical_hash, compute_txn_id, normalize_descriptor, sort_rows
 from .errors import InvalidSchemaError
@@ -69,38 +82,90 @@ def parse_pdf_via_parity_ingestion(
     files = {"file": (file_name or "upload.pdf", file_bytes, "application/pdf")}
 
     t0 = time.perf_counter()
-    with httpx.Client(timeout=300.0) as client:
-        try:
-            resp = client.post(url, files=files)
-        except httpx.ReadTimeout as exc:
-            elapsed = time.perf_counter() - t0
-            raise IngestionTimeoutError(
-                f"Read timeout calling parity-ingestion for document_id={document_id} "
-                f"after {elapsed:.2f}s"
-            ) from exc
-        except httpx.TimeoutException as exc:
-            elapsed = time.perf_counter() - t0
-            raise IngestionTimeoutError(
-                f"Timeout calling parity-ingestion for document_id={document_id} "
-                f"after {elapsed:.2f}s"
-            ) from exc
+    try:
+        with httpx.Client(timeout=300.0) as client:
+            try:
+                resp = client.post(url, files=files)
+            except httpx.ReadTimeout as exc:
+                elapsed = time.perf_counter() - t0
+                partial_result = None
+                # httpx may attach a response; if it does, attempt best-effort JSON extraction.
+                maybe_resp = getattr(exc, "response", None)
+                if maybe_resp is not None:
+                    try:
+                        partial_result = maybe_resp.json()
+                    except Exception:
+                        partial_result = None
+                raise IngestionTimeoutError(
+                    f"Read timeout calling parity-ingestion for document_id={document_id} "
+                    f"after {elapsed:.2f}s",
+                    partial_data=partial_result,
+                ) from exc
+            except httpx.TimeoutException as exc:
+                elapsed = time.perf_counter() - t0
+                partial_result = None
+                maybe_resp = getattr(exc, "response", None)
+                if maybe_resp is not None:
+                    try:
+                        partial_result = maybe_resp.json()
+                    except Exception:
+                        partial_result = None
+                raise IngestionTimeoutError(
+                    f"Timeout calling parity-ingestion for document_id={document_id} "
+                    f"after {elapsed:.2f}s",
+                    partial_data=partial_result,
+                ) from exc
+
+        # We got a response; try to parse JSON regardless of status code.
+        result: Any = None
         if resp.status_code == 415:
-            raise InvalidSchemaError(
-                resp.json().get("detail", "Bank format not recognised by parity-ingestion.")
-            )
-        resp.raise_for_status()
-        result = resp.json()
+            # Keep strict schema error semantics.
+            try:
+                detail = resp.json().get("detail", "Bank format not recognised by parity-ingestion.")
+            except Exception:
+                detail = "Bank format not recognised by parity-ingestion."
+            raise InvalidSchemaError(detail)
 
-    if isinstance(result, dict) and result.get("status") == "UNSUPPORTED_FORMAT":
-        raise InvalidSchemaError(
-            result.get("message", "Bank format not recognised.")
-        )
+        try:
+            result = resp.json()
+        except Exception:
+            # If we can't read JSON, keep previous behavior.
+            resp.raise_for_status()
 
-    rows = _parity_result_to_rows(result, document_id)
-    if not rows:
-        raise InvalidSchemaError("No valid transactions extracted from PDF")
-    rows_sorted = sort_rows(rows)
-    raw_hash = canonical_hash(rows_sorted)
-    currency_detection = result.get("currency") or "unknown"
-    analytics = result.get("analytics") or {}
-    return rows_sorted, raw_hash, currency_detection, analytics
+        # If the service says unsupported but it still included transactions, prefer transactions.
+        if isinstance(result, dict) and result.get("status") == "UNSUPPORTED_FORMAT":
+            tentative_rows = _parity_result_to_rows(result, document_id)
+            if not tentative_rows:
+                raise InvalidSchemaError(result.get("message", "Bank format not recognised."))
+
+        rows = _parity_result_to_rows(result, document_id)
+        if not rows:
+            raise InvalidSchemaError("No valid transactions extracted from PDF")
+
+        rows_sorted = sort_rows(rows)
+        raw_hash = canonical_hash(rows_sorted)
+        currency_detection = result.get("currency") or "unknown"
+        analytics = result.get("analytics") or {}
+        return rows_sorted, raw_hash, currency_detection, analytics
+
+    except IngestionTimeoutError as exc:
+        # NEW: best-effort salvage if timeout occurred but we have partial payload.
+        partial_result = getattr(exc, "partial_data", None)
+        if isinstance(partial_result, dict):
+            try:
+                rows = _parity_result_to_rows(partial_result, document_id)
+                if rows:
+                    logger.warning(
+                        "Partial ingestion used due to timeout for document_id=%s (rows=%d)",
+                        document_id,
+                        len(rows),
+                    )
+                    rows_sorted = sort_rows(rows)
+                    raw_hash = canonical_hash(rows_sorted)
+                    currency_detection = partial_result.get("currency") or "unknown"
+                    analytics = partial_result.get("analytics") or {}
+                    return rows_sorted, raw_hash, currency_detection, analytics
+            except Exception:
+                # If salvage fails, fall back to raising the timeout.
+                pass
+        raise

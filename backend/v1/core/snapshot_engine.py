@@ -3,6 +3,8 @@ import uuid
 from typing import Any, Dict, List, Tuple
 
 from ..parsing.common import canonical_hash, sort_rows
+from backend.v1.core.declared_financials import DeclaredFinancials
+from backend.v1.core.reconciliation import compute_reconciliation
 
 
 def _build_financial_state_payload(
@@ -101,6 +103,47 @@ def build_pds_payload(
             r["txn_id"],
         ),
     )
+
+    # TEMP: declared revenue placeholder (manual input for now)
+    declared = DeclaredFinancials(
+        revenue=[0],  # replace later with real input
+        period="annual",
+    )
+    reconciliation = compute_reconciliation(
+        declared=declared,
+        transactions=sorted_txns,
+    )
+    rev = reconciliation.get("revenue", {}) if isinstance(reconciliation, dict) else {}
+    detected = rev.get("detected_cents", 0)
+    declared_cents = rev.get("declared_cents", 0)
+    delta_bps = rev.get("delta_bps")
+    status = rev.get("status")
+
+    # convert bps to percentage (integer)
+    if delta_bps is None:
+        delta_pct = None
+    else:
+        delta_pct = int(delta_bps / 100)
+
+    if status == "MATCH":
+        recommendation = "Financials are consistent with bank activity"
+    elif status == "NEEDS_REVIEW":
+        recommendation = "Minor inconsistencies detected — review recommended"
+    elif status == "MISMATCH":
+        recommendation = "Significant discrepancy — investigate revenue validity"
+    elif status == "INSUFFICIENT_DATA":
+        recommendation = "Declared financials required for verification"
+    else:
+        recommendation = "Unable to determine"
+
+    reconciliation_summary = {
+        "status": status,
+        "detected_revenue": detected,
+        "declared_revenue": declared_cents,
+        "delta_pct": delta_pct,
+        "insight": rev.get("insight"),
+        "recommendation": recommendation,
+    }
     sorted_transfer_links = sorted(
         transfer_links,
         key=lambda l: (l.get("txn_out_id") or "", l.get("txn_in_id") or ""),
@@ -140,6 +183,8 @@ def build_pds_payload(
     payload = {
         **financial_state_payload,
         "financial_state_hash": financial_state_hash,
+        "reconciliation": reconciliation,
+        "reconciliation_summary": reconciliation_summary,
         "overrides_applied": sorted(overrides_applied, key=lambda o: o.get("entity_id") or ""),
     }
     return payload

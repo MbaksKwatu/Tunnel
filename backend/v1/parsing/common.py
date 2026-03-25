@@ -127,7 +127,7 @@ def compute_txn_id(row: Dict[str, Any], document_id: str) -> str:
 
 
 def sort_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    return sorted(
+    rows_sorted = sorted(
         rows,
         key=lambda r: (
             r["txn_date"],
@@ -137,6 +137,61 @@ def sort_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             r["txn_id"],
         ),
     )
+
+    return deduplicate_structural_duplicates(rows_sorted)
+
+
+def deduplicate_structural_duplicates(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Removes duplicate rows caused by:
+    1) exact duplicates (same day)
+    2) cross-day balance carryover (month transitions)
+
+    Deterministic and safe.
+    """
+    if not rows:
+        return rows
+
+    import datetime as _dt
+
+    deduped = [rows[0]]
+
+    for i in range(1, len(rows)):
+        prev = deduped[-1]
+        curr = rows[i]
+
+        prev_desc = (prev.get("normalized_descriptor") or "").strip().lower()
+        curr_desc = (curr.get("normalized_descriptor") or "").strip().lower()
+
+        same_identity = (
+            curr.get("account_id") == prev.get("account_id")
+            and curr.get("signed_amount_cents") == prev.get("signed_amount_cents")
+            and curr_desc == prev_desc
+        )
+
+        # Parse date strings deterministically; fall back to "no carryover" on parse failure.
+        prev_date_s = prev.get("txn_date")
+        curr_date_s = curr.get("txn_date")
+        date_gap = None
+        if prev_date_s and curr_date_s:
+            try:
+                prev_date = _dt.datetime.strptime(str(prev_date_s), "%Y-%m-%d").date()
+                curr_date = _dt.datetime.strptime(str(curr_date_s), "%Y-%m-%d").date()
+                date_gap = (curr_date - prev_date).days
+            except ValueError:
+                date_gap = None
+
+        is_same_day_duplicate = same_identity and curr.get("txn_date") == prev.get("txn_date")
+        is_cross_day_carryover = (
+            same_identity and date_gap is not None and 0 < date_gap <= 2
+        )
+
+        if is_same_day_duplicate or is_cross_day_carryover:
+            continue
+
+        deduped.append(curr)
+
+    return deduped
 
 
 def canonical_hash(rows: Iterable[Dict[str, Any]]) -> str:
