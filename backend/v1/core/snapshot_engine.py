@@ -3,8 +3,8 @@ import uuid
 from typing import Any, Dict, List, Tuple
 
 from ..parsing.common import canonical_hash, sort_rows
-from backend.v1.core.declared_financials import DeclaredFinancials
-from backend.v1.core.reconciliation import compute_reconciliation
+from .declared_financials import DeclaredFinancials
+from .reconciliation import compute_reconciliation
 
 
 def _build_financial_state_payload(

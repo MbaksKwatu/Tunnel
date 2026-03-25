@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Dict, Any
 
-from backend.v1.core.declared_financials import DeclaredFinancials
+from .declared_financials import DeclaredFinancials
 
 
 def compute_detected_revenue(transactions: List[Dict[str, Any]]) -> int:
