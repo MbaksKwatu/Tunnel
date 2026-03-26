@@ -12,6 +12,7 @@ Business format:
 """
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime
 from typing import Any, List, Optional, Tuple
@@ -20,9 +21,81 @@ import pdfplumber
 
 from app.models import ExtractionResult, RawTransaction, WarningItem
 
+logger = logging.getLogger(__name__)
+
 _DATE_PAT = re.compile(r"^(\d{2}-\d{2}-\d{4})\s")
 _DATE2_PAT = re.compile(r"^(\d{2}-\d{2}-\d{4})\s+(\d{2}-\d{2}-\d{4})\s+(.*)$")
 _AMOUNT_PAT = re.compile(r"[\d,]+\.\d{2}")
+
+# Page-chunked extraction for large PDFs (avoids long single-pass CPU time on small instances)
+EQUITY_PAGE_CHUNK_SIZE = 30
+
+
+class _BusinessParserState:
+    """Mutable state for business-layout extraction (must continue across page chunks)."""
+
+    __slots__ = ("seen_table", "buffer", "previous_balance", "row_idx", "transactions")
+
+    def __init__(self) -> None:
+        self.seen_table = False
+        self.buffer: List[str] = []
+        self.previous_balance: Optional[int] = None
+        self.row_idx = 0
+        self.transactions: List[RawTransaction] = []
+
+
+class _PersonalParserState:
+    __slots__ = ("row_idx", "transactions")
+
+    def __init__(self) -> None:
+        self.row_idx = 0
+        self.transactions: List[RawTransaction] = []
+
+
+def _detect_split_transaction_header(lines: List[str]) -> bool:
+    """
+    Some Equity business PDFs break the column header across lines, e.g.:
+      Transacti Value Transaction Cheque
+      Narrative Debit Credit Running Balance
+      on Date Date Reference Number
+    """
+    for i, line in enumerate(lines):
+        if "Transacti" not in line:
+            continue
+        window = "\n".join(lines[i : min(i + 3, len(lines))])
+        if "on Date" in window:
+            return True
+    return False
+
+
+def _normalize_equity_split_date_block_lines(lines: List[str]) -> List[str]:
+    """
+    Merge split date + amount + year lines into one logical row matching standard layout.
+
+    Layout variant (April 2025 and similar):
+      01-04- 30-03-
+      TCU4O61UKS S46462411 6,387.00 1,117,741.00
+      2025 2025
+    ->  01-04-2025 30-03-2025 TCU4O61UKS S46462411 6,387.00 1,117,741.00
+    """
+    out: List[str] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        s = lines[i].strip()
+        if i + 2 < n:
+            m = re.match(r"^(\d{2}-\d{2}-)\s+(\d{2}-\d{2}-)\s*$", s)
+            y = re.match(r"^(\d{4})\s+(\d{4})\s*$", lines[i + 2].strip())
+            mid = lines[i + 1].strip()
+            if m and y and _AMOUNT_PAT.search(mid):
+                d1 = f"{m.group(1)}{y.group(1)}"
+                d2 = f"{m.group(2)}{y.group(2)}"
+                out.append(f"{d1} {d2} {mid}")
+                i += 3
+                continue
+        out.append(lines[i])
+        i += 1
+    return out
 
 
 def _is_equity_business_format(text: str) -> bool:
@@ -263,6 +336,8 @@ def _clean_equity_business_description(desc: str) -> str:
         r"^n Date Date Reference\s+",
         r"^Date Date Reference\s+",
         r"^Transaction Date Value Date\s+",
+        r"^Transacti Value Transaction Cheque\s+",
+        r"^on Date Date Reference Number\s+",
         r"^Narrative\s+Debit\s+Credit\s+",
         r"^Reference\s+",
     ]
@@ -402,11 +477,15 @@ def _append_raw_transaction(
     return row_idx + 1
 
 
-def _extract_equity_personal(pdf: Any, file_path: str) -> List[RawTransaction]:
-    transactions: List[RawTransaction] = []
-    row_idx = 0
-
-    for page in pdf.pages:
+def _run_personal_on_pages(
+    pages: List[Any],
+    file_path: str,
+    state: _PersonalParserState,
+) -> None:
+    """
+    Personal-format extraction for a sequence of pdfplumber pages (mutates state).
+    """
+    for page in pages:
         text = page.extract_text()
         if not text:
             continue
@@ -433,25 +512,33 @@ def _extract_equity_personal(pdf: Any, file_path: str) -> List[RawTransaction]:
                 else:
                     continue
 
-            row_idx = _append_raw_transaction(transactions, parsed, file_path, row_idx)
+            state.row_idx = _append_raw_transaction(
+                state.transactions, parsed, file_path, state.row_idx
+            )
 
-    return transactions
+
+def _extract_equity_personal(pdf: Any, file_path: str) -> List[RawTransaction]:
+    state = _PersonalParserState()
+    _run_personal_on_pages(pdf.pages, file_path, state)
+    return state.transactions
 
 
-def _extract_equity_business(pdf: Any, file_path: str) -> List[RawTransaction]:
+def _run_business_on_pages(
+    pages: List[Any],
+    file_path: str,
+    state: _BusinessParserState,
+) -> None:
     """Business layout: narrative lines often precede the double-date amount line."""
-    transactions: List[RawTransaction] = []
-    row_idx = 0
-    seen_table = False
-    buffer: List[str] = []
-    previous_balance: Optional[int] = None
-
-    for page in pdf.pages:
+    for page in pages:
         text = page.extract_text()
         if not text:
             continue
 
-        for line in text.split("\n"):
+        lines = text.split("\n")
+        # Split date blocks appear on every page; header "Transacti" / "on Date" may only be on page 1.
+        lines = _normalize_equity_split_date_block_lines(lines)
+
+        for line in lines:
             raw_line = line
             line = line.strip()
             if (
@@ -460,30 +547,58 @@ def _extract_equity_business(pdf: Any, file_path: str) -> List[RawTransaction]:
                 and "Credit" in raw_line
                 and "Running Balance" in raw_line
             ):
-                seen_table = True
-                buffer = []
+                state.seen_table = True
+                state.buffer = []
                 continue
 
-            if not seen_table:
+            if not state.seen_table:
                 continue
 
             if _DATE2_PAT.match(line):
-                prefix = " ".join(buffer).strip()
-                buffer = []
+                prefix = " ".join(state.buffer).strip()
+                state.buffer = []
                 parsed, bal_update = _parse_business_txn_line(
-                    line, prefix, previous_balance
+                    line, prefix, state.previous_balance
                 )
                 if bal_update is not None:
-                    previous_balance = bal_update
+                    state.previous_balance = bal_update
                 if not parsed:
                     continue
-                row_idx = _append_raw_transaction(
-                    transactions, parsed, file_path, row_idx
+                state.row_idx = _append_raw_transaction(
+                    state.transactions, parsed, file_path, state.row_idx
                 )
             elif line:
-                buffer.append(line)
+                state.buffer.append(line)
 
-    return transactions
+
+def _extract_equity_business(pdf: Any, file_path: str) -> List[RawTransaction]:
+    state = _BusinessParserState()
+    _run_business_on_pages(pdf.pages, file_path, state)
+    return state.transactions
+
+
+def _finalize_equity_transactions(transactions: List[RawTransaction]) -> List[RawTransaction]:
+    """Renumber row_index, drop exact duplicates (combined list, not per-chunk)."""
+    seen: set[Tuple[str, str, str, str, str]] = set()
+    deduped: List[RawTransaction] = []
+    for t in transactions:
+        fp = (
+            t.date_raw or "",
+            t.description or "",
+            t.debit_raw or "",
+            t.credit_raw or "",
+            t.balance_raw or "",
+        )
+        if fp in seen:
+            continue
+        seen.add(fp)
+        deduped.append(t)
+    out: List[RawTransaction] = []
+    for i, t in enumerate(deduped):
+        d = t.model_dump()
+        d["row_index"] = i
+        out.append(RawTransaction(**d))
+    return out
 
 
 def extract_equity_pdf(file_path: str) -> ExtractionResult:
@@ -491,6 +606,7 @@ def extract_equity_pdf(file_path: str) -> ExtractionResult:
     transactions: List[RawTransaction] = []
 
     with pdfplumber.open(file_path) as pdf:
+        page_count = len(pdf.pages)
         sample_parts: List[str] = []
         for i, page in enumerate(pdf.pages[:2]):
             t = page.extract_text()
@@ -498,10 +614,82 @@ def extract_equity_pdf(file_path: str) -> ExtractionResult:
                 sample_parts.append(t)
         sample = "\n".join(sample_parts)
 
-        if _is_equity_business_format(sample):
-            transactions = _extract_equity_business(pdf, file_path)
+        is_business = _is_equity_business_format(sample)
+
+        if page_count <= EQUITY_PAGE_CHUNK_SIZE:
+            if is_business:
+                transactions = _extract_equity_business(pdf, file_path)
+            else:
+                transactions = _extract_equity_personal(pdf, file_path)
         else:
-            transactions = _extract_equity_personal(pdf, file_path)
+            num_chunks = (page_count + EQUITY_PAGE_CHUNK_SIZE - 1) // EQUITY_PAGE_CHUNK_SIZE
+            logger.info(
+                "Equity PDF chunking: total_pages=%d chunk_size=%d chunk_count=%d",
+                page_count,
+                EQUITY_PAGE_CHUNK_SIZE,
+                num_chunks,
+            )
+            if is_business:
+                state = _BusinessParserState()
+                for chunk_i in range(num_chunks):
+                    start = chunk_i * EQUITY_PAGE_CHUNK_SIZE
+                    end = min(start + EQUITY_PAGE_CHUNK_SIZE, page_count)
+                    chunk_pages = pdf.pages[start:end]
+                    logger.info(
+                        "Processing chunk %d/%d (pages %d-%d)",
+                        chunk_i + 1,
+                        num_chunks,
+                        start + 1,
+                        end,
+                    )
+                    before = len(state.transactions)
+                    _run_business_on_pages(chunk_pages, file_path, state)
+                    if len(state.transactions) == before and (end - start) > 2:
+                        logger.warning(
+                            "Equity chunk %d/%d produced 0 new transactions (pages %d-%d)",
+                            chunk_i + 1,
+                            num_chunks,
+                            start + 1,
+                            end,
+                        )
+                transactions = _finalize_equity_transactions(state.transactions)
+            else:
+                state = _PersonalParserState()
+                for chunk_i in range(num_chunks):
+                    start = chunk_i * EQUITY_PAGE_CHUNK_SIZE
+                    end = min(start + EQUITY_PAGE_CHUNK_SIZE, page_count)
+                    chunk_pages = pdf.pages[start:end]
+                    logger.info(
+                        "Processing chunk %d/%d (pages %d-%d)",
+                        chunk_i + 1,
+                        num_chunks,
+                        start + 1,
+                        end,
+                    )
+                    before = len(state.transactions)
+                    _run_personal_on_pages(chunk_pages, file_path, state)
+                    if len(state.transactions) == before and (end - start) > 2:
+                        logger.warning(
+                            "Equity chunk %d/%d produced 0 new transactions (pages %d-%d)",
+                            chunk_i + 1,
+                            num_chunks,
+                            start + 1,
+                            end,
+                        )
+                transactions = _finalize_equity_transactions(state.transactions)
+
+        if len(transactions) == 0 and page_count > 5:
+            sample_lines: List[str] = []
+            for page in pdf.pages[:3]:
+                t = page.extract_text() or ""
+                sample_lines.extend(t.split("\n")[:10])
+            preview = "\n".join(sample_lines[:10])
+            logger.warning(
+                "Equity extraction returned 0 transactions for %s (pages=%d). First lines of text:\n%s",
+                file_path,
+                page_count,
+                preview,
+            )
 
     return ExtractionResult(
         source_file=file_path,
