@@ -27,6 +27,11 @@ _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 _results: dict[str, ExtractionResult] = {}
 
 
+@app.get("/")
+def root():
+    return {"status": "ok", "service": "parity-ingestion"}
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "service": "parity-ingestion", "version": "1.0.0-phase3"}
