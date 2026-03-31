@@ -1,7 +1,7 @@
 """
 Client for parity-ingestion microservice.
-When PARITY_INGESTION_URL is set, PDFs are sent to parity-ingestion for bank-specific
-extraction (KCB, Equity, ABSA, Co-op, M-Pesa, SCB). Falls back to built-in parse_pdf otherwise.
+When PARITY_INGESTION_URL is set, PDF and XLSX files are sent to parity-ingestion for
+bank-specific extraction. CSV remains parsed locally unless routed otherwise.
 """
 from __future__ import annotations
 
@@ -33,6 +33,13 @@ from .errors import InvalidSchemaError
 
 
 PARITY_INGESTION_URL = os.getenv("PARITY_INGESTION_URL", "").rstrip("/")
+
+
+def _mime_for_upload(file_name: str) -> str:
+    n = (file_name or "").lower()
+    if n.endswith(".xlsx"):
+        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return "application/pdf"
 
 
 def _parity_result_to_rows(
@@ -68,18 +75,19 @@ def _parity_result_to_rows(
     return rows
 
 
-def parse_pdf_via_parity_ingestion(
+def parse_via_parity_ingestion(
     file_bytes: bytes,
     file_name: str,
     document_id: str,
     deal_currency: str,
 ) -> Tuple[List[Dict[str, Any]], str, str, Dict[str, Any]]:
     """
-    POST PDF to parity-ingestion, convert result to backend rows.
+    POST PDF or XLSX to parity-ingestion, convert result to backend rows.
     Returns (rows, raw_transaction_hash, currency_detection, analytics).
     """
     url = f"{PARITY_INGESTION_URL}/v1/ingest/upload"
-    files = {"file": (file_name or "upload.pdf", file_bytes, "application/pdf")}
+    fname = file_name or "upload.pdf"
+    files = {"file": (fname, file_bytes, _mime_for_upload(fname))}
 
     t0 = time.perf_counter()
     try:
@@ -140,7 +148,8 @@ def parse_pdf_via_parity_ingestion(
 
         rows = _parity_result_to_rows(result, document_id)
         if not rows:
-            raise InvalidSchemaError("No valid transactions extracted from PDF")
+            raise InvalidSchemaError("No valid transactions extracted via parity-ingestion")
+        logger.info("[BACKEND] Rows received from ingestion: %d", len(rows))
 
         rows_sorted = sort_rows(rows)
         raw_hash = canonical_hash(rows_sorted)
@@ -160,6 +169,7 @@ def parse_pdf_via_parity_ingestion(
                         document_id,
                         len(rows),
                     )
+                    logger.info("[BACKEND] Rows received from ingestion: %d", len(rows))
                     rows_sorted = sort_rows(rows)
                     raw_hash = canonical_hash(rows_sorted)
                     currency_detection = partial_result.get("currency") or "unknown"
@@ -169,3 +179,7 @@ def parse_pdf_via_parity_ingestion(
                 # If salvage fails, fall back to raising the timeout.
                 pass
         raise
+
+
+# Backward-compatible name for imports
+parse_pdf_via_parity_ingestion = parse_via_parity_ingestion

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import uuid
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
@@ -13,6 +14,8 @@ from app.extractors.mpesa_extractor import extract_mpesa_csv
 from app.extractors.pdf_type_detector import is_scanned_pdf
 from app.extractors.docai_extractor import extract_with_docai
 from app.normaliser import normalise_all
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Parity Ingestion Service",
@@ -42,10 +45,10 @@ async def upload(file: UploadFile = File(...)):
     filename = file.filename or "upload"
     ext = Path(filename).suffix.lower()
 
-    if ext not in (".pdf", ".csv"):
+    if ext not in (".pdf", ".csv", ".xlsx"):
         raise HTTPException(
             status_code=415,
-            detail=f"Unsupported file type '{ext}'. Accepted: .pdf, .csv",
+            detail=f"Unsupported file type '{ext}'. Accepted: .pdf, .csv, .xlsx",
         )
 
     # Write to temp location
@@ -67,9 +70,15 @@ async def upload(file: UploadFile = File(...)):
                         status_code=415,
                         detail=result.get("message", "Bank format not recognised."),
                     )
+        elif ext == ".xlsx":
+            from app.extractors.xlsx_extractor import extract_xlsx
+
+            result = extract_xlsx(str(dest))
         else:
             result = extract_mpesa_csv(str(dest))
         normalise_all(result)
+        rows = result.normalised_transactions or []
+        logger.info("[INGESTION] Parsed rows: %d", len(rows))
     except Exception as exc:
         dest.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=str(exc)) from exc

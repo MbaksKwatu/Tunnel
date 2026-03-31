@@ -17,6 +17,8 @@ ExtractionMethod = Literal[
     "equity_pdf",
     "kcb_pdf",
     "ncba_pdf",
+    "equity_xlsx",
+    "xlsx_generic",
 ]
 
 

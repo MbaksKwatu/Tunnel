@@ -1,10 +1,12 @@
 """
 Bank format detection and extraction router.
 
-Detection order (most specific first): KCB → NCBA → Equity → ABSA → COOP → MPESA_PDF → SCB
+XLSX is routed by extension first. PDF detection order:
+KCB → NCBA → Equity → ABSA → COOP → MPESA_PDF → SCB
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Union
 
 from app.extractors.kcb_extractor import detect_kcb, extract_kcb_pdf
@@ -31,6 +33,12 @@ def route_extract(file_path: str) -> Union[ExtractionResult, dict]:
     Detect bank format and run the appropriate extractor.
     Returns ExtractionResult on success, or UNSUPPORTED_RESPONSE dict if no format matches.
     """
+    ext = Path(file_path).suffix.lower()
+    if ext == ".xlsx":
+        from app.extractors.xlsx_extractor import extract_xlsx
+
+        return extract_xlsx(file_path)
+
     if detect_kcb(file_path):
         return extract_kcb_pdf(file_path)
     if detect_ncba(file_path):
