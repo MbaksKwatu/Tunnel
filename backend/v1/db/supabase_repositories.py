@@ -16,6 +16,8 @@ from .supabase_client import get_supabase
 
 logger = logging.getLogger(__name__)
 
+SELECT_ROW_LIMIT = 50000
+
 
 class BaseRepo:
     def __init__(self, table: str):
@@ -33,7 +35,15 @@ class BaseRepo:
         self.client.table(self.table).insert(items).execute()
 
     def select_eq(self, column: str, value: Any) -> List[Dict[str, Any]]:
-        res = self.client.table(self.table).select("*").eq(column, value).execute()
+        # PostgREST/Supabase defaults can cap rows (~1000) when no range is provided.
+        # Request an explicit ceiling large enough for full monthly statements.
+        res = (
+            self.client.table(self.table)
+            .select("*")
+            .eq(column, value)
+            .range(0, SELECT_ROW_LIMIT - 1)
+            .execute()
+        )
         return res.data or []
 
     def delete_eq(self, column: str, value: Any) -> None:
