@@ -1,0 +1,166 @@
+=== Equity April gap analysis ===
+PDF: /Users/mbakswatu/Desktop/Demofiles/Sassy Cosmetics - Equity Bank - 1180279761781 - Apr 2025.pdf
+
+Total lines after normalisation (all pages, concatenated): 13819
+Total MATCHED lines (_DATE2_PAT): 2287
+Total UNMATCHED candidates (heuristic): 8472
+
+--- First 30 UNMATCHED candidate lines (verbatim) ---
+  1 | 254700289800
+  2 | 254714556371
+  3 | 239867# RUTH
+  4 | SYOMBUA M
+  5 | EAZZY-FUNDS
+  6 | TRNSF FRM
+  7 | MUSYOKI
+  8 | MWINZI
+  9 | KARIUKI/
+ 10 | 254797492396
+ 11 | 239867#hosana
+ 12 | 254790287175
+ 13 | 239867# PETER
+ 14 | NDIRANGU
+ 15 | USSD/MPESA/25
+ 16 | 01-04- 30-03- 4725907707/UF33
+ 17 | 54149787 30,000.00 1,121,905.00
+ 18 | 2025 2025 0978100ED/
+ 19 | FRANCIS GIC
+ 20 | 54149787 78.51 1,121,826.49
+ 21 | 2025 2025 SMS CHARGE
+ 22 | 254708994466
+ 23 | 239867#mary
+ 24 | FRIDAH KAM
+ 25 | 254722643544
+ 26 | 239867#20006910
+ 27 | 254768780862
+ 28 | 239867# JULIANA
+ 29 | MWELU
+ 30 | 254711492148
+
+--- UNMATCHED frequency by first-token shape ---
+  numeric-token: 3337
+  narrative-only-no-digits: 2645
+  other: 1124
+  date-like-partial: 735
+  reference-code-like: 630
+  amount-token: 1
+
+--- Pages with zero DATE2 matches: 1 ---
+  Page 189 (first 5 raw lines):
+    '1,111,354.00 35,210,255.88 35,971,629.88 1,872,728.00'
+    'PLEASE NOTE: The information contained in this statement is only intended for your information and personal use only. The statement'
+    'SHOULD not be copied, distributed or reproduced in whole or in part nor passed to any third party. The same is not intended to provide'
+    'professional advice and should not therefore be relied upon by any third party in that regard. Any omission or errors in this statement should be'
+    'promptly advised on E-mail to EazzyBiz@equitybank.co.ke within 30 days from the date of receipt otherwise the account will be presumed to be'
+
+=== end ===
+
+================================================================================
+MAY 2025 — /Users/mbakswatu/Desktop/Demofiles/Sassy Cosmetics - Equity Bank - 1180279761781 - May 2025.pdf
+================================================================================
+Summary: total lines=9422 | MATCHED (_DATE2_PAT)=2974 | UNMATCHED (heuristic)=4835 | pages with zero DATE2 matches=0
+
+=== Equity April gap analysis ===
+PDF: /Users/mbakswatu/Desktop/Demofiles/Sassy Cosmetics - Equity Bank - 1180279761781 - May 2025.pdf
+
+Total lines after normalisation (all pages, concatenated): 9422
+Total MATCHED lines (_DATE2_PAT): 2974
+Total UNMATCHED candidates (heuristic): 4835
+
+--- First 30 UNMATCHED candidate lines (verbatim) ---
+  1 | MPS 254742816450
+  2 | ANDERSON WAMBU
+  3 | MPS 254740507513
+  4 | IRENE KHABETSA
+  5 | MPS 254722764672
+  6 | CASCA MINI S
+  7 | MPS 254706960219
+  8 | FRANCIS MWAN
+  9 | MPS 254112277827
+ 10 | CASH & CARRY LIM
+ 11 | KIMANI/
+ 12 | MPS 254740322233
+ 13 | VINCENT TOO/7j
+ 14 | MPS 254799608737
+ 15 | MPS 254798361762
+ 16 | MPS 254722342674
+ 17 | ANISMA VENTURE
+ 18 | MPS 254796946409
+ 19 | JACKLINE WANJI
+ 20 | MPS 254702912503
+ 21 | MPS 254790338753
+ 22 | MODESTER MAKOK
+ 23 | MPS 254726161520
+ 24 | HIDAYA ZAWADI
+ 25 | TPG 5920059800 KCB
+ 26 | BA/125050
+ 27 | MPS 254721618422
+ 28 | JACKLINE MUMBI
+ 29 | USSD/MPESA/254727878
+ 30 | CHARITY MUT
+
+--- UNMATCHED frequency by first-token shape ---
+  narrative-only-no-digits: 2296
+  other: 1408
+  numeric-token: 1083
+  reference-code-like: 46
+  date-like-full: 1
+  amount-token: 1
+
+--- Pages with zero DATE2 matches: 0 ---
+=== end ===
+
+================================================================================
+JUN 2025 — /Users/mbakswatu/Desktop/Demofiles/Sassy Cosmetics - Equity Bank - 1180279761781 - Jun 2025.pdf
+================================================================================
+Summary: total lines=9659 | MATCHED (_DATE2_PAT)=3047 | UNMATCHED (heuristic)=5029 | pages with zero DATE2 matches=0
+
+=== Equity April gap analysis ===
+PDF: /Users/mbakswatu/Desktop/Demofiles/Sassy Cosmetics - Equity Bank - 1180279761781 - Jun 2025.pdf
+
+Total lines after normalisation (all pages, concatenated): 9659
+Total MATCHED lines (_DATE2_PAT): 3047
+Total UNMATCHED candidates (heuristic): 5029
+
+--- First 30 UNMATCHED candidate lines (verbatim) ---
+  1 | 1180279761781
+  2 | 1180279761781
+  3 | MPS 254725452068
+  4 | FRED ODHIAMBO
+  5 | MPS 254721305279
+  6 | EUNICE NGENDO
+  7 | VISA-NAIROBI JAVA
+  8 | 2/01-06-202
+  9 | MPS 254796426963
+ 10 | 239867#200070083 PATRI
+ 11 | BEAUTY PRO
+ 12 | EAZZY-FUNDS TRNSF
+ 13 | SUPERMARKET
+ 14 | MPS 254722538267
+ 15 | MPS 254726615780
+ 16 | ADAN ABDULLAHI
+ 17 | MPS 254711788068
+ 18 | TF2265MOXM
+ 19 | 239867#200073561
+ 20 | JAMES
+ 21 | MPS 254742327499
+ 22 | 239867#200073786 marti
+ 23 | EAZZY-FUNDS TRNSF
+ 24 | WANGECHI WAIHENYA
+ 25 | MPS 254725152427
+ 26 | NANCY W MWANGI
+ 27 | MPS 254717155353
+ 28 | FANCY CHEPKORI
+ 29 | MPS 254725564136
+ 30 | ADEN ABDULLAHI
+
+--- UNMATCHED frequency by first-token shape ---
+  narrative-only-no-digits: 2382
+  other: 1354
+  numeric-token: 1252
+  reference-code-like: 37
+  date-like-full: 3
+  amount-token: 1
+
+--- Pages with zero DATE2 matches: 0 ---
+=== end ===

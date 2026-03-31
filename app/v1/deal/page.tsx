@@ -23,6 +23,7 @@ import type {
   Entity,
   TxnEntityMapping,
   ExportResponse,
+  DocumentListItem,
 } from '@/lib/v1-api';
 // generateParityPdf is loaded dynamically at click time so Next.js never
 // evaluates jsPDF's Node.js build during server compilation.
@@ -98,6 +99,11 @@ export default function V1DealPage() {
   const [reviewQuestion, setReviewQuestion] = useState('');
   const [reviewAnswer, setReviewAnswer] = useState('');
   const [reviewLoading, setReviewLoading] = useState(false);
+  const [uploadSuccessFile, setUploadSuccessFile] = useState<string | null>(null);
+  const [showUploadSuccessModal, setShowUploadSuccessModal] = useState(false);
+  const [localBatchesUsed, setLocalBatchesUsed] = useState(0);
+  const [batchUploadResetKey, setBatchUploadResetKey] = useState(0);
+  const [dealDocuments, setDealDocuments] = useState<DocumentListItem[]>([]);
 
   const onDrop = useCallback((accepted: File[]) => {
     if (accepted.length) setFile(accepted[0]);
@@ -118,6 +124,7 @@ export default function V1DealPage() {
     if (!deal) return;
     try {
       const { documents } = await listDocuments(deal.id);
+      setDealDocuments(documents);
       const nums = new Set<number>();
       for (const d of documents) {
         const bn = d.batch_number;
@@ -126,6 +133,7 @@ export default function V1DealPage() {
       setBatchesUsed(nums.size);
     } catch {
       setBatchesUsed(0);
+      setDealDocuments([]);
     }
   }, [deal]);
 
@@ -133,7 +141,48 @@ export default function V1DealPage() {
     void refreshBatchUploadCount();
   }, [deal?.id, refreshBatchUploadCount]);
 
+  useEffect(() => {
+    if (!deal || !showUploadSuccessModal) return;
+    const tick = () => {
+      void refreshBatchUploadCount();
+    };
+    tick();
+    const id = setInterval(tick, 3000);
+    return () => clearInterval(id);
+  }, [deal, showUploadSuccessModal, refreshBatchUploadCount]);
+
+  const resetBatchUpload = () => {
+    setBatchUploadResetKey((k) => k + 1);
+  };
+
+  const handleUploadSuccess = useCallback((fileName: string) => {
+    setLocalBatchesUsed((prev) => prev + 1);
+    setUploadSuccessFile(fileName);
+    setShowUploadSuccessModal(true);
+  }, []);
+
   const runAnalysis = async () => {
+    if (deal) {
+      try {
+        const { documents: docs } = await listDocuments(deal.id);
+        setDealDocuments(docs);
+        const allComplete = docs.every((doc) => doc.status === 'completed');
+        if (!allComplete) {
+          const stillProcessing = docs.filter(
+            (doc) => doc.status === 'processing' || doc.status === 'pending'
+          );
+          setErrorMsg(
+            stillProcessing.length > 0
+              ? `${stillProcessing.length} document(s) still processing. Please wait a moment and try again.`
+              : 'Some documents are not ready. Please wait a moment and try again.'
+          );
+          return;
+        }
+      } catch (e) {
+        setErrorMsg(e instanceof Error ? e.message : 'Could not verify document status');
+        return;
+      }
+    }
     if (!file) {
       setErrorMsg('Please select a file');
       return;
@@ -467,6 +516,12 @@ export default function V1DealPage() {
           .reduce((max, r) => Math.max(max, r.pctBps / 100), 0)
       : 0;
 
+  const dealDocsStillProcessing =
+    dealDocuments.length === 0 ||
+    dealDocuments.some(
+      (doc) => doc.status === 'processing' || doc.status === 'pending'
+    );
+
   const formatCents = (c: number) =>
     new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -489,8 +544,8 @@ export default function V1DealPage() {
               {' '}
               <span className="text-gray-500">
                 This zone is <strong className="text-gray-400">one file at a time</strong> for the initial
-                analysis. To merge <strong className="text-gray-400">2–3 PDFs</strong> at once, use{' '}
-                <strong className="text-gray-400">Batch upload</strong> below.
+                analysis. For additional monthly PDFs, use <strong className="text-gray-400">Batch upload</strong>{' '}
+                below (one statement per upload).
               </span>
             </>
           )}
@@ -574,9 +629,12 @@ export default function V1DealPage() {
         {deal && (
           <div className="mt-6 pt-6 border-t border-gray-700">
             <BatchUpload
+              key={batchUploadResetKey}
               dealId={deal.id}
               batchesUsed={deal.batch_upload_count ?? batchesUsed}
+              localBatchesUsed={localBatchesUsed}
               onUploadComplete={refreshBatchUploadCount}
+              onUploadSuccess={handleUploadSuccess}
             />
           </div>
         )}
@@ -865,6 +923,45 @@ export default function V1DealPage() {
             )}
           </section>
         </>
+      )}
+
+      {showUploadSuccessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-lg border border-gray-600 bg-gray-800 p-6 shadow-xl">
+            <div className="text-lg font-semibold text-white">✅ Upload complete</div>
+            <div className="mt-2 text-sm text-gray-400 whitespace-pre-line">
+              {uploadSuccessFile} is uploaded and queued for processing.
+              {'\n'}
+              Large files take 30–60 seconds. You can upload the next statement now, or wait until all
+              months are ready before running analysis.
+            </div>
+            <div className="mt-5 flex flex-wrap gap-3">
+              <button
+                type="button"
+                className="rounded border border-gray-600 px-4 py-2 text-sm text-gray-200 hover:bg-gray-700"
+                onClick={() => {
+                  setShowUploadSuccessModal(false);
+                  setUploadSuccessFile(null);
+                  resetBatchUpload();
+                }}
+              >
+                Upload another statement
+              </button>
+              <button
+                type="button"
+                disabled={dealDocsStillProcessing}
+                className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => {
+                  setShowUploadSuccessModal(false);
+                  setUploadSuccessFile(null);
+                  void runAnalysis();
+                }}
+              >
+                {dealDocsStillProcessing ? 'Processing...' : 'Run analysis →'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

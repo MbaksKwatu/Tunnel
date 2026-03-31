@@ -30,6 +30,19 @@ _AMOUNT_PAT = re.compile(r"[\d,]+\.\d{2}")
 # Page-chunked extraction for large PDFs (avoids long single-pass CPU time on small instances)
 EQUITY_PAGE_CHUNK_SIZE = 30
 
+# April 2025 split-date layout (coordinate-based extraction)
+_APR_DATE_PREFIX_PAT = re.compile(r"^(\d{2})-(\d{2})-$")
+_APR_YEAR_PAT = re.compile(r"^(20\d{2})$")
+_APR_AMOUNT_PAT = re.compile(r"^[\d,]+\.\d{2}$")
+_APR_DATE_X_MIN = 38
+_APR_DATE_X_MAX = 80
+_APR_NARR_X_MIN = 115
+_APR_NARR_X_MAX = 280
+_APR_DEBIT_X_MIN = 280
+_APR_DEBIT_CREDIT_X = 345
+_APR_BALANCE_X_MIN = 440
+_APR_DATA_TOP_MIN = 232
+
 
 class _BusinessParserState:
     """Mutable state for business-layout extraction (must continue across page chunks)."""
@@ -66,6 +79,11 @@ def _detect_split_transaction_header(lines: List[str]) -> bool:
         if "on Date" in window:
             return True
     return False
+
+
+def _is_split_date_layout(first_page_lines: List[str]) -> bool:
+    """True if the PDF uses the April 2025 split-date column layout."""
+    return _detect_split_transaction_header(first_page_lines)
 
 
 def _normalize_equity_split_date_block_lines(lines: List[str]) -> List[str]:
@@ -571,6 +589,101 @@ def _run_business_on_pages(
                 state.buffer.append(line)
 
 
+def _run_split_date_on_pages(
+    pages: List[Any],
+    file_path: str,
+    state: _BusinessParserState,
+) -> None:
+    """
+    Coordinate-based extractor for the April 2025 split-date layout.
+
+    Equity's iText renderer splits Transaction Date across two text runs; pdfplumber
+    line extraction drops many rows. This path uses word coordinates and appends
+    RawTransaction rows like _run_business_on_pages.
+    """
+    for page in pages:
+        words = page.extract_words()
+        data = [w for w in words if w["top"] > _APR_DATA_TOP_MIN]
+
+        date_prefixes = [
+            w
+            for w in data
+            if _APR_DATE_X_MIN <= w["x0"] <= _APR_DATE_X_MAX
+            and _APR_DATE_PREFIX_PAT.match(w["text"])
+        ]
+        year_words = [
+            w
+            for w in data
+            if _APR_DATE_X_MIN <= w["x0"] <= _APR_DATE_X_MAX
+            and _APR_YEAR_PAT.match(w["text"])
+        ]
+
+        for dp in date_prefixes:
+            matched_years = [y for y in year_words if 5 <= y["top"] - dp["top"] <= 12]
+            if not matched_years:
+                logger.debug(
+                    "split-date: no year for '%s' top=%.1f — skipped",
+                    dp["text"],
+                    dp["top"],
+                )
+                continue
+
+            m = _APR_DATE_PREFIX_PAT.match(dp["text"])
+            if not m:
+                continue
+            year = matched_years[0]["text"]
+            # DD-MM-YYYY for _append_raw_transaction / _parse_equity_date
+            date_raw_ddmmyyyy = f"{m.group(1)}-{m.group(2)}-{year}"
+
+            row_top = dp["top"] + 4
+
+            narr_words = [
+                w
+                for w in data
+                if _APR_NARR_X_MIN <= w["x0"] < _APR_NARR_X_MAX
+                and dp["top"] - 10 <= w["top"] <= dp["top"] + 28
+            ]
+            description = " ".join(
+                w["text"] for w in sorted(narr_words, key=lambda w: (w["top"], w["x0"]))
+            )
+
+            amount_words = [
+                w
+                for w in data
+                if _APR_DEBIT_X_MIN <= w["x0"] < _APR_BALANCE_X_MIN
+                and abs(w["top"] - row_top) <= 6
+                and _APR_AMOUNT_PAT.match(w["text"])
+            ]
+            debit_raw = None
+            credit_raw = None
+            for aw in amount_words:
+                if aw["x0"] < _APR_DEBIT_CREDIT_X:
+                    debit_raw = aw["text"]
+                else:
+                    credit_raw = aw["text"]
+
+            balance_words = [
+                w
+                for w in data
+                if w["x0"] >= _APR_BALANCE_X_MIN
+                and abs(w["top"] - row_top) <= 6
+                and _APR_AMOUNT_PAT.match(w["text"].lstrip("-"))
+            ]
+            balance_raw = balance_words[0]["text"] if balance_words else None
+
+            parsed = {
+                "date_raw": date_raw_ddmmyyyy,
+                "particulars": description.strip(),
+                "money_out": debit_raw or "",
+                "money_in": credit_raw or "",
+                "balance_raw": balance_raw or "",
+                "is_opening": False,
+            }
+            state.row_idx = _append_raw_transaction(
+                state.transactions, parsed, file_path, state.row_idx
+            )
+
+
 def _extract_equity_business(pdf: Any, file_path: str) -> List[RawTransaction]:
     state = _BusinessParserState()
     _run_business_on_pages(pdf.pages, file_path, state)
@@ -616,9 +729,19 @@ def extract_equity_pdf(file_path: str) -> ExtractionResult:
 
         is_business = _is_equity_business_format(sample)
 
+        first_page_lines = (pdf.pages[0].extract_text() or "").splitlines()
+        split_date_layout = is_business and _is_split_date_layout(first_page_lines)
+        if split_date_layout:
+            logger.info("equity: split-date layout detected — using coordinate extractor")
+
         if page_count <= EQUITY_PAGE_CHUNK_SIZE:
             if is_business:
-                transactions = _extract_equity_business(pdf, file_path)
+                if split_date_layout:
+                    state_small = _BusinessParserState()
+                    _run_split_date_on_pages(pdf.pages, file_path, state_small)
+                    transactions = state_small.transactions
+                else:
+                    transactions = _extract_equity_business(pdf, file_path)
             else:
                 transactions = _extract_equity_personal(pdf, file_path)
         else:
@@ -643,7 +766,10 @@ def extract_equity_pdf(file_path: str) -> ExtractionResult:
                         end,
                     )
                     before = len(state.transactions)
-                    _run_business_on_pages(chunk_pages, file_path, state)
+                    if split_date_layout:
+                        _run_split_date_on_pages(chunk_pages, file_path, state)
+                    else:
+                        _run_business_on_pages(chunk_pages, file_path, state)
                     if len(state.transactions) == before and (end - start) > 2:
                         logger.warning(
                             "Equity chunk %d/%d produced 0 new transactions (pages %d-%d)",

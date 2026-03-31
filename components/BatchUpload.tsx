@@ -2,33 +2,38 @@
 
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Upload, FileText, X, AlertCircle, CheckCircle } from 'lucide-react';
-import { uploadDocumentsBatch } from '@/lib/v1-api';
+import { Upload, FileText, X, AlertCircle } from 'lucide-react';
+import { uploadDocument } from '@/lib/v1-api';
 
 interface BatchUploadProps {
   dealId: string;
   batchesUsed: number;
+  /** Session counter for single-file uploads (increments in parent). When set, preferred over `batchesUsed` for the 4-upload cap. */
+  localBatchesUsed?: number;
   onUploadComplete: () => void;
+  onUploadSuccess?: (fileName: string) => void;
 }
 
-export function BatchUpload({ dealId, batchesUsed, onUploadComplete }: BatchUploadProps) {
+export function BatchUpload({
+  dealId,
+  batchesUsed,
+  localBatchesUsed,
+  onUploadComplete,
+  onUploadSuccess,
+}: BatchUploadProps) {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
 
-  const batchesRemaining = Math.max(0, 4 - batchesUsed);
-  const canUpload = batchesRemaining > 0;
+  const effectiveBatchesUsed = localBatchesUsed ?? batchesUsed;
+  const uploadsRemaining = Math.max(0, 4 - effectiveBatchesUsed);
+  const atLimit = uploadsRemaining <= 0;
+  const canUpload = !atLimit;
 
   const applyPickedFiles = useCallback((files: File[]) => {
-    if (files.length < 2) {
-      setError('Please add at least 2 PDFs (drop or select 2–3 at once)');
-      return;
-    }
-
-    if (files.length > 3) {
-      setError('Maximum 3 files per batch');
+    if (files.length !== 1) {
+      setError('Please select exactly 1 PDF');
       return;
     }
 
@@ -40,7 +45,6 @@ export function BatchUpload({ dealId, batchesUsed, onUploadComplete }: BatchUplo
 
     setSelectedFiles(files);
     setError(null);
-    setSuccess(false);
   }, []);
 
   const onDropBatch = useCallback(
@@ -53,41 +57,38 @@ export function BatchUpload({ dealId, batchesUsed, onUploadComplete }: BatchUplo
   const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
     onDrop: onDropBatch,
     accept: { 'application/pdf': ['.pdf'] },
-    maxFiles: 3,
-    disabled: uploading,
+    maxFiles: 1,
+    disabled: uploading || atLimit,
     noClick: true,
     noKeyboard: true,
   });
 
   const handleUpload = async () => {
-    if (selectedFiles.length < 2 || selectedFiles.length > 3) {
-      setError('Select 2–3 files');
+    if (selectedFiles.length !== 1) {
+      setError('Select 1 PDF');
       return;
     }
+
+    const uploaded = selectedFiles[0];
 
     setUploading(true);
     setProgress(10);
     setError(null);
-    setSuccess(false);
 
     try {
       setProgress(30);
-      await uploadDocumentsBatch(dealId, selectedFiles);
+      await uploadDocument(dealId, uploaded);
 
       setProgress(100);
-      setSuccess(true);
-
-      setTimeout(() => {
-        setSelectedFiles([]);
-        setSuccess(false);
-        onUploadComplete();
-      }, 2000);
+      setSelectedFiles([]);
+      onUploadSuccess?.(uploaded.name);
+      onUploadComplete();
     } catch (err: unknown) {
       console.error('Batch upload error:', err);
       setError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setUploading(false);
-      setTimeout(() => setProgress(0), 1000);
+      setTimeout(() => setProgress(0), 500);
     }
   };
 
@@ -101,10 +102,9 @@ export function BatchUpload({ dealId, batchesUsed, onUploadComplete }: BatchUplo
         <div className="flex items-start gap-3">
           <AlertCircle className="h-5 w-5 shrink-0 text-amber-400 mt-0.5" />
           <div>
-            <p className="font-medium text-amber-100">Batch upload limit reached</p>
+            <p className="font-medium text-amber-100">Upload limit reached (4 of 4 used)</p>
             <p className="text-sm text-amber-200/80 mt-1">
-              This deal has used all 4 batch uploads. Use single-file upload or contact support for
-              more capacity.
+              Use single-file upload above or contact support for more capacity.
             </p>
           </div>
         </div>
@@ -118,15 +118,15 @@ export function BatchUpload({ dealId, batchesUsed, onUploadComplete }: BatchUplo
         <div className="flex items-center justify-between gap-4">
           <div>
             <h3 className="font-semibold text-lg text-white">Batch upload (PDF)</h3>
-            <p className="text-sm text-gray-400">Upload 2–3 monthly statements at once (merged server-side)</p>
+            <p className="text-sm text-gray-400">Upload one monthly statement per upload (sequential)</p>
           </div>
           <div className="text-right shrink-0">
-            <div className="text-2xl font-bold text-white">{batchesRemaining}</div>
-            <div className="text-xs text-gray-400">of 4 batches left</div>
+            <div className="text-2xl font-bold text-white">{uploadsRemaining}</div>
+            <div className="text-xs text-gray-400">uploads remaining</div>
           </div>
         </div>
 
-        {selectedFiles.length === 0 && !success && (
+        {selectedFiles.length === 0 && (
           <div
             {...getRootProps({
               className: `border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
@@ -139,7 +139,7 @@ export function BatchUpload({ dealId, batchesUsed, onUploadComplete }: BatchUplo
             <input {...getInputProps()} />
             <Upload className="h-12 w-12 mx-auto text-gray-500 mb-3" />
             <p className="text-sm text-gray-300 mb-2">
-              <span className="font-medium text-white">Drop 2–3 PDFs here</span>
+              <span className="font-medium text-white">Drop 1 PDF here</span>
               <span className="text-gray-500"> · </span>
               <button
                 type="button"
@@ -150,7 +150,7 @@ export function BatchUpload({ dealId, batchesUsed, onUploadComplete }: BatchUplo
                 or click to select
               </button>
             </p>
-            <p className="text-xs text-gray-500">e.g. Jan, Feb, Mar statements (merged as one document)</p>
+            <p className="text-xs text-gray-500">e.g. April 2025 statement · upload one month at a time</p>
           </div>
         )}
 
@@ -190,18 +190,9 @@ export function BatchUpload({ dealId, batchesUsed, onUploadComplete }: BatchUplo
               />
             </div>
             <p className="text-sm text-center text-gray-400">
-              {progress < 30 && 'Uploading files…'}
-              {progress >= 30 && progress < 100 && 'Merging & processing…'}
+              {progress < 30 && 'Uploading…'}
+              {progress >= 30 && progress < 100 && 'Sending to server…'}
               {progress >= 100 && 'Almost done…'}
-            </p>
-          </div>
-        )}
-
-        {success && (
-          <div className="flex items-center gap-2 p-3 bg-green-950/50 border border-green-800 rounded-lg">
-            <CheckCircle className="h-5 w-5 text-green-400 shrink-0" />
-            <p className="text-sm text-green-100 font-medium">
-              Batch uploaded successfully. Processing in the background…
             </p>
           </div>
         )}
@@ -212,16 +203,16 @@ export function BatchUpload({ dealId, batchesUsed, onUploadComplete }: BatchUplo
           </div>
         )}
 
-        {selectedFiles.length > 0 && !uploading && !success && (
+        {selectedFiles.length > 0 && !uploading && (
           <div className="flex gap-3 flex-wrap">
             <button
               type="button"
               onClick={handleUpload}
-              disabled={selectedFiles.length < 2 || selectedFiles.length > 3}
+              disabled={selectedFiles.length !== 1}
               className="flex-1 min-w-[12rem] px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded text-white text-sm font-medium inline-flex items-center justify-center gap-2"
             >
               <Upload className="h-4 w-4" />
-              Upload &amp; process {selectedFiles.length} files
+              Upload &amp; process
             </button>
             <button
               type="button"
