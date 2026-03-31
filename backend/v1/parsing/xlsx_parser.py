@@ -1,4 +1,5 @@
 import io
+import re
 from typing import Any, Dict, List, Tuple
 
 from openpyxl import load_workbook
@@ -15,6 +16,54 @@ from .common import (
     sort_rows,
 )
 from .errors import InvalidSchemaError
+
+_EQUITY_EXCEL_COL_MAP = {
+    "transaction date": "date",
+    "transactio n date": "date",
+    "transactiondate": "date",
+    "value date": "value_date",
+    "narrative": "description",
+    "particulars": "description",
+    "debit": "debit",
+    "credit": "credit",
+    "running balance": "balance",
+    "balance": "balance",
+    "transaction reference": "reference",
+    "customer reference": "reference",
+    "ref": "reference",
+}
+
+
+def _normalize_equity_col_name(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def _is_equity_excel(header_row: List[Any]) -> bool:
+    cols_lower = {_normalize_equity_col_name(c) for c in header_row if c is not None}
+    equity_indicators = {"narrative", "running balance", "transactio n date", "transaction date"}
+    return bool(cols_lower & equity_indicators)
+
+
+def _normalise_equity_excel_columns(header_row: List[Any]) -> Dict[str, int]:
+    """
+    Map Equity-exported headers to internal parser columns.
+    Keeps the first index per normalized name and ignores empty/None headers.
+    """
+    mapping: Dict[str, int] = {}
+    for idx, col in enumerate(header_row):
+        key = _normalize_equity_col_name(col)
+        if not key:
+            continue
+        mapped = _EQUITY_EXCEL_COL_MAP.get(key)
+        if not mapped:
+            continue
+        if mapped not in mapping:
+            mapping[mapped] = idx
+    required = {"date", "description"}
+    missing = required - set(mapping.keys())
+    if missing:
+        raise InvalidSchemaError(f"Missing required Equity columns: {', '.join(sorted(missing))}")
+    return mapping
 
 
 def _header_map(header_row: List[Any]) -> Dict[str, int]:
@@ -48,13 +97,15 @@ def parse_xlsx(file_bytes: bytes, document_id: str, deal_currency: str) -> Tuple
 
     ws = visible_sheets[0]
 
-    # Reject merged header row
-    for merged in ws.merged_cells.ranges:
-        if merged.min_row == 1:
-            raise InvalidSchemaError("Merged cells in header row are not allowed")
-
     header_row = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
-    header_mapping = _header_map(header_row)
+    is_equity = _is_equity_excel(header_row)
+    # Keep strict merged-header rejection for generic spreadsheets.
+    # Equity exports commonly contain merged header artifacts that produce None columns.
+    if not is_equity:
+        for merged in ws.merged_cells.ranges:
+            if merged.min_row == 1:
+                raise InvalidSchemaError("Merged cells in header row are not allowed")
+    header_mapping = _normalise_equity_excel_columns(header_row) if is_equity else _header_map(header_row)
 
     # Optional: detect multiple header rows
     second_row_cells = [cell.value for cell in next(ws.iter_rows(min_row=2, max_row=2), [])]
@@ -74,18 +125,42 @@ def parse_xlsx(file_bytes: bytes, document_id: str, deal_currency: str) -> Tuple
             return values[idx] if idx is not None and idx < len(values) else None
 
         date_val = get("date")
-        amount_val = get("amount")
         desc_val = get("description")
         direction_val = get("direction") if "direction" in header_mapping else None
 
+        debit_val = None
+        credit_val = None
+        if is_equity:
+            debit_val = get("debit")
+            credit_val = get("credit")
+            reference_val = get("reference")
+            if reference_val not in (None, ""):
+                desc_val = f"{desc_val} {reference_val}".strip()
+        else:
+            amount_val = get("amount")
+
         if desc_val in (None, ""):
+            if is_equity:
+                # Equity exports include non-transaction footer rows (e.g., end-of-statement markers).
+                continue
             raise InvalidSchemaError("Description is required per row")
 
         # Amount parsing and currency detection
         try:
-            signed_cents, detection = parse_amount_with_detection(amount_val, deal_currency)
-            if detection == "ambiguous":
-                currency_detection = "ambiguous"
+            if is_equity:
+                debit_cents = 0
+                credit_cents = 0
+                if debit_val not in (None, ""):
+                    debit_cents = abs(parse_amount_with_detection(debit_val, deal_currency)[0])
+                if credit_val not in (None, ""):
+                    credit_cents = abs(parse_amount_with_detection(credit_val, deal_currency)[0])
+                signed_cents = credit_cents - debit_cents
+                if signed_cents == 0:
+                    raise InvalidSchemaError("Equity row missing both debit and credit")
+            else:
+                signed_cents, detection = parse_amount_with_detection(amount_val, deal_currency)
+                if detection == "ambiguous":
+                    currency_detection = "ambiguous"
         except InvalidSchemaError:
             raise
         except Exception as exc:
@@ -118,6 +193,19 @@ def parse_xlsx(file_bytes: bytes, document_id: str, deal_currency: str) -> Tuple
     if not rows:
         raise InvalidSchemaError("Sheet has no data rows")
 
-    rows_sorted = sort_rows(rows)
+    if is_equity:
+        # Preserve all Equity Excel rows (no structural dedupe) to match statement row counts.
+        rows_sorted = sorted(
+            rows,
+            key=lambda r: (
+                r["txn_date"],
+                r["account_id"],
+                r["signed_amount_cents"],
+                r["normalized_descriptor"],
+                r["txn_id"],
+            ),
+        )
+    else:
+        rows_sorted = sort_rows(rows)
     raw_hash = canonical_hash(rows_sorted)
     return rows_sorted, raw_hash, currency_detection
