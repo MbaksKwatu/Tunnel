@@ -120,24 +120,31 @@ export default function V1DealPage() {
     maxFiles: 1,
   });
 
-  const refreshBatchUploadCount = useCallback(async () => {
-    if (!deal) return;
-    try {
-      const { documents } = await listDocuments(deal.id);
-      setDealDocuments(documents);
-      const nums = new Set<number>();
-      for (const d of documents) {
-        const bn = d.batch_number;
-        if (bn != null && typeof bn === 'number') nums.add(bn);
+  const refreshBatchUploadCount = useCallback(
+    async (dealIdOverride?: string): Promise<DocumentListItem[] | undefined> => {
+      const id = dealIdOverride ?? deal?.id;
+      if (!id) return undefined;
+      try {
+        const { documents } = await listDocuments(id);
+        setDealDocuments(documents);
+        const nums = new Set<number>();
+        for (const d of documents) {
+          const bn = d.batch_number;
+          if (bn != null && typeof bn === 'number') nums.add(bn);
+        }
+        setBatchesUsed(nums.size);
+        return documents;
+      } catch {
+        setBatchesUsed(0);
+        setDealDocuments([]);
+        return undefined;
       }
-      setBatchesUsed(nums.size);
-    } catch {
-      setBatchesUsed(0);
-      setDealDocuments([]);
-    }
-  }, [deal]);
+    },
+    [deal]
+  );
 
   useEffect(() => {
+    if (!deal?.id) return;
     void refreshBatchUploadCount();
   }, [deal?.id, refreshBatchUploadCount]);
 
@@ -254,9 +261,9 @@ export default function V1DealPage() {
       setExportData(data);
       setLastExportedAt(new Date());
       setOverridesList([]);
-      const docs = await listDocuments(d.id);
-      if (docs.documents.length > 0) {
-        const txRes = await getDocumentTransactions(docs.documents[0].id);
+      const documentsAfterExport = await refreshBatchUploadCount(d.id);
+      if (documentsAfterExport && documentsAfterExport.length > 0) {
+        const txRes = await getDocumentTransactions(documentsAfterExport[0].id);
         setRawTransactions(txRes.transactions as Array<Record<string, unknown>>);
       }
       setAnalysisState('done');
