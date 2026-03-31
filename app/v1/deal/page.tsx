@@ -704,7 +704,7 @@ export default function V1DealPage() {
                     Upload all monthly statements, then run analysis once
                   </p>
                 </div>
-                <span className="text-xs font-mono text-gray-400">{statementQueue.length} of 4</span>
+                <span className="text-xs font-mono text-gray-400">{statementQueue.length} of 12</span>
               </div>
 
               {statementQueue.length > 0 && (
@@ -742,14 +742,14 @@ export default function V1DealPage() {
                 </div>
               )}
 
-              {statementQueue.length < 4 ? (
+              {statementQueue.length < 12 ? (
                 <BatchUpload
                   key={statementQueue.length}
                   dealId={deal.id}
                   onFileDrop={handleStatementDrop}
                 />
               ) : (
-                <div className="py-3 text-xs text-gray-400">Upload limit reached (4 of 4)</div>
+                <div className="py-3 text-xs text-gray-400">Upload limit reached (12 of 12)</div>
               )}
 
               {statementQueue.length > 0 && (
