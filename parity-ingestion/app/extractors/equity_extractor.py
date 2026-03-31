@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 _DATE_PAT = re.compile(r"^(\d{2}-\d{2}-\d{4})\s")
 _DATE2_PAT = re.compile(r"^(\d{2}-\d{2}-\d{4})\s+(\d{2}-\d{2}-\d{4})\s+(.*)$")
+_DATE1_BUS_PAT = re.compile(r"^(\d{2}-\d{2}-\d{4})\s+(.*)$")
 _AMOUNT_PAT = re.compile(r"[\d,]+\.\d{2}")
 
 # Page-chunked extraction for large PDFs (avoids long single-pass CPU time on small instances)
@@ -300,8 +301,8 @@ def _cents_to_equity_raw(cents: Optional[int]) -> str:
     return f"-{body}" if neg else body
 
 
-def _parse_equity_business_amounts(
-    line: str, previous_balance: Optional[int] = None
+def _parse_equity_business_amounts_from_rest(
+    rest: str, previous_balance: Optional[int] = None
 ) -> Tuple[Optional[int], Optional[int], Optional[int]]:
     """
     Parse debit/credit/balance from Equity business statement amount line.
@@ -317,11 +318,6 @@ def _parse_equity_business_amounts(
 
     Returns: (debit_cents, credit_cents, balance_cents) — None for absent debit/credit.
     """
-    m = _DATE2_PAT.match(line.strip())
-    if not m:
-        return None, None, None
-
-    rest = m.group(3).strip()
     matches = _AMOUNT_PAT.findall(rest)
     if not matches:
         return None, None, None
@@ -346,6 +342,15 @@ def _parse_equity_business_amounts(
         return amounts_cents[0], amounts_cents[1], amounts_cents[2]
 
     return amounts_cents[-3], amounts_cents[-2], amounts_cents[-1]
+
+
+def _parse_equity_business_amounts(
+    line: str, previous_balance: Optional[int] = None
+) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+    m = _DATE2_PAT.match(line.strip())
+    if not m:
+        return None, None, None
+    return _parse_equity_business_amounts_from_rest(m.group(3).strip(), previous_balance)
 
 
 def _clean_equity_business_description(desc: str) -> str:
@@ -377,12 +382,17 @@ def _parse_business_txn_line(
     Parse a business-format line: TransactionDate ValueDate rest...
     Returns (parsed_row_dict_or_None, new_running_balance_cents_or_None).
     """
-    m = _DATE2_PAT.match(line.strip())
-    if not m:
-        return None, None
-
-    txn_date = m.group(1)
-    rest = m.group(3).strip()
+    stripped = line.strip()
+    m = _DATE2_PAT.match(stripped)
+    if m:
+        txn_date = m.group(1)
+        rest = m.group(3).strip()
+    else:
+        m1 = _DATE1_BUS_PAT.match(stripped)
+        if not m1:
+            return None, None
+        txn_date = m1.group(1)
+        rest = m1.group(2).strip()
     amounts = _AMOUNT_PAT.findall(rest)
     has_dr = " Dr" in rest or " dr" in rest
 
@@ -406,8 +416,8 @@ def _parse_business_txn_line(
             )
         return None, previous_balance
 
-    debit_cents, credit_cents, balance_cents = _parse_equity_business_amounts(
-        line, previous_balance
+    debit_cents, credit_cents, balance_cents = _parse_equity_business_amounts_from_rest(
+        rest, previous_balance
     )
 
     balance_raw = amounts[-1] + (" Dr" if has_dr else "")
@@ -572,7 +582,7 @@ def _run_business_on_pages(
             if not state.seen_table:
                 continue
 
-            if _DATE2_PAT.match(line):
+            if _DATE2_PAT.match(line) or _DATE1_BUS_PAT.match(line):
                 prefix = " ".join(state.buffer).strip()
                 state.buffer = []
                 parsed, bal_update = _parse_business_txn_line(
