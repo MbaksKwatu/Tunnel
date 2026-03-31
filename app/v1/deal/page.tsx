@@ -193,31 +193,35 @@ export default function V1DealPage() {
     [deal, refreshBatchUploadCount]
   );
 
+  // One listDocuments call per tick instead of N× getDocumentStatus — reduces Render load
+  // when many months are processing (avoids 503 / connection spikes).
   useEffect(() => {
-    const processingItems = statementQueue.filter((item) => item.status === 'processing');
-    if (processingItems.length === 0) return;
+    const hasProcessing = statementQueue.some((item) => item.status === 'processing');
+    if (!deal?.id || !hasProcessing) return;
+
+    const POLL_MS = 5000;
 
     const interval = setInterval(async () => {
-      for (const item of processingItems) {
-        try {
-          const status = await getDocumentStatus(item.id);
-          if (status.status === 'completed') {
-            setStatementQueue((prev) =>
-              prev.map((q) => (q.id === item.id ? { ...q, status: 'ready' } : q))
-            );
-          } else if (status.status === 'failed') {
-            setStatementQueue((prev) =>
-              prev.map((q) => (q.id === item.id ? { ...q, status: 'failed' } : q))
-            );
-          }
-        } catch {
-          // ignore per-item polling error
-        }
+      try {
+        const { documents } = await listDocuments(deal.id);
+        const byId = new Map(documents.map((d) => [d.id, d]));
+        setStatementQueue((prev) =>
+          prev.map((q) => {
+            if (q.status !== 'processing') return q;
+            const doc = byId.get(q.id);
+            if (!doc) return q;
+            if (doc.status === 'completed') return { ...q, status: 'ready' };
+            if (doc.status === 'failed') return { ...q, status: 'failed' };
+            return q;
+          })
+        );
+      } catch {
+        // ignore poll errors (network / transient 503)
       }
-    }, 3000);
+    }, POLL_MS);
 
     return () => clearInterval(interval);
-  }, [statementQueue]);
+  }, [deal?.id, statementQueue]);
 
   const runAnalysis = async () => {
     setErrorMsg('');
