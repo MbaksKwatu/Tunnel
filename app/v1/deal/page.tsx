@@ -42,6 +42,12 @@ interface EntityBreakdownRow {
   txnCount: number;
 }
 
+interface QueuedStatement {
+  id: string;
+  fileName: string;
+  status: 'uploading' | 'processing' | 'ready' | 'failed';
+}
+
 /** Basis-point percentage: (entity_amount_cents * 10000) // total_category_cents. No floats. */
 function pctBpsFromCents(entityCents: number, totalCategoryCents: number): number {
   if (totalCategoryCents <= 0) return 0;
@@ -77,7 +83,6 @@ export default function V1DealPage() {
   const [accrualPeriodStart, setAccrualPeriodStart] = useState('');
   const [accrualPeriodEnd, setAccrualPeriodEnd] = useState('');
   const [deal, setDeal] = useState<Deal | null>(null);
-  const [batchesUsed, setBatchesUsed] = useState(0);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [analysisState, setAnalysisState] = useState<AnalysisState>('idle');
   const [errorMsg, setErrorMsg] = useState('');
@@ -99,11 +104,8 @@ export default function V1DealPage() {
   const [reviewQuestion, setReviewQuestion] = useState('');
   const [reviewAnswer, setReviewAnswer] = useState('');
   const [reviewLoading, setReviewLoading] = useState(false);
-  const [uploadSuccessFile, setUploadSuccessFile] = useState<string | null>(null);
-  const [showUploadSuccessModal, setShowUploadSuccessModal] = useState(false);
-  const [localBatchesUsed, setLocalBatchesUsed] = useState(0);
-  const [batchUploadResetKey, setBatchUploadResetKey] = useState(0);
   const [dealDocuments, setDealDocuments] = useState<DocumentListItem[]>([]);
+  const [statementQueue, setStatementQueue] = useState<QueuedStatement[]>([]);
 
   const onDrop = useCallback((accepted: File[]) => {
     if (accepted.length) setFile(accepted[0]);
@@ -127,15 +129,8 @@ export default function V1DealPage() {
       try {
         const { documents } = await listDocuments(id);
         setDealDocuments(documents);
-        const nums = new Set<number>();
-        for (const d of documents) {
-          const bn = d.batch_number;
-          if (bn != null && typeof bn === 'number') nums.add(bn);
-        }
-        setBatchesUsed(nums.size);
         return documents;
       } catch {
-        setBatchesUsed(0);
         setDealDocuments([]);
         return undefined;
       }
@@ -149,33 +144,154 @@ export default function V1DealPage() {
   }, [deal?.id, refreshBatchUploadCount]);
 
   useEffect(() => {
-    if (!deal || !showUploadSuccessModal) return;
-    const tick = () => {
-      void refreshBatchUploadCount();
-    };
-    tick();
-    const id = setInterval(tick, 3000);
-    return () => clearInterval(id);
-  }, [deal, showUploadSuccessModal, refreshBatchUploadCount]);
+    setStatementQueue((prev) => {
+      const mapPrevById = new Map(prev.map((item) => [item.id, item]));
+      return dealDocuments.map((doc, idx) => {
+        const previous = mapPrevById.get(doc.id);
+        const normalizedStatus: QueuedStatement['status'] =
+          doc.status === 'completed'
+            ? 'ready'
+            : doc.status === 'failed'
+              ? 'failed'
+              : 'processing';
+        return {
+          id: doc.id,
+          fileName: previous?.fileName ?? `Statement ${idx + 1}`,
+          status: previous?.status === 'uploading' ? 'uploading' : normalizedStatus,
+        };
+      });
+    });
+  }, [dealDocuments]);
 
-  const resetBatchUpload = () => {
-    setBatchUploadResetKey((k) => k + 1);
-  };
+  const handleStatementDrop = useCallback(
+    async (nextFile: File) => {
+      if (!deal) return;
+      const tempId = crypto.randomUUID();
+      setStatementQueue((prev) => [
+        ...prev,
+        {
+          id: tempId,
+          fileName: nextFile.name,
+          status: 'uploading',
+        },
+      ]);
+      try {
+        const result = await uploadDocument(deal.id, nextFile);
+        const docId = result.ingestion.document_id;
+        setStatementQueue((prev) =>
+          prev.map((item) =>
+            item.id === tempId ? { ...item, id: docId, status: 'processing' } : item
+          )
+        );
+        void refreshBatchUploadCount(deal.id);
+      } catch {
+        setStatementQueue((prev) =>
+          prev.map((item) => (item.id === tempId ? { ...item, status: 'failed' } : item))
+        );
+      }
+    },
+    [deal, refreshBatchUploadCount]
+  );
 
-  const handleUploadSuccess = useCallback((fileName: string) => {
-    setLocalBatchesUsed((prev) => prev + 1);
-    setUploadSuccessFile(fileName);
-    setShowUploadSuccessModal(true);
-  }, []);
+  useEffect(() => {
+    const processingItems = statementQueue.filter((item) => item.status === 'processing');
+    if (processingItems.length === 0) return;
+
+    const interval = setInterval(async () => {
+      for (const item of processingItems) {
+        try {
+          const status = await getDocumentStatus(item.id);
+          if (status.status === 'completed') {
+            setStatementQueue((prev) =>
+              prev.map((q) => (q.id === item.id ? { ...q, status: 'ready' } : q))
+            );
+          } else if (status.status === 'failed') {
+            setStatementQueue((prev) =>
+              prev.map((q) => (q.id === item.id ? { ...q, status: 'failed' } : q))
+            );
+          }
+        } catch {
+          // ignore per-item polling error
+        }
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [statementQueue]);
 
   const runAnalysis = async () => {
-    if (deal) {
-      try {
-        const { documents: docs } = await listDocuments(deal.id);
-        setDealDocuments(docs);
-        const allComplete = docs.every((doc) => doc.status === 'completed');
+    setErrorMsg('');
+    try {
+      let activeDeal = deal;
+
+      if (!activeDeal) {
+        if (!file) {
+          setErrorMsg('Please select a file');
+          return;
+        }
+        setAnalysisState('uploading');
+        const accrual =
+          accrualRevenueCents && accrualPeriodStart && accrualPeriodEnd
+            ? {
+                accrual_revenue_cents: parseInt(accrualRevenueCents, 10) || 0,
+                accrual_period_start: accrualPeriodStart,
+                accrual_period_end: accrualPeriodEnd,
+              }
+            : undefined;
+
+        const { deal: createdDeal } = await createDeal(currency, dealName || undefined, accrual);
+        setDeal(createdDeal);
+        activeDeal = createdDeal;
+
+        const { ingestion } = await uploadDocument(createdDeal.id, file);
+        setDocumentId(ingestion.document_id);
+
+        setAnalysisState('polling');
+        const POLL_INTERVAL_MS = 3000;
+        const MAX_WAIT_MS = 30 * 60 * 1000;
+        const pollDeadline = Date.now() + MAX_WAIT_MS;
+        let status = await getDocumentStatus(ingestion.document_id);
+        while (status.status !== 'completed') {
+          if (status.status === 'failed') {
+            const errType = status.error_type || 'UnknownError';
+            const errMsg = status.error_message || status.error || 'Document processing failed';
+            const stage = status.stage || '';
+            const nextAction = status.next_action || '';
+            setErrorMsg(
+              stage
+                ? `${errType}: ${errMsg} (stage: ${stage}, next: ${nextAction})`
+                : `${errType}: ${errMsg}`
+            );
+            setAnalysisState('error');
+            return;
+          }
+          if (Date.now() >= pollDeadline) {
+            setErrorMsg(
+              'Still processing after 30 minutes. Large PDFs can be slow on a cold server—try again in a few minutes, or use Batch upload for monthly statements. The document may still complete in the background.'
+            );
+            setAnalysisState('error');
+            return;
+          }
+          await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+          status = await getDocumentStatus(ingestion.document_id);
+        }
+        if (status.currency_detected) {
+          setCurrency(status.currency_detected);
+        }
+        if (status.analytics?.monthly_cashflow) {
+          setMonthlyCashflow(status.analytics.monthly_cashflow);
+        }
+        if (status.analytics?.credit_scoring_inputs) {
+          setCreditScoringInputs(status.analytics.credit_scoring_inputs);
+        }
+        if ((status as any).analytics?.monthly_entity_breakdown) {
+          setMonthlyEntityBreakdown((status as any).analytics.monthly_entity_breakdown);
+        }
+      } else {
+        const docs = await refreshBatchUploadCount(activeDeal.id);
+        const allComplete = (docs ?? []).every((doc) => doc.status === 'completed');
         if (!allComplete) {
-          const stillProcessing = docs.filter(
+          const stillProcessing = (docs ?? []).filter(
             (doc) => doc.status === 'processing' || doc.status === 'pending'
           );
           setErrorMsg(
@@ -185,83 +301,14 @@ export default function V1DealPage() {
           );
           return;
         }
-      } catch (e) {
-        setErrorMsg(e instanceof Error ? e.message : 'Could not verify document status');
-        return;
-      }
-    }
-    if (!file) {
-      setErrorMsg('Please select a file');
-      return;
-    }
-    setErrorMsg('');
-    setAnalysisState('uploading');
-    try {
-      const accrual =
-        accrualRevenueCents && accrualPeriodStart && accrualPeriodEnd
-          ? {
-              accrual_revenue_cents: parseInt(accrualRevenueCents, 10) || 0,
-              accrual_period_start: accrualPeriodStart,
-              accrual_period_end: accrualPeriodEnd,
-            }
-          : undefined;
-
-      const { deal: d } = await createDeal(currency, dealName || undefined, accrual);
-      setDeal(d);
-
-      const { ingestion } = await uploadDocument(d.id, file);
-      setDocumentId(ingestion.document_id);
-
-      setAnalysisState('polling');
-      // Wall-clock cap: status polls can each take several seconds on Render; fixed attempt counts
-      // falsely timed out around ~5–8 min. Large bank PDFs often need 15–25+ min to ingest.
-      const POLL_INTERVAL_MS = 3000;
-      const MAX_WAIT_MS = 30 * 60 * 1000;
-      const pollDeadline = Date.now() + MAX_WAIT_MS;
-      let status = await getDocumentStatus(ingestion.document_id);
-      while (status.status !== 'completed') {
-        if (status.status === 'failed') {
-          const errType = status.error_type || 'UnknownError';
-          const errMsg = status.error_message || status.error || 'Document processing failed';
-          const stage = status.stage || '';
-          const nextAction = status.next_action || '';
-          setErrorMsg(
-            stage
-              ? `${errType}: ${errMsg} (stage: ${stage}, next: ${nextAction})`
-              : `${errType}: ${errMsg}`
-          );
-          setAnalysisState('error');
-          return;
-        }
-        if (Date.now() >= pollDeadline) {
-          setErrorMsg(
-            'Still processing after 30 minutes. Large PDFs can be slow on a cold server—try again in a few minutes, or use Batch upload for monthly statements. The document may still complete in the background.'
-          );
-          setAnalysisState('error');
-          return;
-        }
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-        status = await getDocumentStatus(ingestion.document_id);
-      }
-      if (status.currency_detected) {
-        setCurrency(status.currency_detected);
-      }
-      if (status.analytics?.monthly_cashflow) {
-        setMonthlyCashflow(status.analytics.monthly_cashflow);
-      }
-      if (status.analytics?.credit_scoring_inputs) {
-        setCreditScoringInputs(status.analytics.credit_scoring_inputs);
-      }
-      if ((status as any).analytics?.monthly_entity_breakdown) {
-        setMonthlyEntityBreakdown((status as any).analytics.monthly_entity_breakdown);
       }
 
       setAnalysisState('exporting');
-      const data = await exportSnapshot(d.id);
+      const data = await exportSnapshot(activeDeal.id);
       setExportData(data);
       setLastExportedAt(new Date());
       setOverridesList([]);
-      const documentsAfterExport = await refreshBatchUploadCount(d.id);
+      const documentsAfterExport = await refreshBatchUploadCount(activeDeal.id);
       if (documentsAfterExport && documentsAfterExport.length > 0) {
         const txRes = await getDocumentTransactions(documentsAfterExport[0].id);
         setRawTransactions(txRes.transactions as Array<Record<string, unknown>>);
@@ -523,11 +570,11 @@ export default function V1DealPage() {
           .reduce((max, r) => Math.max(max, r.pctBps / 100), 0)
       : 0;
 
-  const dealDocsStillProcessing =
-    dealDocuments.length === 0 ||
-    dealDocuments.some(
-      (doc) => doc.status === 'processing' || doc.status === 'pending'
-    );
+  const queueHasPending = statementQueue.some(
+    (item) => item.status === 'processing' || item.status === 'uploading'
+  );
+  const queueHasFailures = statementQueue.some((item) => item.status === 'failed');
+  const queueAllReady = statementQueue.length > 0 && statementQueue.every((item) => item.status === 'ready');
 
   const formatCents = (c: number) =>
     new Intl.NumberFormat('en-US', {
@@ -647,16 +694,81 @@ export default function V1DealPage() {
         </button>
         {errorMsg && <p className="mt-2 text-red-400 text-sm">{errorMsg}</p>}
 
-        {deal && dealDocuments.length > 0 && (
+        {deal && (
           <div className="mt-6 pt-6 border-t border-gray-700">
-            <BatchUpload
-              key={batchUploadResetKey}
-              dealId={deal.id}
-              batchesUsed={deal.batch_upload_count ?? batchesUsed}
-              localBatchesUsed={localBatchesUsed}
-              onUploadComplete={refreshBatchUploadCount}
-              onUploadSuccess={handleUploadSuccess}
-            />
+            <div className="rounded-lg border border-gray-600 bg-gray-800/80 p-6">
+              <div className="mb-4 flex items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-white">Statement Queue</h3>
+                  <p className="text-sm text-gray-400">
+                    Upload all monthly statements, then run analysis once
+                  </p>
+                </div>
+                <span className="text-xs font-mono text-gray-400">{statementQueue.length} of 4</span>
+              </div>
+
+              {statementQueue.length > 0 && (
+                <div className="mb-4 divide-y divide-gray-700">
+                  {statementQueue.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between py-2 text-sm">
+                      <div className="flex items-center gap-2">
+                        <span>
+                          {item.status === 'ready' && '✅'}
+                          {item.status === 'processing' && '⏳'}
+                          {item.status === 'uploading' && '⬆️'}
+                          {item.status === 'failed' && '❌'}
+                        </span>
+                        <span className="font-mono text-gray-200">{item.fileName}</span>
+                      </div>
+                      <span
+                        className={`text-[10px] font-mono uppercase tracking-wider ${
+                          item.status === 'ready'
+                            ? 'text-green-400'
+                            : item.status === 'failed'
+                              ? 'text-red-400'
+                              : 'text-gray-400'
+                        }`}
+                      >
+                        {item.status === 'uploading'
+                          ? 'Uploading...'
+                          : item.status === 'processing'
+                            ? 'Processing'
+                            : item.status === 'ready'
+                              ? 'Ready'
+                              : 'Failed'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {statementQueue.length < 4 ? (
+                <BatchUpload
+                  key={statementQueue.length}
+                  dealId={deal.id}
+                  onFileDrop={handleStatementDrop}
+                />
+              ) : (
+                <div className="py-3 text-xs text-gray-400">Upload limit reached (4 of 4)</div>
+              )}
+
+              {statementQueue.length > 0 && (
+                <div className="mt-4">
+                  <button
+                    onClick={runAnalysis}
+                    disabled={!queueAllReady || analysisState === 'uploading' || analysisState === 'polling' || analysisState === 'exporting'}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded"
+                  >
+                    {queueHasPending ? 'Waiting for processing...' : 'Run full analysis →'}
+                  </button>
+                  {queueHasFailures && (
+                    <p className="mt-2 text-xs text-red-400">
+                      One or more statements failed to process. Re-upload before running full analysis.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </section>
@@ -946,44 +1058,6 @@ export default function V1DealPage() {
         </>
       )}
 
-      {showUploadSuccessModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-lg border border-gray-600 bg-gray-800 p-6 shadow-xl">
-            <div className="text-lg font-semibold text-white">✅ Upload complete</div>
-            <div className="mt-2 text-sm text-gray-400 whitespace-pre-line">
-              {uploadSuccessFile} is uploaded and queued for processing.
-              {'\n'}
-              Large files take 30–60 seconds. You can upload the next statement now, or wait until all
-              months are ready before running analysis.
-            </div>
-            <div className="mt-5 flex flex-wrap gap-3">
-              <button
-                type="button"
-                className="rounded border border-gray-600 px-4 py-2 text-sm text-gray-200 hover:bg-gray-700"
-                onClick={() => {
-                  setShowUploadSuccessModal(false);
-                  setUploadSuccessFile(null);
-                  resetBatchUpload();
-                }}
-              >
-                Upload another statement
-              </button>
-              <button
-                type="button"
-                disabled={dealDocsStillProcessing}
-                className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={() => {
-                  setShowUploadSuccessModal(false);
-                  setUploadSuccessFile(null);
-                  void runAnalysis();
-                }}
-              >
-                {dealDocsStillProcessing ? 'Processing...' : 'Run analysis →'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
