@@ -694,7 +694,7 @@ export default function V1DealPage() {
         </button>
         {errorMsg && <p className="mt-2 text-red-400 text-sm">{errorMsg}</p>}
 
-        {deal && (
+        {deal && run && snapshot && dealDocuments.length > 0 && (
           <div className="mt-6 pt-6 border-t border-gray-700">
             <div className="rounded-lg border border-gray-600 bg-gray-800/80 p-6">
               <div className="mb-4 flex items-center justify-between gap-4">

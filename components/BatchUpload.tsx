@@ -14,13 +14,16 @@ export function BatchUpload({ dealId: _dealId, onFileDrop }: BatchUploadProps) {
 
   const applyPickedFiles = useCallback((files: File[]) => {
     if (files.length !== 1) {
-      setError('Please select exactly 1 PDF');
+      setError('Please select exactly 1 file');
       return;
     }
 
-    const invalidFiles = files.filter((f) => !f.name.toLowerCase().endsWith('.pdf'));
+    const invalidFiles = files.filter((f) => {
+      const lower = f.name.toLowerCase();
+      return !lower.endsWith('.pdf') && !lower.endsWith('.xlsx') && !lower.endsWith('.xls');
+    });
     if (invalidFiles.length > 0) {
-      setError('Only PDF files are supported');
+      setError('Only PDF or Excel files are supported');
       return;
     }
 
@@ -37,7 +40,11 @@ export function BatchUpload({ dealId: _dealId, onFileDrop }: BatchUploadProps) {
 
   const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
     onDrop: onDropBatch,
-    accept: { 'application/pdf': ['.pdf'] },
+    accept: {
+      'application/pdf': ['.pdf'],
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+      'application/vnd.ms-excel': ['.xls'],
+    },
     maxFiles: 1,
     noClick: true,
     noKeyboard: true,
@@ -64,7 +71,7 @@ export function BatchUpload({ dealId: _dealId, onFileDrop }: BatchUploadProps) {
           >
             or click to select
           </button>
-          <span className="text-gray-500"> · 1 PDF at once</span>
+          <span className="text-gray-500"> · 1 file at once</span>
         </p>
         <p className="text-xs text-gray-500 mt-2">Upload one monthly statement per drop</p>
       </div>
