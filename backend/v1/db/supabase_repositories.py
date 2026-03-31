@@ -16,7 +16,9 @@ from .supabase_client import get_supabase
 
 logger = logging.getLogger(__name__)
 
-SELECT_ROW_LIMIT = 50000
+# PostgREST often caps a single response at ~1000 rows (Supabase API default). Requesting
+# a huge limit in one call still returns at most that cap — so we must paginate.
+_SELECT_PAGE_SIZE = 1000
 
 
 class BaseRepo:
@@ -35,16 +37,31 @@ class BaseRepo:
         self.client.table(self.table).insert(items).execute()
 
     def select_eq(self, column: str, value: Any) -> List[Dict[str, Any]]:
-        # PostgREST/Supabase defaults can cap rows (~1000) when no range is provided.
-        # Request an explicit ceiling large enough for full monthly statements.
-        res = (
-            self.client.table(self.table)
-            .select("*")
-            .eq(column, value)
-            .range(0, SELECT_ROW_LIMIT - 1)
-            .execute()
-        )
-        return res.data or []
+        # Paginate: one .range(0, N) with a large N still hits the server max (~1000 rows).
+        out: List[Dict[str, Any]] = []
+        offset = 0
+        while True:
+            end = offset + _SELECT_PAGE_SIZE - 1
+            res = (
+                self.client.table(self.table)
+                .select("*")
+                .eq(column, value)
+                .range(offset, end)
+                .execute()
+            )
+            chunk = res.data or []
+            out.extend(chunk)
+            if len(chunk) < _SELECT_PAGE_SIZE:
+                break
+            offset += _SELECT_PAGE_SIZE
+            if offset > 2_000_000:
+                logger.warning(
+                    "select_eq pagination exceeded 2M rows (table=%s %s=...)",
+                    self.table,
+                    column,
+                )
+                break
+        return out
 
     def delete_eq(self, column: str, value: Any) -> None:
         self.client.table(self.table).delete().eq(column, value).execute()
