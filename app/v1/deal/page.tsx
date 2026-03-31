@@ -531,21 +531,35 @@ export default function V1DealPage() {
 
   return (
     <div className="min-h-screen bg-base-950 text-gray-200 p-6 max-w-5xl mx-auto">
-      <h1 className="text-2xl font-bold text-white mb-6">Deal Analysis (v1)</h1>
+      <h1 className="text-2xl font-bold text-white mb-4">Deal Analysis (v1)</h1>
 
-      {/* Step 1: Upload + Accrual */}
+      <div className="mb-6 space-y-2 text-sm text-gray-300 leading-relaxed">
+        <p>
+          <span className="text-gray-400">Step 1 —</span>{' '}
+          <span className="text-gray-200">
+            Upload your first statement and click Analyze to create the deal.
+          </span>
+        </p>
+        <p>
+          <span className="text-gray-400">Step 2 —</span>{' '}
+          <span className="text-gray-200">
+            Upload additional monthly statements below, then click Analyze again for the full report.
+          </span>
+        </p>
+      </div>
+
+      {/* Upload + Accrual (Step 1) */}
       <section className="bg-gray-800 rounded-lg p-6 mb-6">
-        <h2 className="text-lg font-semibold mb-4">Upload & Accrual</h2>
+        <h2 className="text-lg font-semibold mb-4">Upload &amp; Accrual</h2>
         <p className="text-sm text-gray-400 mb-3">
           Upload a bank-export CSV or XLSX (must include <code className="text-gray-300">date</code>,{' '}
           <code className="text-gray-300">description</code>, <code className="text-gray-300">amount</code> columns).
-          {deal && (
+          {deal && dealDocuments.length > 0 && (
             <>
               {' '}
               <span className="text-gray-500">
-                This zone is <strong className="text-gray-400">one file at a time</strong> for the initial
-                analysis. For additional monthly PDFs, use <strong className="text-gray-400">Batch upload</strong>{' '}
-                below (one statement per upload).
+                For more months, use <strong className="text-gray-400">Batch upload</strong> below (one PDF per
+                upload), then click <strong className="text-gray-400">Analyze</strong> again for the full report.
               </span>
             </>
           )}
@@ -626,7 +640,7 @@ export default function V1DealPage() {
         </button>
         {errorMsg && <p className="mt-2 text-red-400 text-sm">{errorMsg}</p>}
 
-        {deal && (
+        {deal && dealDocuments.length > 0 && (
           <div className="mt-6 pt-6 border-t border-gray-700">
             <BatchUpload
               key={batchUploadResetKey}

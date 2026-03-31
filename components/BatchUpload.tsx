@@ -117,8 +117,10 @@ export function BatchUpload({
       <div className="space-y-4">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h3 className="font-semibold text-lg text-white">Batch upload (PDF)</h3>
-            <p className="text-sm text-gray-400">Upload one monthly statement per upload (sequential)</p>
+            <h3 className="font-semibold text-lg text-white">Additional monthly statements (PDF)</h3>
+            <p className="text-sm text-gray-400">
+              One PDF per upload. When you are done adding months, click Analyze above for the full report.
+            </p>
           </div>
           <div className="text-right shrink-0">
             <div className="text-2xl font-bold text-white">{uploadsRemaining}</div>
