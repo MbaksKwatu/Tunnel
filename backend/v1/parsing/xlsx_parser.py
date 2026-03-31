@@ -88,7 +88,8 @@ def _detect_additional_header(second_row: List[Any]) -> bool:
 
 
 def parse_xlsx(file_bytes: bytes, document_id: str, deal_currency: str) -> Tuple[List[Dict[str, Any]], str, str]:
-    wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
+    read_only = True
+    wb = load_workbook(io.BytesIO(file_bytes), data_only=True, read_only=read_only)
     visible_sheets = [ws for ws in wb.worksheets if ws.sheet_state == "visible"]
     if not visible_sheets:
         raise InvalidSchemaError("No visible worksheet found")
@@ -101,7 +102,7 @@ def parse_xlsx(file_bytes: bytes, document_id: str, deal_currency: str) -> Tuple
     is_equity = _is_equity_excel(header_row)
     # Keep strict merged-header rejection for generic spreadsheets.
     # Equity exports commonly contain merged header artifacts that produce None columns.
-    if not is_equity:
+    if not is_equity and not read_only:
         for merged in ws.merged_cells.ranges:
             if merged.min_row == 1:
                 raise InvalidSchemaError("Merged cells in header row are not allowed")
