@@ -17,6 +17,7 @@ from ..db.repositories import (
 )
 
 logger = logging.getLogger(__name__)
+INSERT_CHUNK_SIZE = 500
 
 # Ingestion stages (must match exactly for diagnostics)
 STAGE_FILE_RECEIVED = "FILE_RECEIVED"
@@ -52,6 +53,14 @@ class IngestionService:
         self.documents_repo = documents_repo
         self.raw_tx_repo = raw_tx_repo
         self.analysis_repo = analysis_repo
+
+    def _insert_rows_in_chunks(self, rows: list[Dict[str, Any]]) -> None:
+        """Insert parsed rows in chunks to avoid per-request row limits."""
+        if not rows:
+            return
+        for i in range(0, len(rows), INSERT_CHUNK_SIZE):
+            chunk = rows[i : i + INSERT_CHUNK_SIZE]
+            self.raw_tx_repo.insert_batch(chunk)
 
     def ingest(
         self,
@@ -100,7 +109,7 @@ class IngestionService:
             r.pop("abs_amount_cents", None)
 
         db_insert_start = time.perf_counter()
-        self.raw_tx_repo.insert_batch(rows)
+        self._insert_rows_in_chunks(rows)
         db_insert_end = time.perf_counter()
         insert_ms = int((db_insert_end - db_insert_start) * 1000)
 
@@ -214,7 +223,7 @@ class IngestionService:
             stage = STAGE_DB_INSERT_START
             logger.info("[INGEST] stage=%s rows=%d", stage, len(rows))
             db_insert_start = time.perf_counter()
-            self.raw_tx_repo.insert_batch(rows)
+            self._insert_rows_in_chunks(rows)
             db_insert_end = time.perf_counter()
             insert_ms = int((db_insert_end - db_insert_start) * 1000)
             stage = STAGE_DB_INSERT_DONE
