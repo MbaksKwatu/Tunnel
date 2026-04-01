@@ -20,6 +20,7 @@ from .errors import InvalidSchemaError
 _EQUITY_EXCEL_COL_MAP = {
     "transaction date": "date",
     "transactio n date": "date",
+    "transacti on date": "date",
     "transactiondate": "date",
     "value date": "value_date",
     "narrative": "description",
@@ -40,8 +41,23 @@ def _normalize_equity_col_name(value: Any) -> str:
 
 def _is_equity_excel(header_row: List[Any]) -> bool:
     cols_lower = {_normalize_equity_col_name(c) for c in header_row if c is not None}
-    equity_indicators = {"narrative", "running balance", "transactio n date", "transaction date"}
+    equity_indicators = {
+        "narrative",
+        "running balance",
+        "transactio n date",
+        "transacti on date",
+        "transaction date",
+    }
     return bool(cols_lower & equity_indicators)
+
+
+def _clean_equity_date_cell(value: Any) -> Any:
+    """Strip embedded newlines from Equity date cells (e.g. '02-12-\\n2024')."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return re.sub(r"[\r\n]+", "", value).strip()
+    return value
 
 
 def _normalise_equity_excel_columns(header_row: List[Any]) -> Dict[str, int]:
@@ -126,6 +142,8 @@ def parse_xlsx(file_bytes: bytes, document_id: str, deal_currency: str) -> Tuple
             return values[idx] if idx is not None and idx < len(values) else None
 
         date_val = get("date")
+        if is_equity:
+            date_val = _clean_equity_date_cell(date_val)
         desc_val = get("description")
         direction_val = get("direction") if "direction" in header_mapping else None
 

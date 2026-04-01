@@ -79,6 +79,26 @@ class TestDeterministicParsers(unittest.TestCase):
         with self.assertRaises(InvalidSchemaError):
             parse_xlsx(buf.getvalue(), "doc-1", "USD")
 
+    def test_equity_transacti_on_date_header_and_newline_in_date_cell(self):
+        """Dec 2024 variant header + embedded newline in date string (Equity Excel)."""
+        wb = Workbook()
+        ws = wb.active
+        ws.append(
+            [
+                "Narrative",
+                "Transacti on Date",
+                "Debit",
+                "Credit",
+                "Running Balance",
+            ]
+        )
+        ws.append(["Test", "02-12-\n2024", 100, None, None])
+        buf = io.BytesIO()
+        wb.save(buf)
+        rows, _, _ = parse_xlsx(buf.getvalue(), "doc-dec", "KES")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["txn_date"], "2024-12-02")
+
     def test_csv_reorder_rows_same_hash(self):
         content_a = "date,amount,description\n2024-01-01,100,A\n2024-01-02,200,B\n"
         content_b = "date,amount,description\n2024-01-02,200,B\n2024-01-01,100,A\n"
