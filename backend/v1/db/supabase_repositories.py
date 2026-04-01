@@ -189,7 +189,12 @@ class TransferLinksRepo(TransferLinksRepository, BaseRepo):
         super().__init__("pds_transfer_links")
 
     def insert_batch(self, links: Iterable[Dict[str, Any]]) -> None:
-        self.insert_many(links)
+        items = list(links)
+        if not items:
+            return
+        for i in range(0, len(items), BATCH_SIZE):
+            batch = items[i : i + BATCH_SIZE]
+            self.client.table(self.table).insert(batch).execute()
 
     def list_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         return self.select_eq("deal_id", deal_id)
@@ -203,7 +208,9 @@ class EntitiesRepo(EntitiesRepository, BaseRepo):
         items = list(entities)
         if not items:
             return
-        self.client.table(self.table).upsert(items).execute()
+        for i in range(0, len(items), BATCH_SIZE):
+            batch = items[i : i + BATCH_SIZE]
+            self.client.table(self.table).upsert(batch).execute()
 
     def list_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         return self.select_eq("deal_id", deal_id)
@@ -217,7 +224,9 @@ class TxnEntityMapRepo(TxnEntityMapRepository, BaseRepo):
         items = list(mappings)
         if not items:
             return
-        self.client.table(self.table).upsert(items).execute()
+        for i in range(0, len(items), BATCH_SIZE):
+            batch = items[i : i + BATCH_SIZE]
+            self.client.table(self.table).upsert(batch).execute()
 
     def list_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         return self.select_eq("deal_id", deal_id)

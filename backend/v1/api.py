@@ -609,6 +609,20 @@ def get_latest_analysis(request: Request, deal_id: str):
 # Export / Snapshot
 # ===================================================================
 
+
+def _snapshot_for_public_response(snapshot: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    Drop canonical_json from the HTTP response. It can be multi‑MB for large deals and
+    is not required by the Fund IQ UI (only id / hashes); including it risks 500s from
+    response serialization or proxies.
+    """
+    if not snapshot:
+        return None
+    out = dict(snapshot)
+    out.pop("canonical_json", None)
+    return out
+
+
 @router.post("/deals/{deal_id}/export")
 def export(request: Request, deal_id: str):
     started = time.perf_counter()
@@ -654,7 +668,7 @@ def export(request: Request, deal_id: str):
             logger.info("[EXPORT] deal=%s ms=%d short_circuit=1", deal_id, duration_ms)
             return {
                 "analysis_run": run,
-                "snapshot": latest_snapshot,
+                "snapshot": _snapshot_for_public_response(latest_snapshot),
                 "entities": entities,
                 "txn_entity_map": txn_map,
             }
@@ -735,7 +749,7 @@ def export(request: Request, deal_id: str):
     logger.info("[EXPORT] stage=%s deal=%s ms=%d short_circuit=0", stage, deal_id, duration_ms)
     return {
         "analysis_run": run,
-        "snapshot": snapshot,
+        "snapshot": _snapshot_for_public_response(snapshot),
         "entities": entities,
         "txn_entity_map": txn_map,
     }
