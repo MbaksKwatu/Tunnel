@@ -49,6 +49,36 @@ _METRICS_TEMPLATE = {
 PROCESSING_LEASE_SECONDS = 600
 
 
+def _document_processing_lease_expired(doc: Dict[str, Any]) -> bool:
+    """True if the row is still ``processing`` but older than :data:`PROCESSING_LEASE_SECONDS`."""
+    if doc.get("status") != "processing":
+        return False
+    lease_ref = doc.get("updated_at") or doc.get("created_at")
+    ref_dt = _parse_document_timestamp(lease_ref)
+    if ref_dt is None:
+        return False
+    age_s = (datetime.now(timezone.utc) - ref_dt).total_seconds()
+    return age_s > PROCESSING_LEASE_SECONDS
+
+
+def _document_row_for_list_response(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Align list payload with GET /documents/{{id}}/status: stale processing rows surface as failed
+    so clients polling list_documents can unblock (previously only status had lease semantics).
+    """
+    if not _document_processing_lease_expired(doc):
+        return doc
+    out = dict(doc)
+    out["status"] = "failed"
+    out["error_type"] = "ProcessingTimeout"
+    out["error_message"] = (
+        f"Document remained in processing for more than {PROCESSING_LEASE_SECONDS} seconds"
+    )
+    out["error_stage"] = "PROCESSING"
+    out["next_action"] = "retry_or_contact_support"
+    return out
+
+
 def _parse_document_timestamp(value: Any) -> Optional[datetime]:
     """Parse created_at / updated_at from DB (ISO string or datetime). Returns timezone-aware UTC."""
     if value is None:
@@ -407,7 +437,7 @@ def list_documents(request: Request, deal_id: str):
     if not deal:
         _error("NOT_FOUND", f"Deal {deal_id} not found")
     docs = repos["documents"].list_by_deal(deal_id)
-    return {"documents": docs}
+    return {"documents": [_document_row_for_list_response(d) for d in docs]}
 
 
 @router.get("/documents/{document_id}/status")
@@ -418,15 +448,7 @@ def get_document_status(request: Request, document_id: str):
         _error("NOT_FOUND", f"Document {document_id} not found")
 
     db_status = doc.get("status")
-    processing_timed_out = False
-    if db_status == "processing":
-        lease_ref = doc.get("updated_at") or doc.get("created_at")
-        ref_dt = _parse_document_timestamp(lease_ref)
-        if ref_dt is not None:
-            age_s = (datetime.now(timezone.utc) - ref_dt).total_seconds()
-            if age_s > PROCESSING_LEASE_SECONDS:
-                processing_timed_out = True
-
+    processing_timed_out = _document_processing_lease_expired(doc)
     effective_status = "failed" if processing_timed_out else db_status
 
     out = {

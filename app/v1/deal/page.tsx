@@ -48,6 +48,14 @@ interface QueuedStatement {
   status: 'uploading' | 'processing' | 'ready' | 'failed';
 }
 
+/** Normalize API status (list + status endpoints; lease may surface failed). */
+function apiDocumentStatus(doc: Pick<DocumentListItem, 'status'>): 'completed' | 'failed' | 'processing' {
+  const s = String(doc.status ?? '').toLowerCase();
+  if (s === 'completed') return 'completed';
+  if (s === 'failed') return 'failed';
+  return 'processing';
+}
+
 /** Basis-point percentage: (entity_amount_cents * 10000) // total_category_cents. No floats. */
 function pctBpsFromCents(entityCents: number, totalCategoryCents: number): number {
   if (totalCategoryCents <= 0) return 0;
@@ -148,12 +156,9 @@ export default function V1DealPage() {
       const mapPrevById = new Map(prev.map((item) => [item.id, item]));
       return dealDocuments.map((doc, idx) => {
         const previous = mapPrevById.get(doc.id);
+        const ns = apiDocumentStatus(doc);
         const normalizedStatus: QueuedStatement['status'] =
-          doc.status === 'completed'
-            ? 'ready'
-            : doc.status === 'failed'
-              ? 'failed'
-              : 'processing';
+          ns === 'completed' ? 'ready' : ns === 'failed' ? 'failed' : 'processing';
         return {
           id: doc.id,
           fileName: previous?.fileName ?? `Statement ${idx + 1}`,
@@ -216,14 +221,16 @@ export default function V1DealPage() {
       try {
         const { documents } = await listDocuments(deal.id);
         if (cancelled) return;
+        setDealDocuments(documents);
         const byId = new Map(documents.map((d) => [d.id, d]));
         setStatementQueue((prev) =>
           prev.map((q) => {
             if (q.status !== 'processing') return q;
             const doc = byId.get(q.id);
             if (!doc) return q;
-            if (doc.status === 'completed') return { ...q, status: 'ready' };
-            if (doc.status === 'failed') return { ...q, status: 'failed' };
+            const ns = apiDocumentStatus(doc);
+            if (ns === 'completed') return { ...q, status: 'ready' };
+            if (ns === 'failed') return { ...q, status: 'failed' };
             return q;
           })
         );
