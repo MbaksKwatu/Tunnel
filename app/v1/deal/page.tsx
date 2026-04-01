@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
 import { supabase } from '@/lib/supabase';
@@ -193,17 +193,29 @@ export default function V1DealPage() {
     [deal, refreshBatchUploadCount]
   );
 
-  // One listDocuments call per tick instead of N× getDocumentStatus — reduces Render load
-  // when many months are processing (avoids 503 / connection spikes).
+  // One listDocuments poll at a time (sequential), not overlapping setInterval + async —
+  // slow responses were stacking many pending /documents requests and starving the worker.
+  const statementQueueHasProcessing = useMemo(
+    () => statementQueue.some((item) => item.status === 'processing'),
+    [statementQueue]
+  );
+
   useEffect(() => {
-    const hasProcessing = statementQueue.some((item) => item.status === 'processing');
-    if (!deal?.id || !hasProcessing) return;
+    if (!deal?.id || !statementQueueHasProcessing) return;
 
     const POLL_MS = 5000;
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout>;
 
-    const interval = setInterval(async () => {
+    const scheduleNext = () => {
+      timeoutId = setTimeout(run, POLL_MS);
+    };
+
+    const run = async () => {
+      if (cancelled) return;
       try {
         const { documents } = await listDocuments(deal.id);
+        if (cancelled) return;
         const byId = new Map(documents.map((d) => [d.id, d]));
         setStatementQueue((prev) =>
           prev.map((q) => {
@@ -218,10 +230,15 @@ export default function V1DealPage() {
       } catch {
         // ignore poll errors (network / transient 503)
       }
-    }, POLL_MS);
+      if (!cancelled) scheduleNext();
+    };
 
-    return () => clearInterval(interval);
-  }, [deal?.id, statementQueue]);
+    void run();
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [deal?.id, statementQueueHasProcessing]);
 
   const runAnalysis = async () => {
     setErrorMsg('');
