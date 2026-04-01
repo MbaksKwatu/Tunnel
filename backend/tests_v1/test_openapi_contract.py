@@ -291,7 +291,7 @@ class TestDualHashRegression(unittest.TestCase):
         self.assertEqual(snap_d["sha256_hash"], sha_c)
 
     def test_export_entities_match_snapshot_payload(self):
-        """Export response entities and txn_entity_map must exactly match those in canonical_json."""
+        """Entities and txn map in export response match GET /snapshots/{id} canonical_json."""
         deal_resp = self.client.post("/v1/deals", data={"currency": "USD"})
         deal_id = deal_resp.json()["deal"]["id"]
         f = io.BytesIO(VALID_CSV.encode())
@@ -304,7 +304,10 @@ class TestDualHashRegression(unittest.TestCase):
         body = resp.json()
         entities_resp = sorted(body.get("entities", []), key=lambda e: e.get("entity_id", ""))
         txn_map_resp = sorted(body.get("txn_entity_map", []), key=lambda m: m.get("txn_id", ""))
-        canonical = json.loads(body["snapshot"]["canonical_json"])
+        snap_id = body["snapshot"]["id"]
+        detail = self.client.get(f"/v1/snapshots/{snap_id}")
+        self.assertEqual(detail.status_code, 200)
+        canonical = json.loads(detail.json()["snapshot"]["canonical_json"])
         entities_canon = sorted(canonical.get("entities", []), key=lambda e: e.get("entity_id", ""))
         txn_map_canon = sorted(canonical.get("txn_entity_map", []), key=lambda m: m.get("txn_id", ""))
         self.assertEqual(entities_resp, entities_canon, "Export entities must match snapshot payload")

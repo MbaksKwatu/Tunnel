@@ -2,7 +2,8 @@
 Parity Review — Minimal Q&A module.
 
 LLM = intent classifier only. All arithmetic is deterministic and done here.
-Never import pipeline, classifier, snapshot engine, or hashing utilities.
+Never import pipeline, classifier, or hashing utilities. Snapshot helpers that only
+decode stored JSON blobs are allowed.
 """
 
 import json
@@ -10,6 +11,8 @@ import logging
 import os
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
+
+from .core.snapshot_engine import decompress_canonical_json_if_needed
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +180,7 @@ def extract_aggregates(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     Parse the snapshot's canonical_json and join txn_entity_map onto transactions
     so each transaction carries its role and entity_id.
     """
-    data = json.loads(snapshot["canonical_json"])
+    data = json.loads(decompress_canonical_json_if_needed(snapshot["canonical_json"]))
     transactions: List[Dict] = data.get("transactions", [])
     txn_entity_map: List[Dict] = data.get("txn_entity_map", [])
     entities: List[Dict] = data.get("entities", [])

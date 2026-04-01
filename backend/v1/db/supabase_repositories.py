@@ -1,6 +1,7 @@
 import logging
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+from ..core.snapshot_engine import decode_snapshot_row
 from .repositories import (
     AnalysisRunsRepository,
     DealsRepository,
@@ -274,21 +275,28 @@ class SnapshotsRepo(SnapshotsRepository, BaseRepo):
         existing = self.get_by_hash(snapshot.get("sha256_hash", ""))
         if existing:
             return existing
-        return self.insert(snapshot)
+        inserted = self.insert(snapshot)
+        return decode_snapshot_row(inserted) or inserted
 
     def get_by_hash(self, sha256_hash: str) -> Optional[Dict[str, Any]]:
         rows = self.select_eq("sha256_hash", sha256_hash)
-        return rows[0] if rows else None
+        if not rows:
+            return None
+        return decode_snapshot_row(rows[0])
 
     def get_snapshot(self, snapshot_id: str) -> Optional[Dict[str, Any]]:
         rows = self.select_eq("id", snapshot_id)
-        return rows[0] if rows else None
+        if not rows:
+            return None
+        return decode_snapshot_row(rows[0])
 
     def list_snapshots(self, deal_id: str) -> Sequence[Dict[str, Any]]:
-        return self.select_eq("deal_id", deal_id)
+        rows = self.select_eq("deal_id", deal_id)
+        return [decode_snapshot_row(r) or r for r in rows]
 
     def get_latest_snapshot(self, deal_id: str) -> Optional[Dict[str, Any]]:
         rows = self.select_eq("deal_id", deal_id)
         if not rows:
             return None
-        return max(rows, key=lambda r: r.get("created_at") or "")
+        latest = max(rows, key=lambda r: r.get("created_at") or "")
+        return decode_snapshot_row(latest)

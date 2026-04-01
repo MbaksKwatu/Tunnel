@@ -1,10 +1,54 @@
+import base64
+import gzip
 import json
+import logging
 import uuid
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..parsing.common import canonical_hash, sort_rows
 from .declared_financials import DeclaredFinancials
 from .reconciliation import compute_reconciliation
+
+logger = logging.getLogger(__name__)
+
+# Above this size, canonical JSON is gzip+base64 prefixed before persisting so PostgREST
+# INSERT requests stay under typical ~1–8 MiB body limits for large deals.
+CANONICAL_JSON_COMPRESS_MIN_LEN = 262_144  # 256 KiB
+
+_GZIP_PREFIX = "__PDS1_GZIP_B64__:"
+
+
+def compress_canonical_json_if_large(plain: str) -> str:
+    if len(plain) < CANONICAL_JSON_COMPRESS_MIN_LEN:
+        return plain
+    raw = gzip.compress(plain.encode("utf-8"), compresslevel=6)
+    enc = _GZIP_PREFIX + base64.b64encode(raw).decode("ascii")
+    logger.info(
+        "[SNAPSHOT] canonical_json compressed %d -> %d bytes",
+        len(plain),
+        len(enc),
+    )
+    return enc
+
+
+def decompress_canonical_json_if_needed(stored: str) -> str:
+    if not stored:
+        return stored
+    if stored.startswith(_GZIP_PREFIX):
+        raw = base64.b64decode(stored[len(_GZIP_PREFIX) :].encode("ascii"))
+        return gzip.decompress(raw).decode("utf-8")
+    return stored
+
+
+def decode_snapshot_row(snapshot: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Expand stored canonical_json to plain JSON text for API / pipeline consumers."""
+    if not snapshot:
+        return None
+    out = dict(snapshot)
+    cj = out.get("canonical_json")
+    if isinstance(cj, str):
+        out["canonical_json"] = decompress_canonical_json_if_needed(cj)
+    return out
 
 
 def _build_financial_state_payload(
@@ -52,7 +96,7 @@ def compute_financial_state_hash_from_canonical_json(canonical_json: str) -> str
     Idempotent helper for backfill: parses stored canonical_json, rebuilds the
     outcome-only view, and returns the financial_state_hash.
     """
-    data = json.loads(canonical_json)
+    data = json.loads(decompress_canonical_json_if_needed(canonical_json))
     # Re-sort defensively to avoid relying on stored order
     transactions = sort_rows(data.get("transactions", []))
     transfer_links = sorted(
@@ -208,6 +252,7 @@ def export_snapshot(
     existing = snapshot_repo.get_by_hash(sha)
     if existing:
         return existing
+    stored_cj = compress_canonical_json_if_large(canonical_json)
     snapshot = {
         "id": str(uuid.uuid4()),
         "deal_id": deal_id,
@@ -216,7 +261,7 @@ def export_snapshot(
         "config_version": payload["config_version"],
         "financial_state_hash": payload.get("financial_state_hash"),
         "sha256_hash": sha,
-        "canonical_json": canonical_json,
+        "canonical_json": stored_cj,
         "created_by": created_by,
     }
     return snapshot_repo.insert_snapshot(snapshot)

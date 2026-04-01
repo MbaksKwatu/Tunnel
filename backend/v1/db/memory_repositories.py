@@ -7,6 +7,8 @@ import copy
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+from ..core.snapshot_engine import decode_snapshot_row
+
 from .repositories import (
     AnalysisRunsRepository,
     DealsRepository,
@@ -202,29 +204,33 @@ class MemorySnapshotsRepo(SnapshotsRepository):
             return existing
         row = {**snapshot, "created_at": snapshot.get("created_at") or datetime.utcnow().isoformat()}
         self._store.append(row)
-        return copy.deepcopy(row)
+        return decode_snapshot_row(copy.deepcopy(row)) or copy.deepcopy(row)
 
     def get_by_hash(self, sha256_hash: str) -> Optional[Dict[str, Any]]:
         for s in self._store:
             if s.get("sha256_hash") == sha256_hash:
-                return copy.deepcopy(s)
+                return decode_snapshot_row(copy.deepcopy(s))
         return None
 
     def get_snapshot(self, snapshot_id: str) -> Optional[Dict[str, Any]]:
         for s in self._store:
             if s["id"] == snapshot_id:
-                return copy.deepcopy(s)
+                return decode_snapshot_row(copy.deepcopy(s))
         return None
 
     def list_snapshots(self, deal_id: str) -> Sequence[Dict[str, Any]]:
-        return [copy.deepcopy(s) for s in self._store if s.get("deal_id") == deal_id]
+        return [
+            decode_snapshot_row(copy.deepcopy(s)) or copy.deepcopy(s)
+            for s in self._store
+            if s.get("deal_id") == deal_id
+        ]
 
     def get_latest_snapshot(self, deal_id: str) -> Optional[Dict[str, Any]]:
         rows = [s for s in self._store if s.get("deal_id") == deal_id]
         if not rows:
             return None
         latest = max(rows, key=lambda r: r.get("created_at") or "")
-        return copy.deepcopy(latest)
+        return decode_snapshot_row(copy.deepcopy(latest))
 
 
 def build_memory_repos() -> Dict[str, Any]:
