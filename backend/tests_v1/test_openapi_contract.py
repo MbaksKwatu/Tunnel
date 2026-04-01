@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import unittest
+from datetime import datetime, timedelta, timezone
 
 # ---------------------------------------------------------------------------
 _BACKEND = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
@@ -25,7 +26,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from jsonschema import validate, ValidationError
 
-from backend.v1.api import router as v1_router
+from backend.v1.api import PROCESSING_LEASE_SECONDS, router as v1_router
 from backend.v1.db.memory_repositories import build_memory_repos
 
 # ---------------------------------------------------------------------------
@@ -455,6 +456,65 @@ class TestErrorSemantics(unittest.TestCase):
         self.app.state.repos_factory()["documents"].create_document(doc)
         resp = self.client.post(f"/v1/deals/{did}/export")
         self._assert_error(resp, "DOCUMENTS_NOT_READY", 409)
+
+    def test_export_succeeds_when_failed_doc_present(self):
+        """Failed document rows must not block export if another doc completed with transactions."""
+        deal_resp = self.client.post("/v1/deals", data={"currency": "USD"})
+        did = deal_resp.json()["deal"]["id"]
+        cb = deal_resp.json()["deal"]["created_by"]
+        f = io.BytesIO(VALID_CSV.encode())
+        up = self.client.post(
+            f"/v1/deals/{did}/documents",
+            files={"file": ("ok.csv", f, "text/csv")},
+        )
+        self.assertEqual(up.status_code, 200)
+        doc_id = up.json()["ingestion"]["document_id"]
+        st = self.client.get(f"/v1/documents/{doc_id}/status")
+        self.assertEqual(st.json()["status"], "completed")
+        self.app.state.repos_factory()["documents"].create_document(
+            {
+                "id": "doc-failed-extra",
+                "deal_id": did,
+                "storage_url": "inline://failed",
+                "file_type": "xlsx",
+                "status": "failed",
+                "currency_mismatch": False,
+                "created_by": cb,
+            }
+        )
+        resp = self.client.post(f"/v1/deals/{did}/export")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertIn("snapshot", resp.json())
+
+    def test_export_succeeds_when_stale_processing_present(self):
+        """Processing past lease should not block export (align with list/status overlay)."""
+        deal_resp = self.client.post("/v1/deals", data={"currency": "USD"})
+        did = deal_resp.json()["deal"]["id"]
+        cb = deal_resp.json()["deal"]["created_by"]
+        f = io.BytesIO(VALID_CSV.encode())
+        up = self.client.post(
+            f"/v1/deals/{did}/documents",
+            files={"file": ("ok2.csv", f, "text/csv")},
+        )
+        self.assertEqual(up.status_code, 200)
+        doc_id = up.json()["ingestion"]["document_id"]
+        self.assertEqual(self.client.get(f"/v1/documents/{doc_id}/status").json()["status"], "completed")
+        old_ts = (datetime.now(timezone.utc) - timedelta(seconds=PROCESSING_LEASE_SECONDS + 120)).isoformat()
+        self.app.state.repos_factory()["documents"].create_document(
+            {
+                "id": "doc-stale-processing",
+                "deal_id": did,
+                "storage_url": "inline://stale",
+                "file_type": "pdf",
+                "status": "processing",
+                "currency_mismatch": False,
+                "created_by": cb,
+                "created_at": old_ts,
+            }
+        )
+        resp = self.client.post(f"/v1/deals/{did}/export")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertIn("snapshot", resp.json())
 
     def test_invalid_schema_upload(self):
         deal_resp = self.client.post("/v1/deals", data={"currency": "USD"})

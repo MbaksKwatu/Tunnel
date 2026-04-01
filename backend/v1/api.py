@@ -79,6 +79,25 @@ def _document_row_for_list_response(doc: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _document_blocks_export(doc: Dict[str, Any]) -> bool:
+    """
+    True if this row should block POST /export.
+
+    - ``completed``: does not block.
+    - ``failed``: does not block (export uses ingested transactions; failed uploads add no rows).
+    - ``processing`` past lease: does not block (stale row; same idea as list/status overlay).
+    - ``processing`` within lease: blocks.
+    """
+    s = (doc.get("status") or "").strip().lower()
+    if s == "completed":
+        return False
+    if s == "failed":
+        return False
+    if s == "processing":
+        return not _document_processing_lease_expired(doc)
+    return True
+
+
 def _parse_document_timestamp(value: Any) -> Optional[datetime]:
     """Parse created_at / updated_at from DB (ISO string or datetime). Returns timezone-aware UTC."""
     if value is None:
@@ -600,8 +619,8 @@ def export(request: Request, deal_id: str):
     if not deal:
         _error("NOT_FOUND", f"Deal {deal_id} not found")
     docs = repos["documents"].list_by_deal(deal_id)
-    not_ready = [d for d in docs if d.get("status") != "completed"]
-    if not_ready:
+    blocking = [d for d in docs if _document_blocks_export(d)]
+    if blocking:
         _error("DOCUMENTS_NOT_READY", "Documents still processing", status=409, next_action="wait_or_retry")
     raw = list(repos["raw"].list_by_deal(deal_id))
     stage = "FETCH_INPUTS_DONE"
