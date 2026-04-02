@@ -1,61 +1,46 @@
-# Vercel Environment Variables Setup
+# Vercel environment variables (PDS frontend)
 
-## Required Environment Variables
-
-For Vercel deployment to succeed, you **must** set these environment variables in your Vercel project settings:
-
-### Supabase (Required)
-
-1. **NEXT_PUBLIC_SUPABASE_URL**
-   - Get from: https://supabase.com/dashboard/project/_/settings/api
-   - Example: `https://xxxxx.supabase.co`
-
-2. **NEXT_PUBLIC_SUPABASE_ANON_KEY**
-   - Get from: https://supabase.com/dashboard/project/_/settings/api
-   - This is the "anon" or "public" key (not the service role key)
-
-### Backend API (Required)
-
-3. **NEXT_PUBLIC_API_URL**
-   - Your Render backend URL
-   - Example: `https://paritytunnel-w7d2.onrender.com`
+**Scope:** `ParitySME/Tunnel` only — the Next.js app deployed as **`v0-fund-iq-1-0`** on Vercel. Backend lives on Render; Supabase is shared. Do not conflate this with other folders in the monorepo.
 
 ---
 
-## How to Set Environment Variables in Vercel
+## Required variables
 
-1. Go to: https://vercel.com/dashboard
-2. Select your project
-3. Go to **Settings** → **Environment Variables**
-4. Add each variable:
-   - **Key**: `NEXT_PUBLIC_SUPABASE_URL`
-   - **Value**: Your Supabase project URL
-   - **Environment**: Production, Preview, Development (select all)
-5. Repeat for all 3 variables
-6. **Redeploy** your project (or push a new commit to trigger auto-deploy)
+Set these in Vercel → **Settings** → **Environment Variables** for **Production** (and Preview/Development if you use them).
 
----
+| Key | Source | Production value (PDS) |
+|-----|--------|-------------------------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase → **Settings** → **API** → Project URL | `https://ifcdbhbuucmjgtjkluna.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Same page → **anon** `public` key (JWT, starts with `eyJ`) | Copy from dashboard (do not use service role) |
+| `NEXT_PUBLIC_API_URL` | Render Parity API | `https://paritytunnel-w7d2.onrender.com` |
 
-## Why Build Fails Without These
-
-Next.js tries to statically generate pages at build time. If Supabase env vars are missing:
-- Build fails with: `"Your project's URL and API key are required"`
-- Pages can't be pre-rendered
-- Deployment stops
+Wrong or missing **`NEXT_PUBLIC_SUPABASE_*`** causes **“Sign-in is taking too long”** — the browser client in `lib/supabase.ts` cannot initialize auth.
 
 ---
 
-## After Setting Env Vars
+## Fix broken production login
 
-1. Push a new commit OR
-2. Go to Vercel dashboard → Deployments → Click "Redeploy" on latest deployment
-3. Build should succeed ✅
+1. **Supabase** — Open project **`ifcdbhbuucmjgtjkluna`** → Settings → API → copy **Project URL** and **anon public** key.
+2. **Vercel** — Project **`v0-fund-iq-1-0`** → Environment Variables → set/update the three keys above for **Production**.
+3. **Redeploy** — Deployments → latest → **Redeploy**. Next.js inlines `NEXT_PUBLIC_*` at **build** time; env-only changes do nothing until a new deployment runs.
 
 ---
 
-## Verification
+## Do not change
 
-After deployment succeeds, check:
-- ✅ Build logs show no Supabase errors
-- ✅ Pages load correctly
-- ✅ Authentication works
+- **Render:** `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` — server-side only; separate from the anon key above.
+- **Local:** `ParitySME/Tunnel/.env.local` — placeholders for dev; not used by Vercel.
+
+---
+
+## Verify
+
+- Open the production URL in an **incognito** window.
+- **Network:** requests to **`ifcdbhbuucmjgtjkluna.supabase.co`** (auth/session) should return **200**, not hang or fail CORS.
+- Sign-in should finish in a few seconds.
+
+---
+
+## Why builds fail without Supabase env
+
+If `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` are missing at build time, Next.js may error (e.g. URL and key required) or ship a client that cannot authenticate.
