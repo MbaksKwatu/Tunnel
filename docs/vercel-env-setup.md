@@ -44,3 +44,18 @@ Wrong or missing **`NEXT_PUBLIC_SUPABASE_*`** causes **“Sign-in is taking too 
 ## Why builds fail without Supabase env
 
 If `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` are missing at build time, Next.js may error (e.g. URL and key required) or ship a client that cannot authenticate.
+
+---
+
+## Recent `main` commits (handoff)
+
+Pinned short hashes for the December / upload / ingestion stability work. Older pipeline commits on `main` are omitted here; use `git log` for full history.
+
+| Hash | Subject |
+|------|---------|
+| `08072e3` | docs: Vercel env handoff for PDS Tunnel frontend |
+| `bf4bfdb` | fix(ingestion): Equity PDF amount cells and split Running Balance header |
+| `44a0c25` | chore(backend): startup recovery for stuck document processing |
+| `7fdb675` | fix: send document uploads as multipart without JSON Content-Type |
+| `6f4c638` | test: add Jan/Feb Equity xlsx fixtures for test_parsers |
+| `2b2edd3` | fix(xlsx): Equity Dec 2024 Transacti on Date header and newline dates |
