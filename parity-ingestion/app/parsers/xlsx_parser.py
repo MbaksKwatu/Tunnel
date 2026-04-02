@@ -136,6 +136,23 @@ def _clean_equity_date_cell(value: Any) -> Any:
     return value
 
 
+def _equity_amount_cells_are_column_titles(debit_val: Any, credit_val: Any) -> bool:
+    """
+    Some Nov/Dec 2025 sheets repeat the column titles on the row immediately under
+    the real header (cells contain the words 'Debit' / 'Credit', not amounts).
+    Skip that row — it is not a transaction.
+    """
+    d = str(debit_val or "").strip().lower()
+    c = str(credit_val or "").strip().lower()
+    if d == "debit" and c == "credit":
+        return True
+    if d == "debit" and c in ("", "credit"):
+        return True
+    if c == "credit" and d in ("", "debit"):
+        return True
+    return False
+
+
 def _normalise_equity_excel_columns(header_row: List[Any]) -> Dict[str, int]:
     """Build logical column index map; skips merged-cell None/NaN headers and ignored columns."""
     mapping: Dict[str, int] = {}
@@ -221,6 +238,7 @@ def parse_xlsx(
     rows: List[Dict[str, Any]] = []
     currency_detection = "unknown"
 
+    # header_row_num is 1-based (from _try_scan_equity_header_row); first data row is header_row_num + 1.
     for row in ws.iter_rows(min_row=header_row_num + 1):
         values = [cell.value for cell in row]
         if all(v in (None, "") for v in values):
@@ -241,6 +259,8 @@ def parse_xlsx(
         if is_equity:
             debit_val = get("debit")
             credit_val = get("credit")
+            if _equity_amount_cells_are_column_titles(debit_val, credit_val):
+                continue
             reference_val = get("reference")
             if reference_val not in (None, ""):
                 desc_val = f"{desc_val} {reference_val}".strip()

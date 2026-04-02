@@ -100,6 +100,30 @@ class TestDeterministicParsers(unittest.TestCase):
         rows, _, _ = parse_xlsx(buf.getvalue(), "doc-dec", "KES")
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["txn_date"], "2024-12-02")
+        self.assertIsInstance(rows[0]["signed_amount_cents"], int)
+        self.assertNotIn("debit", str(rows[0]["raw_descriptor"]).lower())
+
+    def test_equity_skips_duplicate_column_title_row_under_header(self):
+        """Nov/Dec layout: second row repeats 'Debit'/'Credit' labels — must not parse as amounts."""
+        wb = Workbook()
+        ws = wb.active
+        ws.append(
+            [
+                "Narrative",
+                "Transacti on Date",
+                "Debit",
+                "Credit",
+                "Running Balance",
+            ]
+        )
+        ws.append(["Debit", "Credit", "Debit", "Credit", "Running Balance"])
+        ws.append(["Pay vendor", "15-12-2025", 5000, None, None])
+        buf = io.BytesIO()
+        wb.save(buf)
+        rows, _, _ = parse_xlsx(buf.getvalue(), "doc-dup", "KES")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["signed_amount_cents"], -500000)
+        self.assertEqual(rows[0]["raw_descriptor"].strip().lower(), "pay vendor")
 
     def test_csv_reorder_rows_same_hash(self):
         content_a = "date,amount,description\n2024-01-01,100,A\n2024-01-02,200,B\n"
