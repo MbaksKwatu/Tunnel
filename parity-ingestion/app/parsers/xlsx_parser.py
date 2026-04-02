@@ -296,10 +296,9 @@ def parse_xlsx(
             return values[idx] if idx is not None and idx < len(values) else None
 
         date_val = get("date")
+        txn_date_iso: Optional[str] = None
         if is_equity:
             date_val = _clean_equity_date_cell(date_val)
-            if not _equity_date_cell_looks_like_transaction(date_val):
-                continue
         desc_val = get("description")
         direction_val = get("direction") if "direction" in header_mapping else None
 
@@ -322,6 +321,18 @@ def parse_xlsx(
             if is_equity:
                 continue
             raise InvalidSchemaError("Description is required per row")
+
+        # Date guard (must happen before amount parsing):
+        # - Equity footers/summary rows leave date blank (None/""), so skip them.
+        # - We also validate that the date is parseable into a real datetime to
+        #   avoid attempting to parse footer labels like "Total Credits" as amounts.
+        if is_equity:
+            if date_val in (None, ""):
+                continue
+            txn_date_iso = parse_date(date_val)
+            row_date_value = datetime.strptime(txn_date_iso, "%Y-%m-%d")
+            if not isinstance(row_date_value, datetime):
+                continue
 
         try:
             if is_equity:
@@ -352,7 +363,7 @@ def parse_xlsx(
             elif d not in {"out", "debit", "withdrawal", "outflow", "in", "credit", "inflow", "deposit"}:
                 raise InvalidSchemaError(f"Invalid direction value: {direction_val}")
 
-        txn_date = parse_date(date_val)
+        txn_date = txn_date_iso if is_equity else parse_date(date_val)
 
         row_obj: Dict[str, Any] = {
             "txn_date": txn_date,

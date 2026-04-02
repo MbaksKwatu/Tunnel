@@ -12,6 +12,7 @@ from v1.parsing.xlsx_parser import (
     parse_xlsx,
     scan_equity_excel_header,
 )
+import datetime
 
 JAN_XLSX = Path(
     "/Users/mbakswatu/Desktop/parity/sayuni/2025/Excel/"
@@ -88,7 +89,7 @@ def _december_2025_layout_workbook_bytes() -> bytes:
         credit = None if i % 2 == 0 else "50.00"
         ws.append(
             [
-                "15-12-2025",
+                datetime.datetime(2025, 12, 15, 0, 0),
                 "",
                 "",
                 f"Txn {i}",
