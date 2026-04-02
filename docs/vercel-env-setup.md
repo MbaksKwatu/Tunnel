@@ -49,10 +49,11 @@ If `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` are missing at b
 
 ## Recent `main` commits (handoff)
 
-Pinned short hashes for the December / upload / ingestion stability work. Older pipeline commits on `main` are omitted here; use `git log` for full history.
+Pinned short hashes for the December / upload / ingestion stability work. Older pipeline commits on `main` are omitted here (`prev`-style entries in older notes are replaced by these pins); use `git log` for full history.
 
 | Hash | Subject |
 |------|---------|
+| `c0f2539` | chore(deploy): backend Dockerfile and Cloud Build config |
 | `08072e3` | docs: Vercel env handoff for PDS Tunnel frontend |
 | `bf4bfdb` | fix(ingestion): Equity PDF amount cells and split Running Balance header |
 | `44a0c25` | chore(backend): startup recovery for stuck document processing |
