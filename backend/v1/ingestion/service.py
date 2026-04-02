@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 INSERT_CHUNK_SIZE = 500
 
 # Stuck documents: processing longer than this are marked failed on API boot.
-STUCK_PROCESSING_MINUTES = 10
+STUCK_PROCESSING_MINUTES = 20
 _STUCK_SELECT_LIMIT = 50_000
 
 # Ingestion stages (must match exactly for diagnostics)

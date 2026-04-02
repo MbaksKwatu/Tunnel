@@ -29,7 +29,7 @@ _DATE1_BUS_PAT = re.compile(r"^(\d{2}-\d{2}-\d{4})\s+(.*)$")
 _AMOUNT_PAT = re.compile(r"[\d,]+\.\d{2}")
 
 # Page-chunked extraction for large PDFs (avoids long single-pass CPU time on small instances)
-EQUITY_PAGE_CHUNK_SIZE = 30
+EQUITY_PAGE_CHUNK_SIZE = 20
 
 # April 2025 split-date layout (coordinate-based extraction)
 _APR_DATE_PREFIX_PAT = re.compile(r"^(\d{2})-(\d{2})-$")
