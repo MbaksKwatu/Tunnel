@@ -1,3 +1,4 @@
+import datetime
 import io
 import sys
 import unittest
@@ -81,8 +82,8 @@ class TestDeterministicParsers(unittest.TestCase):
         with self.assertRaises(XlsxInvalidSchemaError):
             parse_xlsx(buf.getvalue(), "doc-1", "USD")
 
-    def test_equity_transacti_on_date_header_and_newline_in_date_cell(self):
-        """Dec 2024 variant header + embedded newline in date string (Equity Excel)."""
+    def test_equity_transacti_on_date_header_variant_with_datetime_cell(self):
+        """'Transacti on Date' split-word header is detected; datetime cell is parsed correctly."""
         wb = Workbook()
         ws = wb.active
         ws.append(
@@ -94,7 +95,7 @@ class TestDeterministicParsers(unittest.TestCase):
                 "Running Balance",
             ]
         )
-        ws.append(["Test", "02-12-\n2024", 100, None, None])
+        ws.append(["Test txn", datetime.datetime(2024, 12, 2), 100, None, None])
         buf = io.BytesIO()
         wb.save(buf)
         rows, _, _ = parse_xlsx(buf.getvalue(), "doc-dec", "KES")
@@ -117,7 +118,7 @@ class TestDeterministicParsers(unittest.TestCase):
             ]
         )
         ws.append(["Debit", "Credit", "Debit", "Credit", "Running Balance"])
-        ws.append(["Pay vendor", "15-12-2025", 5000, None, None])
+        ws.append(["Pay vendor", datetime.datetime(2025, 12, 15), 5000, None, None])
         buf = io.BytesIO()
         wb.save(buf)
         rows, _, _ = parse_xlsx(buf.getvalue(), "doc-dup", "KES")

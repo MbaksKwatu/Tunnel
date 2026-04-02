@@ -322,17 +322,18 @@ def parse_xlsx(
                 continue
             raise InvalidSchemaError("Description is required per row")
 
-        # Date guard (must happen before amount parsing):
-        # - Equity footers/summary rows leave date blank (None/""), so skip them.
-        # - We also validate that the date is parseable into a real datetime to
-        #   avoid attempting to parse footer labels like "Total Credits" as amounts.
+        # Date guard — layout-agnostic.
+        # Equity Excel stores real transaction dates as datetime objects (openpyxl).
+        # Footer/summary rows (Total Credits, Total Debits, Closing Balance) leave
+        # the date column blank (None) or non-datetime. Checking isinstance on the
+        # raw cell value catches every footer variant regardless of wording, without
+        # relying on keyword matching.
+        # NOTE: only skip rows that fail this check; do NOT silence amount errors on
+        # rows that DO have a valid datetime date.
         if is_equity:
-            if date_val in (None, ""):
+            if not isinstance(date_val, datetime):
                 continue
             txn_date_iso = parse_date(date_val)
-            row_date_value = datetime.strptime(txn_date_iso, "%Y-%m-%d")
-            if not isinstance(row_date_value, datetime):
-                continue
 
         try:
             if is_equity:
