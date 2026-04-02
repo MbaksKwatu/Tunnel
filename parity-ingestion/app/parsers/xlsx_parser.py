@@ -5,8 +5,9 @@ Produces backend-shaped row dicts, then ExtractionResult for the normaliser.
 from __future__ import annotations
 
 import io
+import math
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from openpyxl import load_workbook
 
@@ -26,7 +27,11 @@ _EQUITY_EXCEL_COL_MAP = {
     "transactio n date": "date",
     "transacti on date": "date",
     "transactiondate": "date",
-    "value date": "value_date",
+    # December 2025+ layout: ignore secondary / merged-artifact columns
+    "value date": None,
+    "cheque number": None,
+    "remarks 1": None,
+    "remarks 2": None,
     "narrative": "description",
     "particulars": "description",
     "debit": "debit",
@@ -41,6 +46,42 @@ _EQUITY_EXCEL_COL_MAP = {
 
 def _normalize_equity_col_name(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def _is_blank_equity_header_cell(col: Any) -> bool:
+    if col is None:
+        return True
+    if isinstance(col, float) and math.isnan(col):
+        return True
+    return False
+
+
+EQUITY_HEADER_SCAN_MAX = 20
+
+
+def _try_scan_equity_header_row(
+    ws, max_scan: int = EQUITY_HEADER_SCAN_MAX
+) -> Tuple[Optional[int], Optional[List[Any]]]:
+    for row_num in range(1, max_scan + 1):
+        row = next(ws.iter_rows(min_row=row_num, max_row=row_num), None)
+        if row is None:
+            break
+        values = [cell.value for cell in row]
+        if _is_equity_excel(values):
+            return row_num, values
+    return None, None
+
+
+def scan_equity_excel_header(
+    ws, *, max_scan: int = EQUITY_HEADER_SCAN_MAX
+) -> Tuple[int, List[Any]]:
+    """Return (zero-based row index, header values) for the first Equity-style header row."""
+    row_num, values = _try_scan_equity_header_row(ws, max_scan)
+    if row_num is None:
+        raise InvalidSchemaError(
+            f"Equity Excel header row not found in first {max_scan} rows"
+        )
+    return row_num - 1, values
 
 
 def _is_equity_excel(header_row: List[Any]) -> bool:
@@ -65,13 +106,18 @@ def _clean_equity_date_cell(value: Any) -> Any:
 
 
 def _normalise_equity_excel_columns(header_row: List[Any]) -> Dict[str, int]:
+    """Build logical column index map; skips merged-cell None/NaN headers and ignored columns."""
     mapping: Dict[str, int] = {}
     for idx, col in enumerate(header_row):
+        if _is_blank_equity_header_cell(col):
+            continue
         key = _normalize_equity_col_name(col)
         if not key:
             continue
-        mapped = _EQUITY_EXCEL_COL_MAP.get(key)
-        if not mapped:
+        if key not in _EQUITY_EXCEL_COL_MAP:
+            continue
+        mapped = _EQUITY_EXCEL_COL_MAP[key]
+        if mapped is None:
             continue
         if mapped not in mapping:
             mapping[mapped] = idx
@@ -118,22 +164,33 @@ def parse_xlsx(
 
     ws = visible_sheets[0]
 
-    header_row = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
-    is_equity = _is_equity_excel(header_row)
+    scanned_num, scanned_header = _try_scan_equity_header_row(ws)
+    if scanned_num is not None:
+        header_row_num = scanned_num
+        header_row = scanned_header
+        is_equity = True
+    else:
+        header_row = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
+        header_row_num = 1
+        is_equity = _is_equity_excel(header_row)
+
     if not is_equity and not read_only:
         for merged in ws.merged_cells.ranges:
             if merged.min_row == 1:
                 raise InvalidSchemaError("Merged cells in header row are not allowed")
     header_mapping = _normalise_equity_excel_columns(header_row) if is_equity else _header_map(header_row)
 
-    second_row_cells = [cell.value for cell in next(ws.iter_rows(min_row=2, max_row=2), [])]
+    second_row_cells = [
+        cell.value
+        for cell in next(ws.iter_rows(min_row=header_row_num + 1, max_row=header_row_num + 1), [])
+    ]
     if second_row_cells and _detect_additional_header(second_row_cells):
         raise InvalidSchemaError("Multiple header rows detected")
 
     rows: List[Dict[str, Any]] = []
     currency_detection = "unknown"
 
-    for row in ws.iter_rows(min_row=2):
+    for row in ws.iter_rows(min_row=header_row_num + 1):
         values = [cell.value for cell in row]
         if all(v in (None, "") for v in values):
             continue

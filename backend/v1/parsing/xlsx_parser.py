@@ -18,6 +18,7 @@ from app.parsers.xlsx_parser import (  # noqa: E402
     _is_equity_excel,
     _normalise_equity_excel_columns,
     parse_xlsx as _parse_xlsx_full,
+    scan_equity_excel_header,
 )
 
 
@@ -31,4 +32,9 @@ def parse_xlsx(
     return rows, raw_hash, currency_detection
 
 
-__all__ = ["parse_xlsx", "_is_equity_excel", "_normalise_equity_excel_columns"]
+__all__ = [
+    "parse_xlsx",
+    "_is_equity_excel",
+    "_normalise_equity_excel_columns",
+    "scan_equity_excel_header",
+]
