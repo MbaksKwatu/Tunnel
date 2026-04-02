@@ -45,10 +45,10 @@ async def upload(file: UploadFile = File(...)):
     filename = file.filename or "upload"
     ext = Path(filename).suffix.lower()
 
-    if ext not in (".pdf", ".csv", ".xlsx"):
+    if ext not in (".pdf", ".csv"):
         raise HTTPException(
             status_code=415,
-            detail=f"Unsupported file type '{ext}'. Accepted: .pdf, .csv, .xlsx",
+            detail=f"Unsupported file type '{ext}'. Accepted: .pdf, .csv (use /v1/ingest/excel for .xlsx)",
         )
 
     # Write to temp location
@@ -70,10 +70,6 @@ async def upload(file: UploadFile = File(...)):
                         status_code=415,
                         detail=result.get("message", "Bank format not recognised."),
                     )
-        elif ext == ".xlsx":
-            from app.extractors.xlsx_extractor import extract_xlsx
-
-            result = extract_xlsx(str(dest))
         else:
             result = extract_mpesa_csv(str(dest))
         normalise_all(result)
@@ -85,6 +81,45 @@ async def upload(file: UploadFile = File(...)):
 
     result.result_id = result_id
     result.source_file = filename  # return original name, not temp path
+    _results[result_id] = result
+
+    result_dict = result.model_dump()
+    result_dict["analytics"] = run_analytics(result.raw_transactions)
+    return result_dict
+
+
+@app.post("/v1/ingest/excel")
+async def ingest_excel(file: UploadFile = File(...)):
+    """Excel-only: large workbooks are parsed here (GCP) — not on the Render API."""
+    filename = file.filename or "upload.xlsx"
+    ext = Path(filename).suffix.lower()
+    if ext not in (".xlsx", ".xlsm"):
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported file type '{ext}'. Accepted: .xlsx, .xlsm",
+        )
+
+    result_id = str(uuid.uuid4())
+    dest = _UPLOAD_DIR / f"{result_id}{ext}"
+    content = await file.read()
+    dest.write_bytes(content)
+
+    try:
+        from app.parsers.xlsx_parser import extraction_result_from_xlsx_bytes
+
+        deal_currency = os.getenv("DEFAULT_DEAL_CURRENCY", "KES")
+        result, _raw_hash = extraction_result_from_xlsx_bytes(
+            content, result_id, deal_currency, filename
+        )
+        normalise_all(result)
+        rows = result.normalised_transactions or []
+        logger.info("[INGESTION] Parsed rows: %d", len(rows))
+    except Exception as exc:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    result.result_id = result_id
+    result.source_file = filename
     _results[result_id] = result
 
     result_dict = result.model_dump()

@@ -39,7 +39,17 @@ def _mime_for_upload(file_name: str) -> str:
     n = (file_name or "").lower()
     if n.endswith(".xlsx"):
         return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    if n.endswith(".xlsm"):
+        return "application/vnd.ms-excel.sheet.macroEnabled.12"
     return "application/pdf"
+
+
+def _ingest_upload_url(file_name: str) -> str:
+    """Excel is parsed on GCP only — dedicated route to avoid loading openpyxl on Render."""
+    n = (file_name or "").lower()
+    if n.endswith((".xlsx", ".xlsm")):
+        return f"{PARITY_INGESTION_URL}/v1/ingest/excel"
+    return f"{PARITY_INGESTION_URL}/v1/ingest/upload"
 
 
 def _parity_result_to_rows(
@@ -85,13 +95,13 @@ def parse_via_parity_ingestion(
     POST PDF or XLSX to parity-ingestion, convert result to backend rows.
     Returns (rows, raw_transaction_hash, currency_detection, analytics).
     """
-    url = f"{PARITY_INGESTION_URL}/v1/ingest/upload"
     fname = file_name or "upload.pdf"
+    url = _ingest_upload_url(fname)
     files = {"file": (fname, file_bytes, _mime_for_upload(fname))}
 
     t0 = time.perf_counter()
     try:
-        with httpx.Client(timeout=300.0) as client:
+        with httpx.Client(timeout=httpx.Timeout(600.0)) as client:
             try:
                 resp = client.post(url, files=files)
             except httpx.ReadTimeout as exc:

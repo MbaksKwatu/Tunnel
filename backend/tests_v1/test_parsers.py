@@ -1,9 +1,16 @@
 import io
+import sys
 import unittest
 from copy import deepcopy
 from pathlib import Path
 
 from openpyxl import Workbook
+
+_TUNNEL = Path(__file__).resolve().parents[2]
+_PARITY = _TUNNEL / "parity-ingestion"
+if _PARITY.is_dir() and str(_PARITY) not in sys.path:
+    sys.path.insert(0, str(_PARITY))
+from app.parsing_errors import InvalidSchemaError as XlsxInvalidSchemaError  # noqa: E402
 
 from backend.v1.parsing.xlsx_parser import (
     parse_xlsx,
@@ -71,7 +78,7 @@ class TestDeterministicParsers(unittest.TestCase):
         ws.append(["date", "description"])  # missing amount
         buf = io.BytesIO()
         wb.save(buf)
-        with self.assertRaises(InvalidSchemaError):
+        with self.assertRaises(XlsxInvalidSchemaError):
             parse_xlsx(buf.getvalue(), "doc-1", "USD")
 
     def test_equity_transacti_on_date_header_and_newline_in_date_cell(self):

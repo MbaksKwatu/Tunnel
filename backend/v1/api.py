@@ -300,6 +300,7 @@ async def upload_document(
         raw_tx_repo=repos["raw"],
         analysis_repo=repos["runs"],
     )
+    # CSV: local parse. PDF/XLSX: parity-ingestion (XLSX uses POST .../v1/ingest/excel — no openpyxl on this worker).
     background_tasks.add_task(
         ingestion.process_document_background,
         document_id=document_id,
