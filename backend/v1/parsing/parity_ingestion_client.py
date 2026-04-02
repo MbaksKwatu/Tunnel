@@ -150,6 +150,16 @@ def parse_via_parity_ingestion(
             # If we can't read JSON, keep previous behavior.
             resp.raise_for_status()
 
+        if resp.status_code >= 400:
+            detail: Any = None
+            if isinstance(result, dict):
+                detail = result.get("detail")
+            if isinstance(detail, list):
+                msg = str(detail)
+            else:
+                msg = str(detail) if detail else f"parity-ingestion HTTP {resp.status_code}"
+            raise InvalidSchemaError(msg)
+
         # If the service says unsupported but it still included transactions, prefer transactions.
         if isinstance(result, dict) and result.get("status") == "UNSUPPORTED_FORMAT":
             tentative_rows = _parity_result_to_rows(result, document_id)

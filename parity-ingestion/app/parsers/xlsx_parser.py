@@ -26,13 +26,18 @@ _EQUITY_EXCEL_COL_MAP = {
     "transaction date": "date",
     "transactio n date": "date",
     "transacti on date": "date",
+    "transac tion date": "date",
     "transactiondate": "date",
     # December 2025+ layout: ignore secondary / merged-artifact columns
     "value date": None,
     "cheque number": None,
     "remarks 1": None,
     "remarks 2": None,
+    "remarks": None,
     "narrative": "description",
+    "details": "description",
+    "transaction details": "description",
+    "description": "description",
     "particulars": "description",
     "debit": "debit",
     "credit": "credit",
@@ -56,7 +61,7 @@ def _is_blank_equity_header_cell(col: Any) -> bool:
     return False
 
 
-EQUITY_HEADER_SCAN_MAX = 20
+EQUITY_HEADER_SCAN_MAX = 35
 
 
 def _try_scan_equity_header_row(
@@ -85,15 +90,41 @@ def scan_equity_excel_header(
 
 
 def _is_equity_excel(header_row: List[Any]) -> bool:
-    cols_lower = {_normalize_equity_col_name(c) for c in header_row if c is not None}
+    cols_lower = {
+        _normalize_equity_col_name(c)
+        for c in header_row
+        if not _is_blank_equity_header_cell(c)
+    }
     equity_indicators = {
         "narrative",
+        "details",
+        "transaction details",
         "running balance",
         "transactio n date",
         "transacti on date",
+        "transac tion date",
         "transaction date",
     }
-    return bool(cols_lower & equity_indicators)
+    if cols_lower & equity_indicators:
+        return True
+    # Nov/Dec 2025 exports: sometimes "Details" replaces "Narrative" — detect by bank columns.
+    has_dc = "debit" in cols_lower and "credit" in cols_lower
+    has_bal = "running balance" in cols_lower or "balance" in cols_lower
+    has_desc = bool(
+        cols_lower
+        & {"narrative", "details", "transaction details", "description", "particulars"}
+    )
+    has_date = bool(
+        cols_lower
+        & {
+            "transaction date",
+            "transactio n date",
+            "transacti on date",
+            "transac tion date",
+            "transactiondate",
+        }
+    )
+    return has_dc and has_bal and has_desc and has_date
 
 
 def _clean_equity_date_cell(value: Any) -> Any:
