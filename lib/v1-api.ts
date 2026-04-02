@@ -1,6 +1,52 @@
-import { fetchApi } from './api'
+import { fetchApi, API_URL } from './api'
+import { createBrowserClient } from './supabase'
+import { getApiToken, setApiToken } from './auth-bridge'
 
 const BASE = '/v1'
+
+/**
+ * POST multipart to /v1 without a default JSON Content-Type.
+ * fetch() must set multipart boundary automatically — never pass Content-Type here.
+ */
+async function fetchApiFormData(
+  endpoint: string,
+  init: RequestInit & { body: FormData }
+): Promise<Response> {
+  if (!endpoint.startsWith('/v1')) {
+    throw new Error(
+      `Legacy API call blocked: "${endpoint}". All API calls must use /v1/* routes.`
+    )
+  }
+  const url = `${API_URL}${endpoint}`
+  const supabase = createBrowserClient()
+  let token = getApiToken()
+  if (!token && supabase) {
+    try {
+      const { data } = await supabase.auth.getSession()
+      token = data.session?.access_token ?? null
+      if (token) setApiToken(token)
+    } catch {
+      /* continue without auth */
+    }
+  }
+  const headers: Record<string, string> = {}
+  if (token) headers.Authorization = `Bearer ${token}`
+
+  const res = await fetch(url, { ...init, headers })
+  if (res.status === 401 && supabase && token) {
+    try {
+      const { data } = await supabase.auth.refreshSession()
+      if (data.session?.access_token) {
+        setApiToken(data.session.access_token)
+        headers.Authorization = `Bearer ${data.session.access_token}`
+        return fetch(url, { ...init, headers })
+      }
+    } catch {
+      /* return original response */
+    }
+  }
+  return res
+}
 
 export interface AccrualInput {
   accrual_revenue_cents?: number
@@ -75,7 +121,7 @@ export async function createDeal(
     form.append('accrual_period_start', accrual.accrual_period_start)
   if (accrual?.accrual_period_end)
     form.append('accrual_period_end', accrual.accrual_period_end)
-  const res = await fetchApi(`${BASE}/deals`, { method: 'POST', body: form })
+  const res = await fetchApiFormData(`${BASE}/deals`, { method: 'POST', body: form })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
@@ -89,7 +135,7 @@ export async function uploadDocument(
 }> {
   const form = new FormData()
   form.append('file', file)
-  const res = await fetchApi(`${BASE}/deals/${dealId}/documents`, {
+  const res = await fetchApiFormData(`${BASE}/deals/${dealId}/documents`, {
     method: 'POST',
     body: form,
   })
@@ -176,7 +222,7 @@ export async function uploadDocumentsBatch(
   for (const f of files) {
     form.append('files', f)
   }
-  const res = await fetchApi(`${BASE}/deals/${dealId}/documents/batch`, {
+  const res = await fetchApiFormData(`${BASE}/deals/${dealId}/documents/batch`, {
     method: 'POST',
     body: form,
   })
@@ -211,7 +257,7 @@ export async function addOverride(
   form.append('entity_id', entityId)
   form.append('new_value', newValue)
   if (note) form.append('reason', note)
-  const res = await fetchApi(`${BASE}/deals/${dealId}/overrides`, {
+  const res = await fetchApiFormData(`${BASE}/deals/${dealId}/overrides`, {
     method: 'POST',
     body: form,
   })

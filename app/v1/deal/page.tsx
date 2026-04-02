@@ -171,6 +171,7 @@ export default function V1DealPage() {
   const handleStatementDrop = useCallback(
     async (nextFile: File) => {
       if (!deal) return;
+      // Statement queue: pass the dropped File through to uploadDocument as multipart (no JSON).
       const tempId = crypto.randomUUID();
       setStatementQueue((prev) => [
         ...prev,
