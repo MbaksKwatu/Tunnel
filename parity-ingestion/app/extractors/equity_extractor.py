@@ -35,6 +35,8 @@ EQUITY_PAGE_CHUNK_SIZE = 30
 _APR_DATE_PREFIX_PAT = re.compile(r"^(\d{2})-(\d{2})-$")
 _APR_YEAR_PAT = re.compile(r"^(20\d{2})$")
 _APR_AMOUNT_PAT = re.compile(r"^[\d,]+\.\d{2}$")
+# Some statements concatenate amount+reference with no space (e.g. "1,938.00q5LCQ...")
+_APR_AMOUNT_PREFIX_PAT = re.compile(r"^([\d,]+\.\d{2})")
 _APR_DATE_X_MIN = 38
 _APR_DATE_X_MAX = 80
 _APR_NARR_X_MIN = 115
@@ -118,12 +120,16 @@ def _normalize_equity_split_date_block_lines(lines: List[str]) -> List[str]:
 
 
 def _is_equity_business_format(text: str) -> bool:
-    """Equity business account PDF: Account Statement + Debit/Credit/Running Balance columns."""
+    """Equity business account PDF: Account Statement + Debit/Credit/Running Balance columns.
+
+    pdfplumber renders the 'Running Balance' column header across two lines
+    ('Running' / 'Balance') so we check for the words independently.
+    """
     return (
         "Account Statement" in text
         and "Debit" in text
         and "Credit" in text
-        and "Running Balance" in text
+        and ("Running Balance" in text or ("Running" in text and "Balance" in text))
     )
 
 
@@ -662,15 +668,17 @@ def _run_split_date_on_pages(
                 for w in data
                 if _APR_DEBIT_X_MIN <= w["x0"] < _APR_BALANCE_X_MIN
                 and abs(w["top"] - row_top) <= 6
-                and _APR_AMOUNT_PAT.match(w["text"])
+                and _APR_AMOUNT_PREFIX_PAT.match(w["text"])
             ]
             debit_raw = None
             credit_raw = None
             for aw in amount_words:
+                m = _APR_AMOUNT_PREFIX_PAT.match(aw["text"])
+                amount_val = m.group(1) if m else aw["text"]
                 if aw["x0"] < _APR_DEBIT_CREDIT_X:
-                    debit_raw = aw["text"]
+                    debit_raw = amount_val
                 else:
-                    credit_raw = aw["text"]
+                    credit_raw = amount_val
 
             balance_words = [
                 w
