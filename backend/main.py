@@ -12,6 +12,7 @@ import os
 from dotenv import load_dotenv
 
 from v1 import api as v1_api
+from v1.ingestion.service import register_ingestion_startup
 
 load_dotenv()
 
@@ -48,6 +49,8 @@ app.add_middleware(
 
 # V1 deterministic API — only active router
 app.include_router(v1_api.router)
+
+register_ingestion_startup(app)
 
 
 @app.exception_handler(Exception)
