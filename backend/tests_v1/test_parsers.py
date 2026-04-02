@@ -13,14 +13,9 @@ from backend.v1.parsing.xlsx_parser import (
 from backend.v1.parsing.csv_parser import parse_csv
 from backend.v1.parsing.errors import InvalidSchemaError
 
-EQUITY_JAN_XLSX = Path(
-    "/Users/mbakswatu/Desktop/parity/sayuni/2025/Excel/"
-    "Sassy Cosmetics - Equity Bank - 1180279761781 - Jan 2025.xlsx"
-)
-EQUITY_FEB_XLSX = Path(
-    "/Users/mbakswatu/Desktop/parity/sayuni/2025/Excel/"
-    "Sassy Cosmetics - Equity Bank - 1180279761781 - Feb 2025.xlsx"
-)
+_FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+EQUITY_JAN_XLSX = _FIXTURES_DIR / "test_equity_jan_fixture.xlsx"
+EQUITY_FEB_XLSX = _FIXTURES_DIR / "test_equity_feb_fixture.xlsx"
 
 
 def _make_wb(rows):
@@ -107,7 +102,6 @@ class TestDeterministicParsers(unittest.TestCase):
         self.assertEqual(parsed_a, parsed_b)
         self.assertEqual(hash_a, hash_b)
 
-    @unittest.skipUnless(EQUITY_JAN_XLSX.exists(), "January Equity Excel fixture missing")
     def test_equity_excel_january_mapping(self):
         from openpyxl import load_workbook
 
@@ -120,12 +114,11 @@ class TestDeterministicParsers(unittest.TestCase):
             self.assertIn(col, mapping)
 
         rows, _, _ = parse_xlsx(EQUITY_JAN_XLSX.read_bytes(), "doc-jan", "KES")
-        self.assertEqual(len(rows), 2677)
+        self.assertEqual(len(rows), 8)
         signed = [r["signed_amount_cents"] for r in rows]
         self.assertTrue(any(v > 0 for v in signed))
         self.assertTrue(any(v < 0 for v in signed))
 
-    @unittest.skipUnless(EQUITY_FEB_XLSX.exists(), "February Equity Excel fixture missing")
     def test_equity_excel_february_mapping(self):
         from openpyxl import load_workbook
 
@@ -138,7 +131,7 @@ class TestDeterministicParsers(unittest.TestCase):
             self.assertIn(col, mapping)
 
         rows, _, _ = parse_xlsx(EQUITY_FEB_XLSX.read_bytes(), "doc-feb", "KES")
-        self.assertGreater(len(rows), 0)
+        self.assertEqual(len(rows), 8)
 
 
 if __name__ == "__main__":
