@@ -174,9 +174,6 @@ def parse_xlsx(
         header_row_num = 1
         is_equity = _is_equity_excel(header_row)
 
-    header_vals = header_row
-    print("Header scan result:", header_row_num, header_vals)
-
     if not is_equity and not read_only:
         for merged in ws.merged_cells.ranges:
             if merged.min_row == 1:
