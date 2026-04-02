@@ -60,7 +60,7 @@ def test_equity_feb_detection_and_parse():
 
 
 def _december_2025_layout_workbook_bytes() -> bytes:
-    """Synthetic December 2025 Equity layout: 6-row preamble, header row 7, 3030 data rows."""
+    """Synthetic December 2025 Equity layout: preamble, header row 7, 3030 data rows, 2 footer rows."""
     wb = Workbook()
     ws = wb.active
     for _ in range(5):
@@ -104,6 +104,43 @@ def _december_2025_layout_workbook_bytes() -> bytes:
                 "",
             ]
         )
+    # Bank footer summary rows after last transaction — no date column; must not be parsed as txns.
+    ws.append(
+        [
+            None,
+            "",
+            "",
+            "Total Credits",
+            "",
+            "",
+            None,
+            "999999.00",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ]
+    )
+    ws.append(
+        [
+            None,
+            "",
+            "",
+            "Total Debits",
+            "",
+            "",
+            "888888.00",
+            None,
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ]
+    )
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()

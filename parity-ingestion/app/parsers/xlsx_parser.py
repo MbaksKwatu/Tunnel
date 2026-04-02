@@ -7,6 +7,7 @@ from __future__ import annotations
 import io
 import math
 import re
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from openpyxl import load_workbook
@@ -136,6 +137,52 @@ def _clean_equity_date_cell(value: Any) -> Any:
     return value
 
 
+_EQUITY_FOOTER_KEYWORDS = frozenset(
+    {
+        "total credits",
+        "total debits",
+        "closing balance",
+        "opening balance",
+        "total",
+        "balance b/f",
+        "balance c/f",
+    }
+)
+
+
+def _equity_date_cell_looks_like_transaction(date_val: Any) -> bool:
+    """
+    Footer/summary rows leave the transaction date column blank. Real rows use
+    datetime/date (typical in exports), Excel serials, or parseable date strings.
+    """
+    if date_val is None:
+        return False
+    if isinstance(date_val, str):
+        return bool(date_val.strip())
+    if isinstance(date_val, (datetime, date)):
+        return True
+    if isinstance(date_val, bool):
+        return False
+    if isinstance(date_val, (int, float)):
+        return True
+    return False
+
+
+def _equity_row_matches_footer_keywords(desc_val: Any, debit_val: Any, credit_val: Any) -> bool:
+    """Bank footer lines often repeat labels in narrative or amount columns."""
+    for v in (desc_val, debit_val, credit_val):
+        if not isinstance(v, str):
+            continue
+        s = v.strip().lower()
+        if not s:
+            continue
+        if s in _EQUITY_FOOTER_KEYWORDS:
+            return True
+        if s.startswith("total ") and ("credit" in s or "debit" in s):
+            return True
+    return False
+
+
 def _equity_amount_cells_are_column_titles(debit_val: Any, credit_val: Any) -> bool:
     """
     Some Nov/Dec 2025 sheets repeat the column titles on the row immediately under
@@ -251,6 +298,8 @@ def parse_xlsx(
         date_val = get("date")
         if is_equity:
             date_val = _clean_equity_date_cell(date_val)
+            if not _equity_date_cell_looks_like_transaction(date_val):
+                continue
         desc_val = get("description")
         direction_val = get("direction") if "direction" in header_mapping else None
 
@@ -260,6 +309,8 @@ def parse_xlsx(
             debit_val = get("debit")
             credit_val = get("credit")
             if _equity_amount_cells_are_column_titles(debit_val, credit_val):
+                continue
+            if _equity_row_matches_footer_keywords(desc_val, debit_val, credit_val):
                 continue
             reference_val = get("reference")
             if reference_val not in (None, ""):
