@@ -30,6 +30,7 @@ import type {
 type GeneratePdfFn = typeof import('@/lib/generate-parity-pdf').generateParityPdf;
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'KES', 'NGN'];
+const MAX_STATEMENTS = 20;
 
 type AnalysisState = 'idle' | 'uploading' | 'polling' | 'exporting' | 'done' | 'error';
 
@@ -733,7 +734,9 @@ export default function V1DealPage() {
                     Upload all monthly statements, then run analysis once
                   </p>
                 </div>
-                <span className="text-xs font-mono text-gray-400">{statementQueue.length} of 12</span>
+                <span className="text-xs font-mono text-gray-400">
+                  {statementQueue.length} of {MAX_STATEMENTS}
+                </span>
               </div>
 
               {statementQueue.length > 0 && (
@@ -771,14 +774,16 @@ export default function V1DealPage() {
                 </div>
               )}
 
-              {statementQueue.length < 12 ? (
+              {statementQueue.length < MAX_STATEMENTS ? (
                 <BatchUpload
                   key={statementQueue.length}
                   dealId={deal.id}
                   onFileDrop={handleStatementDrop}
                 />
               ) : (
-                <div className="py-3 text-xs text-gray-400">Upload limit reached (12 of 12)</div>
+                <div className="py-3 text-xs text-gray-400">
+                  Upload limit reached ({statementQueue.length} of {MAX_STATEMENTS})
+                </div>
               )}
 
               {statementQueue.length > 0 && (
