@@ -337,7 +337,7 @@ def parse_xlsx(
         # NOTE: only skip rows that fail this check; do NOT silence amount errors on
         # rows that DO have a valid datetime date.
         if is_equity:
-            if not isinstance(date_val, datetime):
+            if not _equity_date_cell_looks_like_transaction(date_val):
                 continue
             txn_date_iso = parse_date(date_val)
 
