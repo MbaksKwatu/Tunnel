@@ -161,7 +161,13 @@ def _equity_date_cell_looks_like_transaction(date_val: Any) -> bool:
     if date_val is None:
         return False
     if isinstance(date_val, str):
-        return bool(date_val.strip())
+        s = date_val.strip()
+        # Dec 2025 injects repeated column-header rows every ~25 data rows.
+        # Gate them out before parse_date() is called. All three known
+        # Equity date-header variants are listed here.
+        if s.lower() in ('transaction date', 'transactio n date', 'transacti on date'):
+            return False
+        return bool(re.match(r'^\d{2}-\d{2}', s))
     if isinstance(date_val, (datetime, date)):
         return True
     if isinstance(date_val, bool):
