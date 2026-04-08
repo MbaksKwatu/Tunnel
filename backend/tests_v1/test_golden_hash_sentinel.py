@@ -47,7 +47,11 @@ GOLDEN_FIXTURE = [
 
 # Expected sha256_hash for GOLDEN_FIXTURE with current SCHEMA_VERSION/CONFIG_VERSION.
 # If pipeline, snapshot_engine, or config changes, this must be updated explicitly.
-GOLDEN_HASH_EXPECTED = "e61407db11e40e7af2d76d593c7084125e4c98b74a7dbb8277bdad52cad5ccbb"
+# Updated 8 April 2026 — hash changed because snapshot payload now includes
+# reconciliation and reconciliation_summary blocks from the core truth engine
+# (snapshot_engine/build_pds_payload), which deterministically changes canonical JSON.
+# Previous hash: e61407db11e40e7af2d76d593c7084125e4c98b74a7dbb8277bdad52cad5ccbb
+GOLDEN_HASH_EXPECTED = "c227a0add5e5268e9993be4a4449e0989ad0396179ea0b9299acd91f8f8d6b79"
 
 
 class TestGoldenHashSentinel(unittest.TestCase):

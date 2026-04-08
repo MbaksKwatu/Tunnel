@@ -47,7 +47,11 @@ _COMPANY_SUFFIXES = frozenset({
 
 # Reversal and refund credits — auto-excluded from revenue
 _REVERSAL_KEYWORDS = frozenset({
-    "reversal", "refund", "chargeback", "reversed", "reverse"
+    "reversal", "refund", "chargeback", "reversed", "reverse",
+    "refer to drawer", "insufficient funds", "dishonoured", "dishonored",
+    "unpaid cheque", "unpaid check", "returned cheque", "returned check",
+    "bounced", "chq rejected", "cheque rejected", "failed payment",
+    "payment failed", "rev ", "rev/", "rev-"
 })
 
 # Non-operational revenue — grants, rental, government transfers
