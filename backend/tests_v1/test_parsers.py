@@ -165,6 +165,67 @@ class TestDeterministicParsers(unittest.TestCase):
         rows, _, _ = parse_xlsx(EQUITY_FEB_XLSX.read_bytes(), "doc-feb", "KES")
         self.assertEqual(len(rows), 8)
 
+    def test_equity_excel_march_2025_cheque_number_column(self):
+        """March 2025 variant — Cheque Number column instead of Customer Reference."""
+        wb = Workbook()
+        ws = wb.active
+        ws.append(
+            [
+                "Transacti on Date",
+                "Value Date",
+                "Narrative",
+                "Transaction Reference",
+                "Debit",
+                "Credit",
+                "Running Balance",
+                "Cheque Number",
+            ]
+        )
+        ws.append(
+            [
+                datetime.datetime(2025, 3, 1),
+                datetime.datetime(2025, 3, 1),
+                "MPS 254743391150 TC12VYJ3KK DENNIS KARONJI",
+                "S8011966",
+                None,
+                40.0,
+                1917059.0,
+                None,
+            ]
+        )
+        ws.append(
+            [
+                datetime.datetime(2025, 3, 1),
+                datetime.datetime(2025, 3, 1),
+                "REJECT:007010:INSUFFICIENT FUNDS - REFER TO DRAWER",
+                "S8158141",
+                19856.0,
+                None,
+                1897203.0,
+                None,
+            ]
+        )
+        ws.append(
+            [
+                datetime.datetime(2025, 3, 1),
+                datetime.datetime(2025, 3, 1),
+                "Unpaid Cheque Commission",
+                "S8159066",
+                2400.0,
+                None,
+                1894803.0,
+                None,
+            ]
+        )
+
+        buf = io.BytesIO()
+        wb.save(buf)
+
+        rows, _, _ = parse_xlsx(buf.getvalue(), "doc-mar", "KES")
+        self.assertEqual(len(rows), 3)
+        descs = [str(r.get("raw_descriptor", "")).upper() for r in rows]
+        self.assertTrue(any("INSUFFICIENT FUNDS" in d for d in descs))
+
 
 if __name__ == "__main__":
     unittest.main()

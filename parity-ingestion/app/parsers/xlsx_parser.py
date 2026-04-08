@@ -31,7 +31,10 @@ _EQUITY_EXCEL_COL_MAP = {
     "transactiondate": "date",
     # December 2025+ layout: ignore secondary / merged-artifact columns
     "value date": None,
-    "cheque number": None,
+    "cheque number": "cheque_number",
+    "cheque no": "cheque_number",
+    "chq number": "cheque_number",
+    "chq no": "cheque_number",
     "remarks 1": None,
     "remarks 2": None,
     "remarks": None,
@@ -314,6 +317,9 @@ def parse_xlsx(
             reference_val = get("reference")
             if reference_val not in (None, ""):
                 desc_val = f"{desc_val} {reference_val}".strip()
+            cheque_num_val = get("cheque_number")
+            if cheque_num_val not in (None, ""):
+                desc_val = f"{desc_val} {cheque_num_val}".strip()
         else:
             amount_val = get("amount")
 
