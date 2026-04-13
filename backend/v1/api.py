@@ -700,6 +700,7 @@ def export(request: Request, deal_id: str):
 
     repos["txn_map"].delete_eq("deal_id", deal_id)
     repos["links"].delete_eq("deal_id", deal_id)
+    repos["entities"].delete_eq("deal_id", deal_id)
 
     run_for_db = {k: v for k, v in run.items() if k != "bank_operational_inflow_cents"}
     repos["runs"].insert_run(run_for_db)
