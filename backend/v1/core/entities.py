@@ -175,7 +175,8 @@ def build_entities(deal_id: str, transactions: List[Dict]) -> Tuple[List[Dict], 
     Returns (entities, txn_entity_map, entities_hash)
     txn_entity_map: txn_id -> entity_id
     """
-    name_to_entity: Dict[str, str] = {}
+    name_to_entity: Dict[str, str] = {}  # group_key -> entity_id
+    norm_to_entity: Dict[str, str] = {}  # normalized_name -> entity_id
     entities: List[Dict] = []
     txn_entity_map: Dict[str, str] = {}
 
@@ -187,22 +188,28 @@ def build_entities(deal_id: str, transactions: List[Dict]) -> Tuple[List[Dict], 
         # Use lower-cased display name as grouping key for deduplication
         group_key = display_name.lower().strip()
         if group_key not in name_to_entity:
-            eid = hashlib.sha256(f"{deal_id}|{group_key}".encode("utf-8")).hexdigest()
-            name_to_entity[group_key] = eid
-            # Use the normalised display_name as normalized_name so it is always
-            # unique per entity (entity deduplication is keyed on display_name).
-            # Previously this used tx.normalized_descriptor, which is the raw
-            # transaction descriptor and could collide across display_name groups.
+            # Derive normalized_name from display_name so it is always unique
+            # per entity. Using tx.normalized_descriptor (the raw descriptor) was
+            # wrong: two display_name groups could share the same descriptor value
+            # after normalization, violating the pds_entities_unique_name constraint.
             normalized_name = normalize_descriptor(display_name)
-            entities.append(
-                {
-                    "entity_id": eid,
-                    "deal_id": deal_id,
-                    "normalized_name": normalized_name,
-                    "display_name": display_name,
-                    "strong_identifiers": {},
-                }
-            )
+            if normalized_name in norm_to_entity:
+                # Two display_names that differ only in whitespace/casing collapse
+                # to the same normalized form — merge into the existing entity.
+                eid = norm_to_entity[normalized_name]
+            else:
+                eid = hashlib.sha256(f"{deal_id}|{group_key}".encode("utf-8")).hexdigest()
+                norm_to_entity[normalized_name] = eid
+                entities.append(
+                    {
+                        "entity_id": eid,
+                        "deal_id": deal_id,
+                        "normalized_name": normalized_name,
+                        "display_name": display_name,
+                        "strong_identifiers": {},
+                    }
+                )
+            name_to_entity[group_key] = eid
         txn_entity_map[tx["txn_id"]] = name_to_entity[group_key]
 
     entities_sorted = sorted(entities, key=lambda e: e["entity_id"])
