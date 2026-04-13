@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 # PostgREST often caps a single response at ~1000 rows (Supabase API default). Requesting
 # a huge limit in one call still returns at most that cap — so we must paginate.
 _SELECT_PAGE_SIZE = 1000
+SELECT_ROW_LIMIT = 50_000
 
 
 class BaseRepo:
@@ -184,6 +185,105 @@ class RawTxRepo(RawTransactionsRepository, BaseRepo):
     def list_by_document(self, document_id: str) -> Sequence[Dict[str, Any]]:
         return self.select_eq("document_id", document_id)
 
+    def get_all_transactions_for_export(
+        self, deal_id: str, year: Optional[int] = None
+    ) -> Sequence[Dict[str, Any]]:
+        """Fetch all transactions with document/entity context for CSV export."""
+        docs_res = (
+            self.client.table("pds_documents")
+            .select("id,name,storage_url")
+            .eq("deal_id", deal_id)
+            .range(0, SELECT_ROW_LIMIT - 1)
+            .execute()
+        )
+        docs = docs_res.data or []
+        if not docs:
+            return []
+
+        doc_ids = [d.get("id") for d in docs if d.get("id")]
+        if not doc_ids:
+            return []
+        doc_by_id = {d["id"]: d for d in docs if d.get("id")}
+
+        tx_rows: List[Dict[str, Any]] = []
+        offset = 0
+        while True:
+            end = offset + SELECT_ROW_LIMIT - 1
+            q = (
+                self.client.table(self.table)
+                .select("id,txn_id,txn_date,description,debit_cents,credit_cents,document_id")
+                .in_("document_id", doc_ids)
+                .range(offset, end)
+            )
+            if year is not None:
+                q = q.gte("txn_date", f"{year:04d}-01-01").lte("txn_date", f"{year:04d}-12-31")
+            res = q.execute()
+            chunk = res.data or []
+            tx_rows.extend(chunk)
+            if len(chunk) < SELECT_ROW_LIMIT:
+                break
+            offset += SELECT_ROW_LIMIT
+
+        if not tx_rows:
+            return []
+
+        tx_ids = [t.get("txn_id") for t in tx_rows if t.get("txn_id")]
+        tx_map_by_txn_id: Dict[str, Dict[str, Any]] = {}
+        if tx_ids:
+            map_res = (
+                self.client.table("pds_txn_entity_map")
+                .select("txn_id,entity_id,role")
+                .eq("deal_id", deal_id)
+                .in_("txn_id", tx_ids)
+                .range(0, SELECT_ROW_LIMIT - 1)
+                .execute()
+            )
+            for m in (map_res.data or []):
+                tid = m.get("txn_id")
+                if tid and tid not in tx_map_by_txn_id:
+                    tx_map_by_txn_id[tid] = m
+
+        entity_ids = [m.get("entity_id") for m in tx_map_by_txn_id.values() if m.get("entity_id")]
+        entity_name_by_id: Dict[str, str] = {}
+        if entity_ids:
+            entity_res = (
+                self.client.table("pds_entities")
+                .select("entity_id,display_name")
+                .eq("deal_id", deal_id)
+                .in_("entity_id", entity_ids)
+                .range(0, SELECT_ROW_LIMIT - 1)
+                .execute()
+            )
+            entity_name_by_id = {
+                e.get("entity_id"): e.get("display_name") or ""
+                for e in (entity_res.data or [])
+                if e.get("entity_id")
+            }
+
+        merged: List[Dict[str, Any]] = []
+        for tx in tx_rows:
+            tx_tid = tx.get("txn_id")
+            mapped = tx_map_by_txn_id.get(tx_tid) if tx_tid else None
+            entity_id = mapped.get("entity_id") if mapped else None
+            doc = doc_by_id.get(tx.get("document_id"))
+            merged.append(
+                {
+                    "txn_date": tx.get("txn_date") or "",
+                    "description": tx.get("description") or "",
+                    "debit_cents": tx.get("debit_cents") or 0,
+                    "credit_cents": tx.get("credit_cents") or 0,
+                    "role": (mapped or {}).get("role") or "",
+                    "entity_name": entity_name_by_id.get(entity_id or "", ""),
+                    "source_file": (doc or {}).get("name")
+                    or (doc or {}).get("storage_url")
+                    or "",
+                    "document_id": tx.get("document_id") or "",
+                }
+            )
+
+        merged.sort(key=lambda r: (str(r.get("txn_date") or ""), str(r.get("description") or "")))
+        return merged
+
 
 class TransferLinksRepo(TransferLinksRepository, BaseRepo):
     def __init__(self):
@@ -300,3 +400,16 @@ class SnapshotsRepo(SnapshotsRepository, BaseRepo):
             return None
         latest = max(rows, key=lambda r: r.get("created_at") or "")
         return decode_snapshot_row(latest)
+
+    def get_all_snapshots_for_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
+        # For snapshots, don't paginate - there are only a few per deal
+        # Explicitly select canonical_json to ensure it's included
+        rows = (
+            self.client.table(self.table)
+            .select("id, deal_id, analysis_run_id, canonical_json, sha256_hash, financial_state_hash, created_at, schema_version, config_version")
+            .eq("deal_id", deal_id)
+            .order("created_at", desc=False)
+            .execute()
+        )
+        decoded = [decode_snapshot_row(r) or r for r in (rows.data or [])]
+        return sorted(decoded, key=lambda r: r.get("created_at") or "")
