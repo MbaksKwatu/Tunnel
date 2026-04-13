@@ -31,17 +31,17 @@ def parse_date(value: Any) -> str:
     if isinstance(value, (datetime, date)):
         return value.date().isoformat() if isinstance(value, datetime) else value.isoformat()
 
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         try:
             dt = from_excel(value)
             return dt.date().isoformat() if isinstance(dt, datetime) else dt.isoformat()
         except Exception as exc:
             raise InvalidSchemaError(f"Invalid Excel date serial: {value}") from exc
 
-    s = str(value or "").strip()
+    # Strip embedded newlines and surrounding whitespace before string parsing
+    s = str(value or "").strip().replace('\n', '').replace('\r', '')
     if not s:
         raise InvalidSchemaError("Missing date value")
-
     if re.fullmatch(r"\d{1,2}[/-]\d{1,2}[/-]\d{2}$", s):
         raise InvalidSchemaError(f"Ambiguous date format: {s}")
 
