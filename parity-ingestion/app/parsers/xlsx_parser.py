@@ -167,6 +167,21 @@ def _equity_date_cell_looks_like_transaction(date_val: Any) -> bool:
         # Equity date-header variants are listed here.
         if s.lower() in ('transaction date', 'transactio n date', 'transacti on date'):
             return False
+        # Dec 2025 specific: guard against account info headers
+        if s.lower().startswith('account number:'):
+            return False
+        if s.lower().startswith('account name:'):
+            return False
+        if s.lower().startswith('currency:'):
+            return False
+        if s.lower().startswith('from date:'):
+            return False
+        if s.lower().startswith('to date:'):
+            return False
+        if s.lower().startswith('report generated on:'):
+            return False
+        if s.lower().startswith('total count:'):
+            return False
         return bool(re.match(r'^\d{2}-\d{2}', s))
     if isinstance(date_val, (datetime, date)):
         return True
