@@ -279,4 +279,4 @@ For issues and questions:
 
 ---
 
-**Built with ❤️ for investment teams who need fast, accurate financial data extraction.**
+**Built with ❤️ for investment teams who need fast, accurate financial data extraction.**# Deployment trigger
