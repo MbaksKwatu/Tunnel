@@ -189,7 +189,11 @@ def build_entities(deal_id: str, transactions: List[Dict]) -> Tuple[List[Dict], 
         if group_key not in name_to_entity:
             eid = hashlib.sha256(f"{deal_id}|{group_key}".encode("utf-8")).hexdigest()
             name_to_entity[group_key] = eid
-            normalized_name = normalize_descriptor(tx.get("normalized_descriptor", ""))
+            # Use the normalised display_name as normalized_name so it is always
+            # unique per entity (entity deduplication is keyed on display_name).
+            # Previously this used tx.normalized_descriptor, which is the raw
+            # transaction descriptor and could collide across display_name groups.
+            normalized_name = normalize_descriptor(display_name)
             entities.append(
                 {
                     "entity_id": eid,
