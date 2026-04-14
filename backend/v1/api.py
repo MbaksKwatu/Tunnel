@@ -4,6 +4,7 @@ All money fields: integer cents.  All ratios: integer basis points.
 Snapshot only on explicit POST /v1/deals/{deal_id}/export.
 """
 
+import csv
 import io
 import logging
 import time
@@ -11,6 +12,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request, BackgroundTasks, Body
+from fastapi.responses import StreamingResponse
 from pypdf import PdfWriter
 
 from .utils.pdf_merge import validate_pdf_count
@@ -773,6 +775,44 @@ def get_snapshot(request: Request, snapshot_id: str):
     if not snap:
         _error("NOT_FOUND", f"Snapshot {snapshot_id} not found")
     return {"snapshot": snap}
+
+
+@router.get("/deals/{deal_id}/export/transactions")
+def export_transactions_csv(request: Request, deal_id: str):
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+    raw = list(repos["raw"].list_by_deal(deal_id))
+    if not raw:
+        _error("NOT_FOUND", "No transactions found. Upload documents first.")
+
+    raw.sort(key=lambda r: (
+        r.get("txn_date", ""),
+        r.get("account_id", ""),
+        r.get("txn_id", ""),
+    ))
+
+    fieldnames = ["txn_date", "description", "amount_cents", "account_id", "txn_id"]
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for row in raw:
+        writer.writerow({
+            "txn_date": row.get("txn_date", ""),
+            "description": row.get("normalized_descriptor", ""),
+            "amount_cents": row.get("signed_amount_cents", ""),
+            "account_id": row.get("account_id", ""),
+            "txn_id": row.get("txn_id", ""),
+        })
+
+    content = output.getvalue()
+    filename = f"transactions_{deal_id[:8]}.csv"
+    return StreamingResponse(
+        iter([content]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ===================================================================

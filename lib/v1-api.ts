@@ -285,3 +285,7 @@ export async function askParity(
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
+
+export async function exportTransactionsCsv(dealId: string): Promise<Response> {
+  return fetchApi(`${BASE}/deals/${dealId}/export/transactions`)
+}

@@ -14,6 +14,7 @@ import {
   listOverrides,
   listDocuments,
   askParity,
+  exportTransactionsCsv,
 } from '@/lib/v1-api';
 import { BatchUpload } from '@/components/BatchUpload';
 import type {
@@ -369,6 +370,23 @@ export default function V1DealPage() {
       setOverrideError(e instanceof Error ? e.message : 'Override failed');
     } finally {
       setOverrideSaving(false);
+    }
+  };
+
+  const handleDownloadCSV = async () => {
+    if (!deal?.id) return;
+    try {
+      const res = await exportTransactionsCsv(deal.id);
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `parity_transactions_${deal.id.slice(0, 8)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('CSV export failed:', e);
     }
   };
 
@@ -1040,6 +1058,12 @@ export default function V1DealPage() {
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded"
               >
                 {analysisState === 'exporting' ? 'Saving...' : 'Save & Export Snapshot'}
+              </button>
+              <button
+                onClick={handleDownloadCSV}
+                className="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded"
+              >
+                Download transactions CSV
               </button>
               {lastExportedAt && (
                 <span className="text-xs text-gray-400">
