@@ -26,7 +26,8 @@ _LOAN_KEYWORDS = frozenset({
 # Known microfinance and bank paybill patterns for loan repayment detection
 _LOAN_REPAYMENT_PATTERNS = frozenset({
     "choice microfinance", "faulu", "kwft", "smep", "sumac",
-    "rafiki microfinance", "century microfinance", "uwezo"
+    "rafiki microfinance", "century microfinance", "uwezo",
+    "oda collection"
 })
 
 # Capital injection (positive only)
@@ -86,7 +87,7 @@ _BANK_CHARGE_KEYWORDS = frozenset({
     "pesalink fee", "funds transfer debit fee", "debit fee",
     "alert crg", "crg excise", "kplcprepaidcomm", "int.coll",
     "interest run", "interest charge", "interest collected",
-    "agency charge", "atm charge"
+    "agency charge", "atm charge", "unpaid cheque commission"
 })
 
 # Cash withdrawals — outflows only
@@ -129,6 +130,16 @@ _PESALINK_INFLOW_KEYWORDS = frozenset({
 # Named counterparty threshold — positive amounts above this get needs_review
 _LARGE_POSITIVE_THRESHOLD_CENTS = 10_000_000  # KES 100,000
 
+DEBIT_ONLY_ROLES = {
+    "bank_charge", "loan_repayment", "tax_payment", "supplier_payment",
+    "merchant_payment", "reversal_debit", "pesalink_outflow", "payroll"
+}
+
+CREDIT_ONLY_ROLES = {
+    "revenue_operational", "loan_inflow", "capital_injection",
+    "reversal_credit", "pesalink_inflow", "mpesa_inflow"
+}
+
 
 def _keyword_classify(descriptor: str, amount_cents: int) -> Optional[Tuple[str, str]]:
     """
@@ -154,6 +165,14 @@ def _keyword_classify(descriptor: str, amount_cents: int) -> Optional[Tuple[str,
     """
     d = (descriptor or "").lower()
     amt = amount_cents
+
+    # PAYED BY / PAID BY prefix → revenue_operational (must run before all other checks)
+    if d.startswith("payed by") or d.startswith("paid by"):
+        return ("revenue_operational", "keyword_match:payed_by_prefix")
+
+    # MPS credit prefix → revenue_operational
+    if d.startswith("mps") and amt > 0:
+        return ("revenue_operational", "keyword_match:mps_credit_inflow")
 
     # 1. Strip categories
     for kw in _OPENING_BALANCE_KEYWORDS:
@@ -231,6 +250,10 @@ def _keyword_classify(descriptor: str, amount_cents: int) -> Optional[Tuple[str,
             else:
                 return ("revenue_operational", f"keyword_match:{kw}:bill_payment_inbound")
 
+    # Supermarket cheque → supplier_payment (before generic cheque-to-merchant path)
+    if "chq:" in d and "supermarket" in d:
+        return ("supplier_payment", "keyword_match:supermarket_cheque")
+
     # 12. Merchant payment
     for kw in _MERCHANT_KEYWORDS:
         if kw in d:
@@ -290,13 +313,21 @@ def classify_with_reason(txn: Dict) -> Tuple[str, str]:
 
     result = _keyword_classify(descriptor, amt)
     if result is not None:
-        return result
-
-    # Fallback
-    if amt > 0:
+        role, reason = result
+    elif amt > 0:
         if amt >= _LARGE_POSITIVE_THRESHOLD_CENTS:
-            return ("needs_review", f"fallback:large_positive_no_keyword_match:amount_{amt}")
-        return ("revenue_operational", "fallback:positive_amount")
-    if amt < 0:
-        return ("supplier", "fallback:negative_amount")
-    return ("other", "fallback:zero_amount")
+            role, reason = "needs_review", f"fallback:large_positive_no_keyword_match:amount_{amt}"
+        else:
+            role, reason = "revenue_operational", "fallback:positive_amount"
+    elif amt < 0:
+        role, reason = "supplier", "fallback:negative_amount"
+    else:
+        role, reason = "other", "fallback:zero_amount"
+
+    # Direction consistency guard
+    if role in DEBIT_ONLY_ROLES and amt > 0:
+        return ("needs_review", f"direction_conflict:{role}_on_credit")
+    if role in CREDIT_ONLY_ROLES and amt < 0:
+        return ("needs_review", f"direction_conflict:{role}_on_debit")
+
+    return (role, reason)

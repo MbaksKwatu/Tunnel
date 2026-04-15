@@ -787,23 +787,44 @@ def export_transactions_csv(request: Request, deal_id: str):
     if not raw:
         _error("NOT_FOUND", "No transactions found. Upload documents first.")
 
+    # Fetch entity/txn-map for entity_name enrichment
+    entities = list(repos["entities"].list_by_deal(deal_id))
+    txn_map_rows = list(repos["txn_map"].list_by_deal(deal_id))
+    # entity_id is a SHA256 hex string; cast to str to guard against int storage variants
+    entity_name_by_id = {str(e["entity_id"]): e.get("display_name") or "" for e in entities}
+    # txn_id in stored map is UUID (Supabase after export rewrite) or text id (memory/tests)
+    txn_id_to_entity_id = {
+        str(m["txn_id"]): str(m["entity_id"])
+        for m in txn_map_rows
+        if m.get("txn_id") and m.get("entity_id")
+    }
+
     raw.sort(key=lambda r: (
         r.get("txn_date", ""),
         r.get("account_id", ""),
         r.get("txn_id", ""),
     ))
 
-    fieldnames = ["txn_date", "description", "amount_cents", "account_id", "txn_id"]
+    fieldnames = ["txn_date", "description", "amount_cents", "account_id", "txn_id", "entity_name"]
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
     writer.writeheader()
     for row in raw:
+        # Try UUID row id first (Supabase), fall back to text txn_id (memory/tests)
+        eid = (
+            txn_id_to_entity_id.get(str(row.get("id") or ""))
+            or txn_id_to_entity_id.get(str(row.get("txn_id") or ""))
+            or ""
+        )
+        entity_name = entity_name_by_id.get(str(eid), "")
+        # entity_name population: ~50%+ expected; was 0% before fix
         writer.writerow({
             "txn_date": row.get("txn_date", ""),
             "description": row.get("normalized_descriptor", ""),
             "amount_cents": row.get("signed_amount_cents", ""),
             "account_id": row.get("account_id", ""),
             "txn_id": row.get("txn_id", ""),
+            "entity_name": entity_name,
         })
 
     content = output.getvalue()
