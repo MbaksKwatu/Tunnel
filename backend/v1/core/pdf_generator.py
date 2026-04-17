@@ -518,10 +518,11 @@ def generate_pdf(
         story.append(Spacer(1, 8))
 
     # ── 05  ENTITY BREAKDOWN ──────────────────────────────────────────────────
+    _EB_CAP = 50
     story += _section_header("05  ENTITY BREAKDOWN")
     if entity_breakdown:
         eb_rows = [["Entity", "Role", "Amount", "% Total", "Txns"]]
-        for r in entity_breakdown:
+        for r in entity_breakdown[:_EB_CAP]:
             eb_rows.append([
                 _trunc(r["entity_name"], 28),
                 r["role"],
@@ -530,6 +531,13 @@ def generate_pdf(
                 str(r["txn_count"]),
             ])
         story.append(_table(eb_rows, [130, 110, 100, 56, 40], right_cols=[2, 3, 4]))
+        story.append(Spacer(1, 4))
+        if len(entity_breakdown) > _EB_CAP:
+            story.append(_p(
+                f"Showing top {_EB_CAP} entities by transaction volume. "
+                "Full entity list available in CSV export.",
+                _S_SMALL,
+            ))
         story.append(Spacer(1, 12))
     else:
         story.append(_body_line("No entity breakdown available."))
@@ -555,10 +563,14 @@ def generate_pdf(
     story.append(Spacer(1, 8))
 
     # ── 07  MONTHLY ENTITY BREAKDOWN ──────────────────────────────────────────
+    # Aggregates by role bucket per month (one row per month, not per entity).
+    # Cap to top 20 months by total volume to bound length on multi-year deals.
+    _MEB_CAP = 20
     if monthly_entity:
         story += _section_header("07  MONTHLY ENTITY BREAKDOWN")
+        meb_display = monthly_entity[:_MEB_CAP]
         meb_rows = [["Month", "Revenue In", "Suppliers", "Payroll", "Loan Repmt", "Tax"]]
-        for row in monthly_entity:
+        for row in meb_display:
             meb_rows.append([
                 row["month"],
                 _fmt_cents(row["revenue_in_cents"], currency),
@@ -568,9 +580,16 @@ def generate_pdf(
                 _fmt_cents(row["tax_cents"], currency)             if row["tax_cents"]            > 0 else "—",
             ])
         story.append(_table(meb_rows, [55, 95, 95, 82, 86, 86], right_cols=[1, 2, 3, 4, 5]))
+        story.append(Spacer(1, 4))
+        if len(monthly_entity) > _MEB_CAP:
+            story.append(_p(
+                f"Showing first {_MEB_CAP} months. Full breakdown available in CSV export.",
+                _S_SMALL,
+            ))
         story.append(Spacer(1, 12))
 
     # ── 08  ITEMS REQUIRING REVIEW ────────────────────────────────────────────
+    _REV_CAP = 100
     if review_ents:
         story += _section_header("08  ITEMS REQUIRING REVIEW")
         count = len(review_ents)
@@ -580,7 +599,7 @@ def generate_pdf(
         ))
         story.append(Spacer(1, 4))
         rev_rows = [["Entity", "Flagged As", "Amount", "Action Required"]]
-        for r in review_ents:
+        for r in review_ents[:_REV_CAP]:
             if r["role"] == "loan_inflow":
                 action = "VERIFY — possible loan disbursement"
             elif r["role"] == "capital_injection":
@@ -594,6 +613,9 @@ def generate_pdf(
                 action,
             ])
         story.append(_table(rev_rows, [140, 90, 95, 175], right_cols=[2]))
+        story.append(Spacer(1, 4))
+        if count > _REV_CAP:
+            story.append(_p(f"Showing first {_REV_CAP} items requiring review.", _S_SMALL))
         story.append(Spacer(1, 12))
 
     # ── 09  MONTHLY CASHFLOW ──────────────────────────────────────────────────
