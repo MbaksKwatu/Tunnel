@@ -627,10 +627,10 @@ def _snapshot_for_public_response(snapshot: Optional[Dict[str, Any]]) -> Optiona
 
 
 @router.post("/deals/{deal_id}/export")
-def export(request: Request, deal_id: str):
+def export(request: Request, deal_id: str, force: bool = False):
     started = time.perf_counter()
     stage = "EXPORT_START"
-    logger.info("[EXPORT] stage=%s deal_id=%s", stage, deal_id)
+    logger.info("[EXPORT] stage=%s deal_id=%s force=%s", stage, deal_id, force)
     repos = _repos(request)
     deal = repos["deals"].get_deal(deal_id)
     if not deal:
@@ -647,12 +647,13 @@ def export(request: Request, deal_id: str):
     if not raw:
         _error("BAD_REQUEST", "No transactions to export. Upload documents first.", next_action="upload_new_file")
 
-    # Short-circuit: return existing snapshot if no new docs/overrides since last export
+    # Short-circuit: return existing snapshot if no new docs/overrides since last export.
+    # Skipped when force=True to rebuild the snapshot unconditionally.
     latest_snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
     latest_doc_at = repos["documents"].get_latest_update_at(deal_id)
     latest_override_at = repos["overrides"].get_latest_update_at(deal_id) or ""
     snap_created_at = (latest_snapshot or {}).get("created_at") or ""
-    if (
+    if not force and (
         latest_snapshot
         and snap_created_at
         and (not latest_doc_at or snap_created_at >= latest_doc_at)
