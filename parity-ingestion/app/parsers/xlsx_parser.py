@@ -167,28 +167,13 @@ def _equity_date_cell_looks_like_transaction(date_val: Any) -> bool:
         # Equity date-header variants are listed here.
         if s.lower() in ('transaction date', 'transactio n date', 'transacti on date'):
             return False
-        # Dec 2025 specific: guard against account info headers
-        if s.lower().startswith('account number:'):
-            return False
-        if s.lower().startswith('account name:'):
-            return False
-        if s.lower().startswith('currency:'):
-            return False
-        if s.lower().startswith('from date:'):
-            return False
-        if s.lower().startswith('to date:'):
-            return False
-        if s.lower().startswith('report generated on:'):
-            return False
-        if s.lower().startswith('total count:'):
-            return False
         return bool(re.match(r'^\d{2}-\d{2}', s))
     if isinstance(date_val, (datetime, date)):
         return True
     if isinstance(date_val, bool):
         return False
     if isinstance(date_val, (int, float)):
-        return True
+        return 40000 <= date_val <= MAX_VALID_EXCEL_SERIAL
     return False
 
 
@@ -265,6 +250,29 @@ def _header_map(header_row: List[Any]) -> Dict[str, int]:
 def _detect_additional_header(second_row: List[Any]) -> bool:
     lowered = {normalize_header(c) for c in second_row if c not in (None, "")}
     return bool(REQUIRED_HEADERS & lowered)
+
+
+def _is_valid_transaction_date(date_str: str) -> bool:
+    """Reject dates more than 5 years from today — parser artifact guard."""
+    try:
+        parsed = date.fromisoformat(date_str)
+        max_allowed = date.today().replace(year=date.today().year + 5)
+        return parsed <= max_allowed
+    except (ValueError, TypeError):
+        return False
+
+
+# Excel date serial guard — rejects absurd serials before conversion
+MAX_VALID_EXCEL_SERIAL = 54789  # Dec 31, 2049 — well beyond any real transaction date
+
+
+def _is_valid_excel_serial(value) -> bool:
+    """Return False for numeric values that cannot be valid Excel date serials."""
+    try:
+        numeric = float(value)
+        return 0 < numeric <= MAX_VALID_EXCEL_SERIAL
+    except (TypeError, ValueError):
+        return False
 
 
 def parse_xlsx(
@@ -360,7 +368,17 @@ def parse_xlsx(
         if is_equity:
             if not _equity_date_cell_looks_like_transaction(date_val):
                 continue
-            txn_date_iso = parse_date(date_val)
+            # Extra serial guard — rejects absurd float serials before parse_date conversion
+            if isinstance(date_val, (int, float)) and not _is_valid_excel_serial(date_val):
+                continue  # skip row — date serial is a parser artifact
+            try:
+                txn_date_iso = parse_date(date_val)
+            except Exception as exc:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "[PARSER] Skipping row — date conversion failed: %s", exc
+                )
+                continue
 
         try:
             if is_equity:
@@ -403,6 +421,8 @@ def parse_xlsx(
             "account_id": "default",
         }
         row_obj["txn_id"] = compute_txn_id(row_obj, document_id)
+        if not _is_valid_transaction_date(row_obj["txn_date"]):
+            continue  # skip this row — date is a parser artifact
         rows.append(row_obj)
 
     wb.close()
