@@ -24,7 +24,8 @@ from .config import SCHEMA_VERSION, CONFIG_VERSION, GIT_COMMIT, BUILD_TIMESTAMP,
 from .ingestion.service import IngestionService
 from .parsing.errors import CurrencyMismatchError, InvalidSchemaError
 from .core.pipeline import run_pipeline
-from .core.snapshot_engine import build_pds_payload, export_snapshot
+from .core.snapshot_engine import build_pds_payload, export_snapshot, decompress_canonical_json_if_needed
+from .core.pdf_generator import generate_pdf as _generate_snapshot_pdf
 
 router = APIRouter(prefix="/v1", tags=["v1"])
 
@@ -833,6 +834,34 @@ def export_transactions_csv(request: Request, deal_id: str):
     return StreamingResponse(
         iter([content]),
         media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/deals/{deal_id}/snapshot/pdf")
+def get_snapshot_pdf(request: Request, deal_id: str):
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+    snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    if not snapshot:
+        _error("NOT_FOUND", "No snapshot found for this deal. Run POST /export first.")
+    stored_cj = snapshot.get("canonical_json") or ""
+    if not stored_cj:
+        _error("INTERNAL", "Snapshot exists but canonical_json is empty.")
+    import json
+    canonical = json.loads(decompress_canonical_json_if_needed(stored_cj))
+    snap_meta = {
+        "id":                   snapshot.get("id"),
+        "sha256_hash":          snapshot.get("sha256_hash"),
+        "financial_state_hash": snapshot.get("financial_state_hash"),
+    }
+    pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta)
+    filename = f"parity_snapshot_{deal_id}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
