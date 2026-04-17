@@ -269,3 +269,58 @@ def test_classify_returns_string():
     role = classify(txn("mpesa payment", 100000))
     assert isinstance(role, str)
     assert len(role) > 0
+
+
+# ── SESSION 7: CLASSIFIER GAP FIXES ──────────────────────────────────────────
+
+def test_eazzybiz_debit_supplier_payment():
+    role, reason = classify_with_reason(txn("07722000000 eazzybiz trsf mpesa", -500000))
+    assert role == "supplier_payment"
+    assert "eazzybiz_b2c_outflow" in reason
+
+def test_eazzybiz_credit_not_caught():
+    # EazzyBiz credit must NOT be classified as supplier_payment
+    role, _ = classify_with_reason(txn("eazzybiz trsf mpesa", 500000))
+    assert role != "supplier_payment"
+
+def test_ussd_mpesa_debit_supplier_payment():
+    role, reason = classify_with_reason(txn("ussd/mpesa/2547 0722123456/ref james kariuki abc", -150000))
+    assert role == "supplier_payment"
+    assert "ussd_mpesa_outflow" in reason
+
+def test_ussd_mpesa_credit_not_caught():
+    # USSD MPESA credit must NOT hit the debit rule
+    role, _ = classify_with_reason(txn("ussd/mpesa/2547 0722123456/ref james kariuki abc", 150000))
+    assert role != "supplier_payment"
+
+def test_od_sweep_credit_loan_inflow():
+    role, reason = classify_with_reason(txn("sweep trf from: 118od00002479", 533294))
+    assert role == "loan_inflow"
+    assert "od_sweep_credit" in reason
+
+def test_od_sweep_debit_not_caught():
+    # Sweep debit must NOT be classified as loan_inflow
+    role, _ = classify_with_reason(txn("sweep trf from: 118od00002479", -533294))
+    assert role != "loan_inflow"
+
+def test_cheque_credit_revenue_operational():
+    role, reason = classify_with_reason(txn("chq:094038 magunas super stores", 194838))
+    assert role == "revenue_operational"
+    assert "cheque_receipt_credit" in reason
+
+def test_cheque_supermarket_debit_supplier_payment():
+    # Existing supermarket debit rule must still fire
+    role, reason = classify_with_reason(txn("chq:000731 silmatt supermarket s8627174", -45000))
+    assert role == "supplier_payment"
+    assert "supermarket_cheque" in reason
+
+def test_ussd_bulk_credit_revenue_operational():
+    role, reason = classify_with_reason(txn("ussd/chajay & sons limited/", 260000))
+    assert role == "revenue_operational"
+    assert "ussd_credit_inflow" in reason
+
+def test_ussd_mpesa_debit_takes_priority_over_ussd_credit_rule():
+    # ussd/mpesa debit must exit at Step 2, not fall through to USSD credit rule
+    role, reason = classify_with_reason(txn("ussd/mpesa/2547 0722123456/ref name abc", -150000))
+    assert role == "supplier_payment"
+    assert "ussd_mpesa_outflow" in reason

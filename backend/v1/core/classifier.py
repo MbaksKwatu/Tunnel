@@ -250,6 +250,26 @@ def _keyword_classify(descriptor: str, amount_cents: int) -> Optional[Tuple[str,
             else:
                 return ("revenue_operational", f"keyword_match:{kw}:bill_payment_inbound")
 
+    # EazzyBiz B2C bulk MPESA outflow → supplier_payment (direction-guarded)
+    if "eazzybiz" in d and amt < 0:
+        return ("supplier_payment", "keyword_match:eazzybiz_b2c_outflow")
+
+    # USSD MPESA individual send → supplier_payment (direction-guarded)
+    if d.startswith("ussd/mpesa") and amt < 0:
+        return ("supplier_payment", "keyword_match:ussd_mpesa_outflow")
+
+    # USSD bulk credit from named company → revenue_operational
+    if d.startswith("ussd/") and amt > 0:
+        return ("revenue_operational", "keyword_match:ussd_credit_inflow")
+
+    # OD sweep credit → loan_inflow (direction-guarded)
+    if "sweep trf" in d and amt > 0:
+        return ("loan_inflow", "keyword_match:od_sweep_credit")
+
+    # Cheque receipt (credit) → revenue_operational (must come before supermarket debit rule)
+    if "chq:" in d and amt > 0:
+        return ("revenue_operational", "keyword_match:cheque_receipt_credit")
+
     # Supermarket cheque → supplier_payment (before generic cheque-to-merchant path)
     if "chq:" in d and "supermarket" in d:
         return ("supplier_payment", "keyword_match:supermarket_cheque")
