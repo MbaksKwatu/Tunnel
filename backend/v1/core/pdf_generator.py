@@ -141,11 +141,29 @@ def _table(
 # ---------------------------------------------------------------------------
 
 def _build_txn_role_map(canonical: Dict[str, Any]) -> Dict[str, str]:
-    """txn_id (sha256 or UUID) → role string."""
+    """UUID (pds_raw_transactions.id) → role string.
+
+    After export, txn_entity_map.txn_id is rewritten to the row UUID.
+    Transaction objects carry both id (UUID) and txn_id (sha256 hash).
+    Keying by UUID lets _role_for_txn() match via t["id"].
+    """
     return {
         str(m.get("txn_id") or ""): (m.get("role") or "")
         for m in canonical.get("txn_entity_map", [])
     }
+
+
+def _role_for_txn(txn_role_map: Dict[str, str], t: Dict[str, Any]) -> str:
+    """Return the classified role for a transaction dict.
+
+    Tries t["id"] (UUID — matches post-export map keys) first, then
+    t["txn_id"] (sha256 — fallback for in-memory / test data).
+    """
+    return (
+        txn_role_map.get(str(t.get("id") or ""))
+        or txn_role_map.get(str(t.get("txn_id") or ""))
+        or ""
+    )
 
 
 def _compute_entity_breakdown(canonical: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -253,7 +271,8 @@ def _compute_credit_scoring_inputs(
     else:
         rev_growth_bps = 0
 
-    # Loan repayment burden (% of total outflow)
+    # Loan repayment burden: numerator = loan_repayment outflows only
+    # denominator = all outflows (signed_amount_cents < 0)
     total_out = sum(
         abs(int(t.get("signed_amount_cents", 0)))
         for t in transactions
@@ -262,7 +281,7 @@ def _compute_credit_scoring_inputs(
     loan_out = sum(
         abs(int(t.get("signed_amount_cents", 0)))
         for t in transactions
-        if txn_role.get(str(t.get("txn_id") or "")) in _LOAN_ROLES
+        if _role_for_txn(txn_role, t) == "loan_repayment"
         and int(t.get("signed_amount_cents", 0)) < 0
     )
     loan_burden_bps = int(loan_out / total_out * 10_000) if total_out > 0 else 0
@@ -271,7 +290,7 @@ def _compute_credit_scoring_inputs(
     payroll_months = {
         str(t.get("txn_date") or "")[:7]
         for t in transactions
-        if txn_role.get(str(t.get("txn_id") or "")) in _PAYROLL_ROLES
+        if _role_for_txn(txn_role, t) in _PAYROLL_ROLES
         and len(str(t.get("txn_date") or "")) >= 7
     }
     n_payroll = len(payroll_months)
@@ -289,7 +308,7 @@ def _compute_credit_scoring_inputs(
     tax_months: set = set()
     tax_total = 0
     for t in transactions:
-        if txn_role.get(str(t.get("txn_id") or "")) in _TAX_ROLES:
+        if _role_for_txn(txn_role, t) in _TAX_ROLES:
             ds = str(t.get("txn_date") or "")
             if len(ds) >= 7:
                 tax_months.add(ds[:7])
@@ -334,7 +353,7 @@ def _compute_monthly_entity_breakdown(canonical: Dict[str, Any]) -> List[Dict[st
             continue
         month = ds[:7]
         amt  = int(t.get("signed_amount_cents", 0))
-        role = txn_role.get(str(t.get("txn_id") or ""))
+        role = _role_for_txn(txn_role, t)
         if   role in _REVENUE_ROLES  and amt > 0: buckets[month]["revenue_in_cents"]    += amt
         elif role in _SUPPLIER_ROLES and amt < 0: buckets[month]["suppliers_cents"]      += abs(amt)
         elif role in _PAYROLL_ROLES  and amt < 0: buckets[month]["payroll_cents"]         += abs(amt)
@@ -430,7 +449,7 @@ def generate_pdf(
     payroll_total  = sum(
         abs(int(t.get("signed_amount_cents", 0)))
         for t in canonical.get("transactions", [])
-        if txn_role_map.get(str(t.get("txn_id") or "")) in _PAYROLL_ROLES
+        if _role_for_txn(txn_role_map, t) in _PAYROLL_ROLES
         and int(t.get("signed_amount_cents", 0)) < 0
     )
     largest_rev_pct = max((r["pct_of_total"] for r in top_revenue), default=0.0)
