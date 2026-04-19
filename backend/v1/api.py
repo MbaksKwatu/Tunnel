@@ -800,6 +800,7 @@ def export_transactions_csv(request: Request, deal_id: str):
         for m in txn_map_rows
         if m.get("txn_id") and m.get("entity_id")
     }
+    txn_id_to_role = {str(m["txn_id"]): m.get("role", "") for m in txn_map_rows}
 
     raw.sort(key=lambda r: (
         r.get("txn_date", ""),
@@ -807,7 +808,7 @@ def export_transactions_csv(request: Request, deal_id: str):
         r.get("txn_id", ""),
     ))
 
-    fieldnames = ["txn_date", "description", "amount_cents", "account_id", "txn_id", "entity_name"]
+    fieldnames = ["txn_date", "description", "amount_cents", "account_id", "txn_id", "entity_name", "role"]
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
     writer.writeheader()
@@ -820,6 +821,11 @@ def export_transactions_csv(request: Request, deal_id: str):
         )
         entity_name = entity_name_by_id.get(str(eid), "")
         # entity_name population: ~50%+ expected; was 0% before fix
+        role = (
+            txn_id_to_role.get(str(row.get("id", "")))
+            or txn_id_to_role.get(str(row.get("txn_id", "")))
+            or ""
+        )
         writer.writerow({
             "txn_date": row.get("txn_date", ""),
             "description": row.get("normalized_descriptor", ""),
@@ -827,6 +833,7 @@ def export_transactions_csv(request: Request, deal_id: str):
             "account_id": row.get("account_id", ""),
             "txn_id": row.get("txn_id", ""),
             "entity_name": entity_name,
+            "role": role,
         })
 
     content = output.getvalue()
