@@ -8,6 +8,7 @@ import {
   getLatestEnrichment,
   createEnrichment,
   finalizeEnrichment,
+  downloadEnrichedPdf,
   type DealTransaction,
   type ClassificationOverride,
   type CustomFlag,
@@ -297,6 +298,7 @@ export default function ParityReviewPage() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
   const [saveError, setSaveError] = useState('');
+  const [downloading, setDownloading] = useState(false);
   const [userEmail, setUserEmail] = useState('');
 
   // Auth guard
@@ -387,6 +389,27 @@ export default function ParityReviewPage() {
       setSaveError(String(e));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!dealId) return;
+    setDownloading(true);
+    setSaveError('');
+    try {
+      const res = await downloadEnrichedPdf(dealId, existingEnrichment?.id);
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `parity_${dealId.slice(0, 8)}_enriched.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setSaveError(String(e));
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -639,6 +662,13 @@ export default function ParityReviewPage() {
                 className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 rounded font-medium"
               >
                 {saving ? 'Saving…' : 'Finalize for export'}
+              </button>
+              <button
+                onClick={handleDownloadPdf}
+                disabled={downloading}
+                className="px-5 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 rounded font-medium"
+              >
+                {downloading ? 'Generating…' : 'Download enriched PDF'}
               </button>
               {saveMsg && <span className="text-sm text-green-400">{saveMsg}</span>}
               {saveError && <span className="text-sm text-red-400">{saveError}</span>}

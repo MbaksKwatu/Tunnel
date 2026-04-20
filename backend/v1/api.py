@@ -919,6 +919,56 @@ def get_snapshot_pdf(request: Request, deal_id: str):
     )
 
 
+@router.get("/deals/{deal_id}/snapshot/pdf/enriched")
+def get_enriched_pdf(request: Request, deal_id: str, enrichment_id: Optional[str] = None):
+    """
+    Export PDF with Section A (base analytics) + Section B (analyst enrichment).
+    Uses the latest final enrichment unless enrichment_id is specified.
+    """
+    repos = _repos(request)
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    if not snapshot:
+        _error("NOT_FOUND", "No snapshot found. Run POST /export first.")
+
+    # Resolve enrichment
+    if enrichment_id:
+        enrichment = repos["enrichments"].get_enrichment(enrichment_id)
+        if not enrichment:
+            _error("NOT_FOUND", f"Enrichment {enrichment_id} not found")
+    else:
+        enrichment = repos["enrichments"].get_latest_for_snapshot(snapshot["id"])
+
+    # Hydrate enrichment with overrides + flags if found
+    if enrichment:
+        overrides = list(repos["cls_overrides"].list_by_enrichment(enrichment["id"]))
+        flags = list(repos["custom_flags"].list_by_enrichment(enrichment["id"]))
+        enrichment = {**enrichment, "overrides": overrides, "flags": flags}
+
+    stored_cj = snapshot.get("canonical_json") or ""
+    if not stored_cj:
+        _error("INTERNAL", "Snapshot canonical_json is empty.")
+
+    import json as _json
+    canonical = _json.loads(decompress_canonical_json_if_needed(stored_cj))
+    snap_meta = {
+        "id":                   snapshot.get("id"),
+        "sha256_hash":          snapshot.get("sha256_hash"),
+        "financial_state_hash": snapshot.get("financial_state_hash"),
+    }
+
+    pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta, enrichment)
+    suffix = "_enriched" if enrichment else ""
+    filename = f"parity_{deal_id}{suffix}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # ===================================================================
 # Analyst Enrichment
 # ===================================================================

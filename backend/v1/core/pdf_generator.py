@@ -398,12 +398,209 @@ class _NumberedCanvas(Canvas):
 
 
 # ---------------------------------------------------------------------------
+# FX conversion helpers
+# ---------------------------------------------------------------------------
+
+_FX_CURRENCY_CODES = frozenset({"EUR", "USD", "GBP", "CHF", "JPY", "CNY", "AED", "ZAR"})
+_FX_CONVERSION_KEYWORDS = frozenset({"CONVERSION TRANSFER", "FX CONVERSION", "CURRENCY CONVERSION", "CONVERSION"})
+
+
+def _is_fx_conversion_desc(desc: str) -> bool:
+    d = desc.upper()
+    has_kw = any(kw in d for kw in _FX_CONVERSION_KEYWORDS)
+    has_cc = any(cc in d for cc in _FX_CURRENCY_CODES)
+    if has_kw and has_cc:
+        return True
+    if has_cc and ("TO KSH" in d or "TO KES" in d):
+        return True
+    import re
+    if has_cc and re.search(r'AT\s+\d+\.?\d*', d) and ("TRF FROM" in d or "TRANSFER FROM" in d):
+        return True
+    return False
+
+
+def _compute_fx_metrics(canonical: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute FX conversion metrics from canonical JSON."""
+    txn_role = _build_txn_role_map(canonical)
+    transactions = canonical.get("transactions", [])
+
+    fx_txns = [
+        t for t in transactions
+        if _role_for_txn(txn_role, t) == "currency_conversion"
+        or _is_fx_conversion_desc(str(t.get("description") or t.get("normalized_descriptor") or ""))
+    ]
+
+    if not fx_txns:
+        return {"count": 0}
+
+    total_fx = sum(abs(int(t.get("signed_amount_cents", 0))) for t in fx_txns)
+    largest  = max(abs(int(t.get("signed_amount_cents", 0))) for t in fx_txns)
+    months   = sorted({
+        str(t.get("txn_date") or "")[:7]
+        for t in fx_txns
+        if len(str(t.get("txn_date") or "")) >= 7
+    })
+    total_in = sum(int(t.get("signed_amount_cents", 0)) for t in transactions if int(t.get("signed_amount_cents", 0)) > 0)
+    fx_pct   = (total_fx / total_in * 100) if total_in > 0 else 0.0
+
+    return {
+        "count":       len(fx_txns),
+        "total_cents": total_fx,
+        "largest_cents": largest,
+        "months":      months,
+        "pct_of_inflow": fx_pct,
+    }
+
+
+def _add_fx_section(story: List[Any], fx: Dict[str, Any], currency: str) -> None:
+    """Append FX conversion section to story. No-op if no conversions."""
+    if not fx.get("count"):
+        return
+    story += _section_header("FX  FOREIGN EXCHANGE CONVERSIONS")
+    fx_rows = [
+        ["Metric", "Value", "Note"],
+        ["Total Converted",
+         _fmt_cents(fx["total_cents"], currency),
+         f"{fx['count']} transactions"],
+        ["Largest Conversion",
+         _fmt_cents(fx["largest_cents"], currency),
+         "Single transaction"],
+        ["As % of Inflow",
+         f"{fx['pct_of_inflow']:.1f}%",
+         "Of total credit inflow"],
+        ["Active Months",
+         ", ".join(fx["months"]) if fx["months"] else "—",
+         f"{len(fx['months'])} months"],
+    ]
+    story.append(_table(fx_rows, [140, 120, BODY_W - 260], right_cols=[1]))
+    story.append(Spacer(1, 4))
+    story.append(_p(
+        "<b>Note:</b> Currency conversions are excluded from operational revenue "
+        "calculations. Verify that conversion source represents export proceeds "
+        "or legitimate foreign currency inflows.",
+        _S_SMALL,
+    ))
+    story.append(Spacer(1, 12))
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
+def _add_enrichment_sections(
+    story: List[Any],
+    enrichment: Dict[str, Any],
+    currency: str,
+) -> None:
+    """Append Section B: Analyst Enrichment pages to story."""
+    from reportlab.platypus import PageBreak
+
+    story.append(PageBreak())
+    story.append(_p("SECTION B — ANALYST ENRICHMENT", _S_TITLE))
+    story.append(Spacer(1, 4))
+    story.append(_p(
+        "This section records analyst-added context layered on top of the deterministic base snapshot. "
+        "The base snapshot (Section A) is immutable and was not modified.",
+        _S_SMALL,
+    ))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.black, spaceAfter=8))
+
+    # B1 — Enrichment provenance
+    story += _section_header("B1  ENRICHMENT PROVENANCE")
+    for label, value in [
+        ("enrichment_id:",    enrichment.get("id") or "—"),
+        ("enriched_hash:",    enrichment.get("enriched_hash") or "—"),
+        ("base_snapshot_id:", enrichment.get("base_snapshot_id") or "—"),
+        ("analyst:",          enrichment.get("analyst_name") or enrichment.get("analyst_id") or "—"),
+        ("created:",          str(enrichment.get("created_at") or "—")[:19]),
+        ("status:",           "FINAL" if enrichment.get("is_final") else "DRAFT"),
+    ]:
+        story.append(_p(f"<b>{label}</b> {value}", _S_SMALL))
+        story.append(Spacer(1, 2))
+    if enrichment.get("enrichment_reason"):
+        story.append(Spacer(1, 4))
+        story.append(_body_line(f"Reason: {enrichment['enrichment_reason']}"))
+    story.append(Spacer(1, 8))
+
+    # B2 — Classification overrides
+    overrides = enrichment.get("overrides") or []
+    story += _section_header(f"B2  CLASSIFICATION OVERRIDES ({len(overrides)})")
+    if not overrides:
+        story.append(_body_line("None."))
+    else:
+        ov_rows = [["Transaction ID", "Original Role", "Override Role", "Reason"]]
+        for ov in overrides:
+            txn_id = str(ov.get("txn_id") or "")
+            ov_rows.append([
+                _trunc(txn_id, 20),
+                ov.get("original_role") or "—",
+                ov.get("override_role") or "—",
+                _trunc(ov.get("override_reason") or "—", 40),
+            ])
+        story.append(_table(ov_rows, [110, 100, 100, BODY_W - 310], right_cols=[]))
+    story.append(Spacer(1, 8))
+
+    # B3 — Custom flags
+    flags = enrichment.get("flags") or []
+    story += _section_header(f"B3  CUSTOM THRESHOLD ALERTS ({len(flags)})")
+    if not flags:
+        story.append(_body_line("None defined."))
+    else:
+        fl_rows = [["Flag", "Severity", "Metric / Threshold", "Result"]]
+        for f in flags:
+            criteria = f.get("criteria") or {}
+            threshold_str = f"{criteria.get('threshold_cents', 0) / 100:,.0f} {currency}"
+            cmp_map = {
+                "less_than": "<", "less_than_or_equal": "≤",
+                "greater_than": ">", "greater_than_or_equal": "≥",
+            }
+            cmp_sym = cmp_map.get(criteria.get("comparison", ""), criteria.get("comparison", ""))
+            metric_str = f"{criteria.get('metric', '?')} {cmp_sym} {threshold_str}"
+            triggered = f.get("triggered", False)
+            count = f.get("trigger_count", 0)
+            result_str = f"TRIGGERED ({count}×)" if triggered else "OK"
+            fl_rows.append([
+                _trunc(f.get("flag_description") or f.get("flag_name") or "—", 30),
+                (f.get("flag_severity") or "—").upper(),
+                metric_str,
+                result_str,
+            ])
+        story.append(_table(fl_rows, [130, 60, 160, BODY_W - 350], right_cols=[]))
+
+        # Detail rows for triggered flags
+        triggered_flags = [f for f in flags if f.get("triggered")]
+        if triggered_flags:
+            story.append(Spacer(1, 6))
+            story.append(_body_line("Triggered flag details:"))
+            for f in triggered_flags:
+                story.append(Spacer(1, 4))
+                story.append(_body_line(f"  {f.get('flag_name')} — {f.get('trigger_count', 0)} breach(es):"))
+                details = f.get("trigger_details") or []
+                for d in details[:10]:
+                    month_or_date = d.get("month") or d.get("date") or "?"
+                    bal = d.get("balance_cents") or d.get("amount_cents")
+                    val_str = (_fmt_cents(bal, currency) if bal is not None else "")
+                    story.append(_body_line(f"    {month_or_date}  {val_str}"))
+                if len(details) > 10:
+                    story.append(_p(f"    … and {len(details) - 10} more", _S_SMALL))
+    story.append(Spacer(1, 8))
+
+    # B4 — Analyst narrative
+    narrative = (enrichment.get("narrative") or "").strip()
+    story += _section_header("B4  ANALYST NARRATIVE")
+    if narrative:
+        for para in narrative.split("\n\n"):
+            story.append(_body_line(para.strip()))
+            story.append(Spacer(1, 4))
+    else:
+        story.append(_body_line("No narrative provided."))
+    story.append(Spacer(1, 8))
+
 
 def generate_pdf(
     canonical: Dict[str, Any],
     snapshot_meta: Optional[Dict[str, Any]] = None,
+    enrichment: Optional[Dict[str, Any]] = None,
 ) -> bytes:
     """
     Generate Parity snapshot PDF.
@@ -430,6 +627,7 @@ def generate_pdf(
     monthly_cashflow  = _compute_monthly_cashflow(canonical)
     csi               = _compute_credit_scoring_inputs(canonical, monthly_cashflow)
     monthly_entity    = _compute_monthly_entity_breakdown(canonical)
+    fx_metrics        = _compute_fx_metrics(canonical)
 
     currency  = canonical.get("currency", "KES")
     deal_id   = canonical.get("deal_id", "—")
@@ -581,6 +779,9 @@ def generate_pdf(
     story.append(_body_line(f"Largest revenue entity %:       {largest_rev_pct:.1f}%"))
     story.append(Spacer(1, 8))
 
+    # ── FX  FOREIGN EXCHANGE CONVERSIONS (conditional) ───────────────────────
+    _add_fx_section(story, fx_metrics, currency)
+
     # ── 07  MONTHLY ENTITY BREAKDOWN ──────────────────────────────────────────
     # Aggregates by role bucket per month (one row per month, not per entity).
     # Cap to top 20 months by total volume to bound length on multi-year deals.
@@ -687,6 +888,10 @@ def generate_pdf(
         story.append(_p(f"<b>{label}</b> {value}", _S_SMALL))
         story.append(Spacer(1, 3))
     story.append(Spacer(1, 12))
+
+    # ── SECTION B  ANALYST ENRICHMENT (optional) ──────────────────────────────
+    if enrichment:
+        _add_enrichment_sections(story, enrichment, currency)
 
     doc.build(story, canvasmaker=_NumberedCanvas)
     return buf.getvalue()

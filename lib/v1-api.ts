@@ -410,3 +410,11 @@ export async function evaluateFlags(
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
+
+export async function downloadEnrichedPdf(
+  dealId: string,
+  enrichmentId?: string
+): Promise<Response> {
+  const params = enrichmentId ? `?enrichment_id=${enrichmentId}` : ''
+  return fetchApi(`${BASE}/deals/${dealId}/snapshot/pdf/enriched${params}`)
+}
