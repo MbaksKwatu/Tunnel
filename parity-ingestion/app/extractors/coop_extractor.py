@@ -25,23 +25,22 @@ def detect_coop(file_path: str) -> bool:
                 if t:
                     text += t + " "
             text_upper = text.upper()
-            has_bank = (
-                "CO-OPERATIVE BANK" in text_upper
-                or "COOPERATIVE BANK" in text_upper
-                or "CO-OPERATIVE" in text_upper
-            )
+            has_bank = "CO-OPERATIVE" in text_upper or "COOPERATIVE" in text_upper
             has_stmt = "STATEMENT OF ACCOUNT" in text_upper
-            has_marker = "KCOOKENA" in text_upper or "WE ARE YOU" in text_upper
+            has_marker = (
+                "KCOOKENA" in text_upper
+                or "WE ARE YOU" in text_upper
+                or "ENJOY EXTENDED HOURS" in text_upper
+                or "7 DAY BANKING" in text_upper
+                or "PRIMENET" in text_upper
+            )
             has_layout_b = (
                 "TRANS" in text_upper
                 and "CHANNEL" in text_upper
                 and "BOOK BALANCE" in text_upper
                 and "MSME" in text_upper
             )
-            return bool(
-                (has_stmt and (has_bank or has_marker))
-                or has_layout_b
-            )
+            return has_bank and has_marker
     except Exception:
         return False
 
@@ -70,10 +69,10 @@ def _detect_currency(file_path: str) -> str:
 
 
 def _parse_coop_date(raw: str) -> str | None:
-    """Parse DD/MM/YYYY or DD-M-YYYY to ISO YYYY-MM-DD. Returns None on failure."""
+    """Parse DD/MM/YYYY, DD-M-YYYY, or DD-MM-YY (PrimeNET) to ISO YYYY-MM-DD."""
     if not raw or not raw.strip():
         return None
-    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d-%m-%Y"):
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d-%m-%y"):
         try:
             dt = datetime.strptime(raw.strip(), fmt)
             return dt.strftime("%Y-%m-%d")
@@ -90,6 +89,58 @@ def _detect_pattern(description: str, channel: str = "") -> tuple[str, str]:
     """
     desc_upper = (description or "").upper()
     chan_upper = (channel or "").upper()
+
+    # PrimeNET portal prefixed descriptions
+    if desc_upper.startswith("PRIMENET:"):
+        rest = desc_upper[9:]
+        if "MPESA" in rest and any(x in rest for x in ("CHARG", "EXCIS", "COMM", "FEE")):
+            return ("AUTO_CLASSIFIED", "BANK_CHARGE")
+        if "PL ATA EXCI" in rest or "PLATA EXCI" in rest:
+            return ("AUTO_CLASSIFIED", "BANK_CHARGE")
+        if "PL ATA" in rest or "PLATA" in rest:
+            return ("PENDING_CLASSIFICATION", "PESALINK_TRANSFER")
+        if "EXCISE" in rest or "CHARGE" in rest or "FEE" in rest:
+            return ("AUTO_CLASSIFIED", "BANK_CHARGE")
+        if "MPESA" in rest:
+            return ("AUTO_CLASSIFIED", "MPESA_C2B")
+        if "EFT" in rest or "RTGS" in rest:
+            return ("PENDING_CLASSIFICATION", "INWARD_EFT_CREDIT")
+
+    if desc_upper.startswith("I:RTGS TO:") or desc_upper.startswith("I:RTGS FROM:"):
+        return ("PENDING_CLASSIFICATION", "RTGS_TRANSFER")
+
+    if "FOREIGN TT FROM" in desc_upper or "FOREIGN TT CREDIT" in desc_upper:
+        return ("PENDING_CLASSIFICATION", "INWARD_EFT_CREDIT")
+
+    if "EFT TO:" in desc_upper or "EFT FROM:" in desc_upper:
+        return ("PENDING_CLASSIFICATION", "INWARD_EFT_CREDIT")
+
+    if "STANDING FEES" in desc_upper or "STANDING ORDER FEES" in desc_upper:
+        return ("AUTO_CLASSIFIED", "BANK_CHARGE")
+
+    if "EXCISE TAX" in desc_upper:
+        return ("AUTO_CLASSIFIED", "BANK_CHARGE")
+
+    if "CONVERSION TRANSFER" in desc_upper or "FX CONVERSION" in desc_upper:
+        return ("AUTO_CLASSIFIED", "CURRENCY_CONVERSION")
+
+    if "TRF FROM EUR" in desc_upper or "TRF FROM EURO" in desc_upper or "TRF FROM USD" in desc_upper:
+        return ("AUTO_CLASSIFIED", "CURRENCY_CONVERSION")
+
+    if "TRF FROM KES" in desc_upper or "TRF TO KES" in desc_upper:
+        return ("AUTO_CLASSIFIED", "CURRENCY_CONVERSION")
+
+    if "FCY PURCHASE" in desc_upper or "EURO " in desc_upper or "EUR " in desc_upper:
+        return ("AUTO_CLASSIFIED", "CURRENCY_CONVERSION")
+
+    if "EFT CHARGES" in desc_upper or "EFT EXCISE" in desc_upper:
+        return ("AUTO_CLASSIFIED", "BANK_CHARGE")
+
+    if "REVERSAL I/W" in desc_upper or "REVERSAL IW" in desc_upper:
+        return ("AUTO_CLASSIFIED", "BANK_CHARGE")
+
+    if "RETURN OF FUNDS" in desc_upper:
+        return ("PENDING_CLASSIFICATION", "REVERSAL_PAIR")
 
     if "REVERSED :" in desc_upper:
         return ("PENDING_CLASSIFICATION", "REVERSAL_PAIR")
@@ -256,6 +307,181 @@ _SKIP_LINE_RE = _re.compile(
 )
 
 
+# Layout C patterns — PrimeNET portal (text-only, no tables)
+# Line with amounts: "description  DD-MM-YY  amount  balance_CR"
+# Balance is always suffixed CR or DR.
+_DATE_PAT_2Y = r'\d{2}-\d{2}-\d{2}'   # DD-MM-YY (2-digit year)
+_AMT_PAT     = r'[\d,]+\.\d{2}'
+_BAL_PAT     = r'[\d,]+\.\d{2}(?:CR|DR)'
+
+# Continuation line: ends with  [value_date]  [debit|credit]  [balance CR/DR]
+# Groups: (continuation_text, value_date, amount, balance)
+_LINE_C_AMOUNTS_RE = _re.compile(
+    rf'^(.*?)\s+({_DATE_PAT_2Y})\s+({_AMT_PAT})\s+({_BAL_PAT})\s*$'
+)
+
+# Header / footer lines to skip in layout C
+_SKIP_C_RE = _re.compile(
+    r'^(RIVERSIDE DRIVE|KANKAM|P\.O\. BOX|UKULIMA|NAIROBI|KENYA'
+    r'|Debit Tran|Credit Tran|Sum Of|Available Balance|Clear Balance'
+    r'|\d{10}\s|KES CURRENT|USD CURRENT|\d{1,2}-\d{2}-\d{4}\s+to\s)',
+    _re.IGNORECASE,
+)
+
+
+def _is_layout_c(file_path: str) -> bool:
+    """Return True if the PDF uses the PrimeNET text layout (no tables, DD-MM-YY dates)."""
+    try:
+        with pdfplumber.open(file_path) as pdf:
+            for page in pdf.pages[:2]:
+                tables = page.extract_tables()
+                if tables:
+                    return False  # has tables → Layout A or B
+                text = page.extract_text() or ""
+                if "PRIMENET" in text.upper() or "PRIME NET" in text.upper():
+                    # Look for 2-digit year date pattern
+                    if _re.search(r'\d{2}-\d{2}-\d{2}\s', text):
+                        return True
+    except Exception:
+        pass
+    return False
+
+
+def _extract_coop_layout_c(file_path: str) -> tuple:
+    """
+    Extract transactions from Co-op PrimeNET portal layout.
+
+    Each transaction is 1–2 text lines:
+      Single:  DD-MM-YY  DESCRIPTION  DD-MM-YY  AMOUNT  BALANCE_CR
+      Wrapped: DD-MM-YY  DESCRIPTION_START          (no amounts — wraps)
+               DESCRIPTION_END  DD-MM-YY  AMOUNT  BALANCE_CR
+    """
+    transactions: List[RawTransaction] = []
+    warnings: List[WarningItem] = []
+    row_idx = 0
+    pending: dict | None = None
+
+    _DATE_LINE_RE = _re.compile(rf'^({_DATE_PAT_2Y})\s+(.*)')
+
+    def flush(p: dict) -> None:
+        nonlocal row_idx
+        desc = p["description"].strip()
+
+        # Skip opening B/F balance line
+        if desc.upper() in ("B/F", "B/FWD", "OPENING BALANCE"):
+            return
+
+        # Skip page summary lines
+        if _is_footer_row(desc):
+            return
+
+        classification_status, pattern_hint = _detect_pattern(desc)
+        transactions.append(RawTransaction(
+            row_index=p["row_index"],
+            date_raw=p["date_raw"],
+            description=desc,
+            debit_raw=p["debit_raw"],
+            credit_raw=p["credit_raw"],
+            balance_raw=p["balance_raw"],
+            source_file=file_path,
+            extraction_confidence=1.0 if p["date_raw"] and (p["debit_raw"] or p["credit_raw"]) else 0.8,
+            classification_status=classification_status,
+            pattern_hint=pattern_hint,
+        ))
+
+    def parse_amounts(amount_str: str, balance_str: str) -> tuple[str, str]:
+        """
+        Determine debit vs credit from the signed context.
+        Balance direction: CR = net positive, DR = net negative.
+        Single amount field — debit if balance went down, credit if it went up.
+        We keep it simple: store in debit_raw, normaliser resolves sign via balance delta.
+        """
+        return amount_str, balance_str
+
+    with pdfplumber.open(file_path) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text() or ""
+            for raw_line in text.split("\n"):
+                line = raw_line.strip()
+                if not line:
+                    continue
+                if _SKIP_C_RE.match(line):
+                    continue
+
+                # Does this line carry amounts? (ends with balance CR/DR)
+                m_amt = _LINE_C_AMOUNTS_RE.match(line)
+
+                # Does this line start with a date?
+                m_date = _DATE_LINE_RE.match(line)
+
+                if m_date:
+                    date_part = m_date.group(1)
+                    rest = m_date.group(2).strip()
+                    iso_date = _parse_coop_date(date_part)
+
+                    if m_amt and m_date:
+                        # Full single-line transaction:
+                        # DD-MM-YY  DESC  DD-MM-YY  AMT  BAL_CR
+                        # m_amt groups: (desc_part, value_date, amount, balance)
+                        desc_part = m_amt.group(1)
+                        # Strip the leading date from desc_part if present
+                        inner = _DATE_LINE_RE.match(desc_part)
+                        description = inner.group(2).strip() if inner else desc_part.strip()
+                        amount_str = m_amt.group(3)
+                        balance_str = m_amt.group(4)
+                        debit_raw, balance_raw = parse_amounts(amount_str, balance_str)
+
+                        if pending:
+                            flush(pending)
+                        pending = {
+                            "row_index": row_idx,
+                            "date_raw": iso_date or date_part,
+                            "description": description,
+                            "debit_raw": debit_raw,
+                            "credit_raw": "",
+                            "balance_raw": balance_raw,
+                        }
+                        row_idx += 1
+                        flush(pending)
+                        pending = None
+                    else:
+                        # Wrapped first line — no amounts yet
+                        if pending:
+                            flush(pending)
+                        pending = {
+                            "row_index": row_idx,
+                            "date_raw": iso_date or date_part,
+                            "description": rest,
+                            "debit_raw": "",
+                            "credit_raw": "",
+                            "balance_raw": "",
+                        }
+                        row_idx += 1
+
+                elif m_amt and pending:
+                    # Continuation line carrying amounts
+                    desc_tail = m_amt.group(1).strip()
+                    amount_str = m_amt.group(3)
+                    balance_str = m_amt.group(4)
+                    debit_raw, balance_raw = parse_amounts(amount_str, balance_str)
+
+                    if desc_tail:
+                        pending["description"] = (pending["description"] + " " + desc_tail).strip()
+                    pending["debit_raw"] = debit_raw
+                    pending["balance_raw"] = balance_raw
+                    flush(pending)
+                    pending = None
+
+                elif pending:
+                    # Pure description continuation (no amounts, no date)
+                    pending["description"] = (pending["description"] + " " + line).strip()
+
+    if pending:
+        flush(pending)
+
+    return transactions, warnings
+
+
 def _is_layout_b(file_path: str) -> bool:
     """Return True if the PDF uses the 8-column Trans/Details/Channel layout."""
     try:
@@ -332,7 +558,9 @@ def extract_coop_pdf(file_path: str) -> ExtractionResult:
 
     detected_currency = _detect_currency(file_path)
 
-    if _is_layout_b(file_path):
+    if _is_layout_c(file_path):
+        transactions, warnings = _extract_coop_layout_c(file_path)
+    elif _is_layout_b(file_path):
         transactions, warnings = _extract_coop_layout_b(file_path)
     else:
         with pdfplumber.open(file_path) as pdf:

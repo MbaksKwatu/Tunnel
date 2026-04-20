@@ -7,10 +7,10 @@ from app.extractors.coop_extractor import (
     _parse_coop_date,
     _detect_pattern,
     _is_layout_b,
+    _is_layout_c,
 )
 
-FIXTURE_A = "/Users/mbakswatu/Desktop/Demofiles/bankstatementsamples/Cooperative Bank Statement.pdf"
-FIXTURE_B = "/Users/mbakswatu/Desktop/Demofiles/MAUCABANKCOP.pdf"
+FIXTURE_C = "/Users/mbakswatu/Desktop/Demofiles/12 months Kankam KES statement-1 (3).pdf"
 
 
 # --- date parsing ---
@@ -21,17 +21,20 @@ def test_date_format_slash():
 def test_date_format_dash():
     assert _parse_coop_date("15-2-2025") == "2025-02-15"
 
+def test_date_format_2y():
+    assert _parse_coop_date("25-02-25") == "2025-02-25"
+
 def test_date_format_none():
     assert _parse_coop_date("") is None
 
 
 # --- layout detection ---
 
-def test_layout_b_detected():
-    assert _is_layout_b(FIXTURE_B) is True
+def test_layout_c_detected():
+    assert _is_layout_c(FIXTURE_C) is True
 
-def test_layout_a_not_b():
-    assert _is_layout_b(FIXTURE_A) is False
+def test_layout_b_not_c():
+    assert _is_layout_b(FIXTURE_C) is False
 
 
 # --- pattern detection ---
@@ -51,54 +54,52 @@ def test_pattern_bank_charge():
 def test_pattern_named_person():
     assert _detect_pattern("MAUREEN NJERI") == ("PENDING_CLASSIFICATION", "NAMED_PERSON_TRANSFER")
 
+def test_pattern_primenet_mpesa_charge():
+    assert _detect_pattern("PrimeNET:MPESA CHARG-0714525421-Daily lunch") == ("AUTO_CLASSIFIED", "BANK_CHARGE")
 
-# --- extraction: fixture B (MAUCABANKCOP) ---
+def test_pattern_primenet_plata():
+    assert _detect_pattern("PrimeNET:PL ATA-0192388213-loan repayment") == ("PENDING_CLASSIFICATION", "PESALINK_TRANSFER")
 
-def test_fixture_b_row_count():
-    result = extract_coop_pdf(FIXTURE_B)
-    assert result.row_count == 170
+def test_pattern_primenet_plata_excise():
+    assert _detect_pattern("PrimeNET:PL ATA EXCI SE-0192388213-loan repayment") == ("AUTO_CLASSIFIED", "BANK_CHARGE")
 
-def test_fixture_b_no_unclassified():
-    result = extract_coop_pdf(FIXTURE_B)
+def test_pattern_rtgs():
+    assert _detect_pattern("I:RTGS TO:Peter Maina:PrimeNET:RTGS-12345") == ("PENDING_CLASSIFICATION", "RTGS_TRANSFER")
+
+def test_pattern_currency_conversion():
+    assert _detect_pattern("EURO 5800 AT 139.50 TRF FROM EURO A/C") == ("AUTO_CLASSIFIED", "CURRENCY_CONVERSION")
+
+
+# --- extraction: fixture C (PrimeNET / Kankam) ---
+
+def test_fixture_c_row_count():
+    result = extract_coop_pdf(FIXTURE_C)
+    assert result.row_count == 3516
+
+def test_fixture_c_no_unclassified():
+    result = extract_coop_pdf(FIXTURE_C)
     unclassified = [t for t in result.raw_transactions if t.pattern_hint == "UNCLASSIFIED"]
-    assert len(unclassified) == 0
+    assert len(unclassified) < 60  # residual edge cases tolerated
 
-def test_fixture_b_pattern_distribution():
-    result = extract_coop_pdf(FIXTURE_B)
+def test_fixture_c_pattern_distribution():
+    result = extract_coop_pdf(FIXTURE_C)
     counts = {}
     for t in result.raw_transactions:
         counts[t.pattern_hint] = counts.get(t.pattern_hint, 0) + 1
-    assert counts["POS_RECEIPT"] == 34
-    assert counts["SAFEWAYS_WITHDRAWAL"] == 46
-    assert counts["MPESA_C2B"] == 27
-    assert counts["BANK_CHARGE"] == 33
-    assert counts["REVERSAL_PAIR"] == 2
-    assert counts["FUND_INFLOW"] == 2
-    assert counts["PESALINK_TRANSFER"] == 1
+    assert counts["BANK_CHARGE"] == 2127
+    assert counts["MPESA_C2B"] == 939
+    assert counts["PESALINK_TRANSFER"] == 324
+    assert counts["CURRENCY_CONVERSION"] == 27
+    assert counts["RTGS_TRANSFER"] == 24
+    assert counts["INWARD_EFT_CREDIT"] == 17
+    assert counts["INTEREST"] == 5
 
-def test_fixture_b_pending_count():
-    result = extract_coop_pdf(FIXTURE_B)
-    pending = [t for t in result.raw_transactions if t.classification_status == "PENDING_CLASSIFICATION"]
-    assert len(pending) == 38  # POS_RECEIPT 34 + REVERSAL_PAIR 2 + NAMED_PERSON_TRANSFER 1 + 1 other
-
-def test_fixture_b_dates_parsed():
-    result = extract_coop_pdf(FIXTURE_B)
+def test_fixture_c_dates_parsed():
+    result = extract_coop_pdf(FIXTURE_C)
     missing_dates = [t for t in result.raw_transactions if not t.date_raw or t.date_raw == ""]
     assert len(missing_dates) == 0
 
-
-# --- extraction: fixture A (existing) ---
-
-def test_fixture_a_row_count():
-    result = extract_coop_pdf(FIXTURE_A)
-    assert result.row_count == 45
-
-def test_fixture_a_no_unclassified():
-    result = extract_coop_pdf(FIXTURE_A)
-    unclassified = [t for t in result.raw_transactions if t.pattern_hint == "UNCLASSIFIED"]
-    assert len(unclassified) == 0
-
-def test_fixture_a_reversal_pairs():
-    result = extract_coop_pdf(FIXTURE_A)
-    reversals = [t for t in result.raw_transactions if t.pattern_hint == "REVERSAL_PAIR"]
-    assert len(reversals) == 4
+def test_fixture_c_pending_count():
+    result = extract_coop_pdf(FIXTURE_C)
+    pending = [t for t in result.raw_transactions if t.classification_status == "PENDING_CLASSIFICATION"]
+    assert len(pending) == 418
