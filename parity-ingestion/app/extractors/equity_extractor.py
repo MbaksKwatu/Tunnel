@@ -168,6 +168,17 @@ def _parse_equity_date(raw: str) -> Optional[str]:
         return None
 
 
+def _is_valid_transaction_date(date_str: str) -> bool:
+    """Reject dates more than 5 years from today — parser artifact guard."""
+    from datetime import date as _date
+    try:
+        parsed = _date.fromisoformat(date_str)
+        max_allowed = _date.today().replace(year=_date.today().year + 5)
+        return parsed <= max_allowed
+    except (ValueError, TypeError):
+        return False
+
+
 def _parse_equity_balance(raw: str) -> Tuple[int, bool]:
     """
     Parse balance. Strip "Dr" suffix for overdrawn. Return (cents, is_overdrawn).
@@ -471,6 +482,8 @@ def _append_raw_transaction(
         return row_idx
 
     iso_date = _parse_equity_date(parsed["date_raw"]) or ""
+    if iso_date and not _is_valid_transaction_date(iso_date):
+        return row_idx  # skip this row — date is a parser artifact
     balance_raw = parsed["balance_raw"]
     balance_str = (
         balance_raw.replace("Dr", "").replace("dr", "").strip()

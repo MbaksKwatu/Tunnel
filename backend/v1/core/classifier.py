@@ -1,3 +1,4 @@
+import re
 from typing import Dict, Optional, Tuple
 
 # ── ONTOLOGY v2.0 ─────────────────────────────────────────────────────────────
@@ -130,6 +131,33 @@ _PESALINK_INFLOW_KEYWORDS = frozenset({
 # Named counterparty threshold — positive amounts above this get needs_review
 _LARGE_POSITIVE_THRESHOLD_CENTS = 10_000_000  # KES 100,000
 
+# Foreign currency codes for conversion detection
+_FX_CURRENCY_CODES = frozenset({"EUR", "USD", "GBP", "CHF", "JPY", "CNY", "AED", "ZAR"})
+_FX_CONVERSION_KEYWORDS = frozenset({"CONVERSION TRANSFER", "FX CONVERSION", "CURRENCY CONVERSION", "CONVERSION"})
+_FX_RATE_PATTERN = re.compile(r'AT\s+\d+\.?\d*')
+
+
+def _classify_currency_conversion(desc_upper: str) -> bool:
+    """Return True if the description matches a foreign currency conversion."""
+    # Pattern 1: explicit conversion keyword + foreign currency code
+    has_conversion = any(kw in desc_upper for kw in _FX_CONVERSION_KEYWORDS)
+    has_currency = any(cc in desc_upper for cc in _FX_CURRENCY_CODES)
+    if has_conversion and has_currency:
+        return True
+
+    # Pattern 2: "EUR/USD/etc <amount> AT <rate> TRF FROM/TRANSFER FROM"
+    if has_currency:
+        if _FX_RATE_PATTERN.search(desc_upper) and (
+            "TRF FROM" in desc_upper or "TRANSFER FROM" in desc_upper
+        ):
+            return True
+
+    # Pattern 3: "TO KSH/TO KES" + foreign currency code
+    if has_currency and ("TO KSH" in desc_upper or "TO KES" in desc_upper):
+        return True
+
+    return False
+
 DEBIT_ONLY_ROLES = {
     "bank_charge", "loan_repayment", "tax_payment", "supplier_payment",
     "merchant_payment", "reversal_debit", "pesalink_outflow", "payroll"
@@ -165,6 +193,10 @@ def _keyword_classify(descriptor: str, amount_cents: int) -> Optional[Tuple[str,
     """
     d = (descriptor or "").lower()
     amt = amount_cents
+
+    # Currency conversion — must run before revenue/supplier rules to avoid misclassification
+    if _classify_currency_conversion(d.upper()):
+        return ("currency_conversion", "keyword_match:currency_conversion")
 
     # PAYED BY / PAID BY prefix → revenue_operational (must run before all other checks)
     if d.startswith("payed by") or d.startswith("paid by"):
@@ -222,10 +254,12 @@ def _keyword_classify(descriptor: str, amount_cents: int) -> Optional[Tuple[str,
             else:
                 return ("revenue_operational", f"keyword_match:{kw}:payroll_keywords_inbound")
 
-    # 7. Tax payment
+    # 7. Tax payment (debit-only — payments TO KRA; credits handled by reversal/direction guard)
     for kw in _TAX_KEYWORDS:
         if kw in d:
-            return ("tax_payment", f"keyword_match:{kw}:tax_keywords")
+            if amt < 0:
+                return ("tax_payment", f"keyword_match:{kw}:tax_keywords")
+            break  # credit with tax keyword — fall through to direction guard
 
     # 8. Bank charges
     for kw in _BANK_CHARGE_KEYWORDS:

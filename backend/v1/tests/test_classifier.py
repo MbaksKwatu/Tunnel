@@ -324,3 +324,78 @@ def test_ussd_mpesa_debit_takes_priority_over_ussd_credit_rule():
     role, reason = classify_with_reason(txn("ussd/mpesa/2547 0722123456/ref name abc", -150000))
     assert role == "supplier_payment"
     assert "ussd_mpesa_outflow" in reason
+
+
+# ── CURRENCY CONVERSION ───────────────────────────────────────────────────────
+
+def test_eur_conversion_transfer_credit():
+    role, reason = classify_with_reason(txn("conversion transfer of eur 40,000 to ksh 03-03-25", 536000000))
+    assert role == "currency_conversion"
+    assert "keyword_match" in reason
+
+def test_eur_with_rate_trf_from():
+    role, reason = classify_with_reason(txn("eur 18950 at 145.90 trf from eur a/c 06-05-25", 276633670))
+    assert role == "currency_conversion"
+    assert "keyword_match" in reason
+
+def test_usd_to_kes_conversion():
+    role, reason = classify_with_reason(txn("usd to kes conversion - usd 10,000", 129000000))
+    assert role == "currency_conversion"
+    assert "keyword_match" in reason
+
+def test_gbp_fx_conversion():
+    role, reason = classify_with_reason(txn("fx conversion gbp 5000 to ksh", 85000000))
+    assert role == "currency_conversion"
+    assert "keyword_match" in reason
+
+def test_eur_mention_no_conversion_keyword():
+    """EUR mentioned without conversion keyword should NOT be currency_conversion."""
+    role, _ = classify_with_reason(txn("payment to european supplier for goods", -50000000))
+    assert role != "currency_conversion"
+
+def test_conversion_debit_side():
+    role, reason = classify_with_reason(txn("conversion transfer ksh to eur a/c", -500000000))
+    assert role == "currency_conversion"
+    assert "keyword_match" in reason
+
+
+# ── KRA TAX PAYMENT ───────────────────────────────────────────────────────────
+
+class TestKRATaxPayment:
+    """KRA tax payment classification with directional flow validation."""
+
+    def test_kra_tax_payment_debit(self):
+        role, reason = classify_with_reason(txn("paid to kra tax/0008218", -15000000))
+        assert role == "tax_payment"
+        assert "keyword_match" in reason
+
+    def test_kra_paye_debit(self):
+        role, reason = classify_with_reason(txn("kra paye deduction march 2025", -1800000))
+        assert role == "tax_payment"
+        assert "keyword_match" in reason
+
+    def test_kra_withholding_debit(self):
+        role, reason = classify_with_reason(txn("kra withholding tax", -3500000))
+        assert role == "tax_payment"
+        assert "keyword_match" in reason
+
+    def test_vat_remittance_debit(self):
+        role, reason = classify_with_reason(txn("vat remittance march 2025", -8000000))
+        assert role == "tax_payment"
+        assert "keyword_match" in reason
+
+    def test_kra_reversal_credit_not_tax_payment(self):
+        """KRA reversal (credit) must NOT be tax_payment."""
+        role, _ = classify_with_reason(txn("reversal credit kra tax", 15000000))
+        assert role != "tax_payment"
+
+    def test_kra_credit_large_needs_review(self):
+        """Unexpected large credit from KRA → needs_review."""
+        role, _ = classify_with_reason(txn("credit from kra", 10000000))
+        assert role == "needs_review"
+
+    def test_kra_tax_refund_credit_not_tax_payment(self):
+        """KRA refund (credit) must NOT be tax_payment."""
+        role, _ = classify_with_reason(txn("kra tax refund overpayment", 5000000))
+        assert role != "tax_payment"
+

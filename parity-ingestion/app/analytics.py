@@ -339,8 +339,8 @@ def credit_scoring_inputs(transactions: List[RawTransaction]) -> Dict[str, Any]:
             if month:
                 payroll_months.add(month)
 
-        # KRA / tax detection
-        if t.description and any(
+        # KRA / tax detection — debit-only (payments TO KRA, not refunds/reversals)
+        if debit > 0 and t.description and any(
             kw in t.description.upper() for kw in ["KRA", "PAYE", "VAT", "TAX"]
         ):
             tax_months.add(month)
@@ -469,6 +469,7 @@ _CATEGORY_MAP = {
     "transfer": None,
     "other": None,
     "revenue_non_operational": None,
+    "currency_conversion": None,  # excluded from all operational categories
 }
 
 
@@ -694,6 +695,56 @@ def monthly_entity_breakdown(transactions: List[RawTransaction]) -> List[Dict[st
     return result
 
 
+_FX_DESC_KEYWORDS = ("CONVERSION TRANSFER", "FX CONVERSION", "CURRENCY CONVERSION", "CONVERSION")
+_FX_CURRENCY_CODES = ("EUR", "USD", "GBP", "CHF", "JPY", "CNY", "AED", "ZAR")
+
+
+def _is_fx_conversion(description: Optional[str]) -> bool:
+    """Detect foreign currency conversion transactions from description."""
+    if not description:
+        return False
+    d = description.upper()
+    has_kw = any(kw in d for kw in _FX_DESC_KEYWORDS)
+    has_cc = any(cc in d for cc in _FX_CURRENCY_CODES)
+    if has_kw and has_cc:
+        return True
+    if has_cc and ("TO KSH" in d or "TO KES" in d):
+        return True
+    import re
+    if has_cc and re.search(r'AT\s+\d+\.?\d*', d) and ("TRF FROM" in d or "TRANSFER FROM" in d):
+        return True
+    return False
+
+
+def fx_conversion_metrics(transactions: List[RawTransaction]) -> Dict[str, Any]:
+    """Compute FX conversion metrics. Mirrors classifier currency_conversion role detection."""
+    fx_txns = [t for t in transactions if _is_fx_conversion(t.description)]
+
+    if not fx_txns:
+        return {
+            "total_fx_conversion_cents": 0,
+            "fx_conversion_count": 0,
+            "fx_conversion_months": [],
+            "largest_fx_conversion_cents": 0,
+            "fx_as_pct_of_inflow": 0,
+        }
+
+    total_fx = sum(_parse_amount(t.credit_raw) for t in fx_txns)
+    months = sorted({_month_key(t.date_raw) for t in fx_txns if _month_key(t.date_raw)})
+    largest = max((_parse_amount(t.credit_raw) for t in fx_txns), default=0)
+
+    total_credits = sum(_parse_amount(t.credit_raw) for t in transactions)
+    fx_pct_bps = int(total_fx * 10000 // total_credits) if total_credits > 0 else 0
+
+    return {
+        "total_fx_conversion_cents": total_fx,
+        "fx_conversion_count": len(fx_txns),
+        "fx_conversion_months": months,
+        "largest_fx_conversion_cents": largest,
+        "fx_as_pct_of_inflow_bps": fx_pct_bps,
+    }
+
+
 def run_analytics(transactions: List[RawTransaction], threshold_cents: int = 50000000) -> Dict[str, Any]:
     """
     Run all analytics modules and return combined result.
@@ -712,4 +763,5 @@ def run_analytics(transactions: List[RawTransaction], threshold_cents: int = 500
         "expense_patterns": expense_patterns(transactions),
         "cash_position": cash_position(transactions, threshold_cents),
         "entity_discovery_flags": entity_discovery_flags(transactions),
+        "fx_conversion_metrics": fx_conversion_metrics(transactions),
     }

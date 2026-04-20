@@ -47,6 +47,18 @@ def _clean_display_name(raw_descriptor: str, parsed_descriptor: str) -> str:
     if safeways_match:
         return safeways_match.group(1).strip().title()
 
+    # Rule 4a: KRA — normalize all Kenya Revenue Authority variations to canonical "Kra"
+    kra_patterns = [
+        "KENYA REVENUE AUTHORITY", "K.R.A", "K R A",
+        "KRA TAX", "KRA PAYE", "KRA WITHHOLDING", "KRA VAT", "KRA CUSTOMS",
+        "TAX REMITTANCE TO KRA", "PAID TO KRA",
+    ]
+    for pattern in kra_patterns:
+        if pattern in d:
+            return "Kra"
+    if re.search(r'\bKRA\b', d):
+        return "Kra"
+
     # Rule 4b: PesaLink outbound — must check before slash rule fires
     if "BP:PESALINK" in d or "MB BP:PESALINK" in d:
         return "PesaLink Transfer"
