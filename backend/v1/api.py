@@ -193,6 +193,7 @@ def _repos(request: Optional[Request] = None) -> Dict[str, Any]:
         DealsRepo, DocumentsRepo, RawTxRepo, TransferLinksRepo,
         EntitiesRepo, TxnEntityMapRepo, OverridesRepo,
         AnalysisRunsRepo, SnapshotsRepo,
+        EnrichmentsRepo, ClassificationOverridesRepo, CustomFlagsRepo,
     )
     return {
         "deals": DealsRepo(),
@@ -204,6 +205,9 @@ def _repos(request: Optional[Request] = None) -> Dict[str, Any]:
         "overrides": OverridesRepo(),
         "runs": AnalysisRunsRepo(),
         "snapshots": SnapshotsRepo(),
+        "enrichments": EnrichmentsRepo(),
+        "cls_overrides": ClassificationOverridesRepo(),
+        "custom_flags": CustomFlagsRepo(),
     }
 
 
@@ -845,6 +849,48 @@ def export_transactions_csv(request: Request, deal_id: str):
     )
 
 
+@router.get("/deals/{deal_id}/transactions")
+def list_deal_transactions(request: Request, deal_id: str):
+    """
+    Return all transactions for a deal with their current roles and entity names.
+    Used by the Parity Review enrichment UI.
+    """
+    repos = _repos(request)
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    raw = list(repos["raw"].list_by_deal(deal_id))
+    entities = list(repos["entities"].list_by_deal(deal_id))
+    txn_map_rows = list(repos["txn_map"].list_by_deal(deal_id))
+
+    entity_name_by_id = {str(e["entity_id"]): e.get("display_name") or "" for e in entities}
+    txn_id_to_entity_id = {
+        str(m["txn_id"]): str(m["entity_id"])
+        for m in txn_map_rows
+        if m.get("txn_id") and m.get("entity_id")
+    }
+    txn_id_to_role = {str(m["txn_id"]): m.get("role", "") for m in txn_map_rows}
+
+    result = []
+    for row in sorted(raw, key=lambda r: (r.get("txn_date", ""), r.get("txn_id", ""))):
+        row_uuid = str(row.get("id") or "")
+        row_txn_id = str(row.get("txn_id") or "")
+        eid = txn_id_to_entity_id.get(row_uuid) or txn_id_to_entity_id.get(row_txn_id) or ""
+        role = txn_id_to_role.get(row_uuid) or txn_id_to_role.get(row_txn_id) or ""
+        result.append({
+            "id": row_uuid,
+            "txn_id": row_txn_id,
+            "txn_date": row.get("txn_date"),
+            "description": row.get("normalized_descriptor", ""),
+            "signed_amount_cents": row.get("signed_amount_cents", 0),
+            "account_id": row.get("account_id", ""),
+            "role": role,
+            "entity_name": entity_name_by_id.get(eid, ""),
+        })
+
+    return {"deal_id": deal_id, "transactions": result}
+
+
 @router.get("/deals/{deal_id}/snapshot/pdf")
 def get_snapshot_pdf(request: Request, deal_id: str):
     repos = _repos(request)
@@ -871,6 +917,175 @@ def get_snapshot_pdf(request: Request, deal_id: str):
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ===================================================================
+# Analyst Enrichment
+# ===================================================================
+
+from .core.enrichment_engine import (  # noqa: E402
+    build_enrichment_record,
+    build_override_records,
+    build_flag_records,
+    evaluate_threshold_flag,
+)
+
+
+@router.post("/deals/{deal_id}/enrichment")
+def create_enrichment(request: Request, deal_id: str, body: dict = Body(...)):
+    """
+    Create a new analyst enrichment layer on top of the latest base snapshot.
+
+    Body fields (all optional except analyst_id):
+      analyst_id     str   — email or user identifier
+      analyst_name   str
+      overrides      list  — [{txn_id, original_role, override_role, override_reason, original_reason?}]
+      flags          list  — [{flag_type, flag_name, flag_severity, flag_description, criteria}]
+                             criteria is evaluated against the base snapshot automatically
+      narrative      str
+      enrichment_reason str
+      is_final       bool
+    """
+    repos = _repos(request)
+
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    base_snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    if not base_snapshot:
+        _error("NOT_FOUND", "No snapshot found. Run export first.")
+
+    analyst_id = (body.get("analyst_id") or "").strip()
+    if not analyst_id:
+        _error("BAD_REQUEST", "analyst_id is required")
+
+    raw_overrides = body.get("overrides") or []
+    raw_flags = body.get("flags") or []
+    narrative = (body.get("narrative") or "").strip()
+    enrichment_reason = (body.get("enrichment_reason") or "").strip()
+    is_final = bool(body.get("is_final", False))
+
+    # Evaluate each flag's criteria against base snapshot
+    evaluated_flags = []
+    for f in raw_flags:
+        result = evaluate_threshold_flag(f, base_snapshot)
+        evaluated_flags.append({**f, **result})
+
+    enrichment = build_enrichment_record(
+        base_snapshot_id=base_snapshot["id"],
+        base_snapshot_hash=base_snapshot["sha256_hash"],
+        analyst_id=analyst_id,
+        analyst_name=body.get("analyst_name"),
+        overrides=raw_overrides,
+        flags=evaluated_flags,
+        narrative=narrative,
+        enrichment_reason=enrichment_reason,
+        is_final=is_final,
+    )
+
+    # Idempotent: return existing if same hash
+    existing = repos["enrichments"].get_by_hash(enrichment["enriched_hash"])
+    if existing:
+        return {"enrichment_id": existing["id"], "enriched_hash": existing["enriched_hash"], "created": False}
+
+    saved = repos["enrichments"].insert_enrichment(enrichment)
+
+    override_records = build_override_records(saved["id"], raw_overrides, analyst_id)
+    if override_records:
+        repos["cls_overrides"].insert_batch(override_records)
+
+    flag_records = build_flag_records(saved["id"], evaluated_flags, analyst_id)
+    if flag_records:
+        repos["custom_flags"].insert_batch(flag_records)
+
+    return {"enrichment_id": saved["id"], "enriched_hash": saved["enriched_hash"], "created": True}
+
+
+@router.get("/deals/{deal_id}/enrichment/latest")
+def get_latest_enrichment(request: Request, deal_id: str):
+    """Return the most recent enrichment for the latest base snapshot, or null."""
+    repos = _repos(request)
+
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    base_snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    if not base_snapshot:
+        return {"enrichment": None}
+
+    enrichment = repos["enrichments"].get_latest_for_snapshot(base_snapshot["id"])
+    if not enrichment:
+        return {"enrichment": None}
+
+    overrides = repos["cls_overrides"].list_by_enrichment(enrichment["id"])
+    flags = repos["custom_flags"].list_by_enrichment(enrichment["id"])
+
+    return {
+        "enrichment": {
+            **enrichment,
+            "overrides": list(overrides),
+            "flags": list(flags),
+        }
+    }
+
+
+@router.get("/enrichments/{enrichment_id}")
+def get_enrichment(request: Request, enrichment_id: str):
+    """Return a specific enrichment with its overrides and flags."""
+    repos = _repos(request)
+
+    enrichment = repos["enrichments"].get_enrichment(enrichment_id)
+    if not enrichment:
+        _error("NOT_FOUND", f"Enrichment {enrichment_id} not found")
+
+    overrides = repos["cls_overrides"].list_by_enrichment(enrichment_id)
+    flags = repos["custom_flags"].list_by_enrichment(enrichment_id)
+
+    return {
+        **enrichment,
+        "overrides": list(overrides),
+        "flags": list(flags),
+    }
+
+
+@router.post("/enrichments/{enrichment_id}/finalize")
+def finalize_enrichment(request: Request, enrichment_id: str):
+    """Mark an enrichment as final (ready for client export)."""
+    repos = _repos(request)
+
+    enrichment = repos["enrichments"].get_enrichment(enrichment_id)
+    if not enrichment:
+        _error("NOT_FOUND", f"Enrichment {enrichment_id} not found")
+
+    updated = repos["enrichments"].mark_final(enrichment_id)
+    return {"enrichment_id": enrichment_id, "is_final": True, "updated": updated is not None}
+
+
+@router.post("/enrichments/{enrichment_id}/evaluate-flags")
+def evaluate_flags(request: Request, enrichment_id: str, body: dict = Body(...)):
+    """
+    Evaluate a list of flag definitions against the base snapshot without persisting.
+    Useful for previewing flag results in the UI before saving an enrichment.
+
+    Body: { "flags": [...flag_defs...] }
+    """
+    repos = _repos(request)
+
+    enrichment = repos["enrichments"].get_enrichment(enrichment_id)
+    if not enrichment:
+        _error("NOT_FOUND", f"Enrichment {enrichment_id} not found")
+
+    base_snapshot = repos["snapshots"].get_snapshot(enrichment["base_snapshot_id"])
+    if not base_snapshot:
+        _error("NOT_FOUND", "Base snapshot not found")
+
+    raw_flags = body.get("flags") or []
+    results = []
+    for f in raw_flags:
+        result = evaluate_threshold_flag(f, base_snapshot)
+        results.append({**f, **result})
+
+    return {"flags": results}
 
 
 # ===================================================================

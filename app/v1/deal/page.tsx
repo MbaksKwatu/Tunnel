@@ -1065,6 +1065,12 @@ export default function V1DealPage() {
               >
                 Download transactions CSV
               </button>
+              <button
+                onClick={() => router.push(`/v1/deal/parity-review?dealId=${deal?.id}`)}
+                className="px-4 py-2 bg-indigo-700 hover:bg-indigo-600 rounded"
+              >
+                Analyst Enrichment →
+              </button>
               {lastExportedAt && (
                 <span className="text-xs text-gray-400">
                   Last exported: {lastExportedAt.toLocaleTimeString()}

@@ -143,3 +143,39 @@ class SnapshotsRepository:
     def get_latest_snapshot(self, deal_id: str) -> Optional[Dict[str, Any]]:
         """Fetch latest snapshot for deal (by created_at desc)."""
         raise NotImplementedError
+
+
+class EnrichmentsRepository:
+    def insert_enrichment(self, enrichment: Dict[str, Any]) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def get_by_hash(self, enriched_hash: str) -> Optional[Dict[str, Any]]:
+        raise NotImplementedError
+
+    def get_enrichment(self, enrichment_id: str) -> Optional[Dict[str, Any]]:
+        raise NotImplementedError
+
+    def get_latest_for_snapshot(self, base_snapshot_id: str) -> Optional[Dict[str, Any]]:
+        raise NotImplementedError
+
+    def list_for_snapshot(self, base_snapshot_id: str) -> Sequence[Dict[str, Any]]:
+        raise NotImplementedError
+
+    def mark_final(self, enrichment_id: str) -> Optional[Dict[str, Any]]:
+        raise NotImplementedError
+
+
+class ClassificationOverridesRepository:
+    def insert_batch(self, records: Iterable[Dict[str, Any]]) -> None:
+        raise NotImplementedError
+
+    def list_by_enrichment(self, enrichment_id: str) -> Sequence[Dict[str, Any]]:
+        raise NotImplementedError
+
+
+class CustomFlagsRepository:
+    def insert_batch(self, records: Iterable[Dict[str, Any]]) -> None:
+        raise NotImplementedError
+
+    def list_by_enrichment(self, enrichment_id: str) -> Sequence[Dict[str, Any]]:
+        raise NotImplementedError

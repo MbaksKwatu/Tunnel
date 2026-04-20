@@ -289,3 +289,124 @@ export async function askParity(
 export async function exportTransactionsCsv(dealId: string): Promise<Response> {
   return fetchApi(`${BASE}/deals/${dealId}/export/transactions`)
 }
+
+export interface DealTransaction {
+  id: string
+  txn_id: string
+  txn_date: string
+  description: string
+  signed_amount_cents: number
+  account_id: string
+  role: string
+  entity_name: string
+}
+
+export async function listDealTransactions(
+  dealId: string
+): Promise<{ deal_id: string; transactions: DealTransaction[] }> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/transactions`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+// ── Analyst Enrichment ────────────────────────────────────────────────────────
+
+export interface ClassificationOverride {
+  txn_id: string
+  original_role: string
+  original_reason?: string
+  override_role: string
+  override_reason: string
+}
+
+export interface FlagCriteria {
+  metric: string           // 'closing_balance' | 'overdraft_days' | 'single_transaction_amount'
+  comparison: string       // 'less_than' | 'greater_than' | 'less_than_or_equal' | 'greater_than_or_equal'
+  threshold_cents: number
+}
+
+export interface CustomFlag {
+  flag_type: string        // 'threshold' | 'pattern' | 'compliance' | 'custom'
+  flag_name: string
+  flag_severity: string    // 'info' | 'warning' | 'critical'
+  flag_description: string
+  criteria: FlagCriteria
+  // populated after evaluation
+  triggered?: boolean
+  trigger_count?: number
+  trigger_details?: unknown[]
+}
+
+export interface Enrichment {
+  id: string
+  base_snapshot_id: string
+  enriched_hash: string
+  analyst_id: string
+  analyst_name?: string
+  narrative?: string
+  enrichment_reason?: string
+  is_final: boolean
+  created_at: string
+  overrides?: ClassificationOverride[]
+  flags?: CustomFlag[]
+}
+
+export interface CreateEnrichmentInput {
+  analyst_id: string
+  analyst_name?: string
+  overrides?: ClassificationOverride[]
+  flags?: CustomFlag[]
+  narrative?: string
+  enrichment_reason?: string
+  is_final?: boolean
+}
+
+export async function createEnrichment(
+  dealId: string,
+  input: CreateEnrichmentInput
+): Promise<{ enrichment_id: string; enriched_hash: string; created: boolean }> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/enrichment`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function getLatestEnrichment(
+  dealId: string
+): Promise<{ enrichment: Enrichment | null }> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/enrichment/latest`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function getEnrichment(enrichmentId: string): Promise<Enrichment> {
+  const res = await fetchApi(`${BASE}/enrichments/${enrichmentId}`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function finalizeEnrichment(
+  enrichmentId: string
+): Promise<{ enrichment_id: string; is_final: boolean }> {
+  const res = await fetchApi(`${BASE}/enrichments/${enrichmentId}/finalize`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function evaluateFlags(
+  enrichmentId: string,
+  flags: CustomFlag[]
+): Promise<{ flags: CustomFlag[] }> {
+  const res = await fetchApi(`${BASE}/enrichments/${enrichmentId}/evaluate-flags`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ flags }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}

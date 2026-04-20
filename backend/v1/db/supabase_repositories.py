@@ -4,8 +4,11 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 from ..core.snapshot_engine import decode_snapshot_row
 from .repositories import (
     AnalysisRunsRepository,
+    ClassificationOverridesRepository,
+    CustomFlagsRepository,
     DealsRepository,
     DocumentsRepository,
+    EnrichmentsRepository,
     EntitiesRepository,
     RawTransactionsRepository,
     SnapshotsRepository,
@@ -413,3 +416,59 @@ class SnapshotsRepo(SnapshotsRepository, BaseRepo):
         )
         decoded = [decode_snapshot_row(r) or r for r in (rows.data or [])]
         return sorted(decoded, key=lambda r: r.get("created_at") or "")
+
+
+class EnrichmentsRepo(EnrichmentsRepository, BaseRepo):
+    def __init__(self):
+        super().__init__("pds_snapshot_enrichments")
+
+    def insert_enrichment(self, enrichment: Dict[str, Any]) -> Dict[str, Any]:
+        return self.insert(enrichment)
+
+    def get_by_hash(self, enriched_hash: str) -> Optional[Dict[str, Any]]:
+        rows = self.select_eq("enriched_hash", enriched_hash)
+        return rows[0] if rows else None
+
+    def get_enrichment(self, enrichment_id: str) -> Optional[Dict[str, Any]]:
+        rows = self.select_eq("id", enrichment_id)
+        return rows[0] if rows else None
+
+    def get_latest_for_snapshot(self, base_snapshot_id: str) -> Optional[Dict[str, Any]]:
+        rows = self.select_eq("base_snapshot_id", base_snapshot_id)
+        if not rows:
+            return None
+        return max(rows, key=lambda r: r.get("created_at") or "")
+
+    def list_for_snapshot(self, base_snapshot_id: str) -> Sequence[Dict[str, Any]]:
+        return self.select_eq("base_snapshot_id", base_snapshot_id)
+
+    def mark_final(self, enrichment_id: str) -> Optional[Dict[str, Any]]:
+        res = (
+            self.client.table(self.table)
+            .update({"is_final": True})
+            .eq("id", enrichment_id)
+            .execute()
+        )
+        return res.data[0] if res.data else None
+
+
+class ClassificationOverridesRepo(ClassificationOverridesRepository, BaseRepo):
+    def __init__(self):
+        super().__init__("pds_classification_overrides")
+
+    def insert_batch(self, records: Iterable[Dict[str, Any]]) -> None:
+        self.insert_many(records)
+
+    def list_by_enrichment(self, enrichment_id: str) -> Sequence[Dict[str, Any]]:
+        return self.select_eq("enrichment_id", enrichment_id)
+
+
+class CustomFlagsRepo(CustomFlagsRepository, BaseRepo):
+    def __init__(self):
+        super().__init__("pds_custom_flags")
+
+    def insert_batch(self, records: Iterable[Dict[str, Any]]) -> None:
+        self.insert_many(records)
+
+    def list_by_enrichment(self, enrichment_id: str) -> Sequence[Dict[str, Any]]:
+        return self.select_eq("enrichment_id", enrichment_id)
