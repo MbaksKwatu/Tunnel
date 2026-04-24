@@ -1,0 +1,129 @@
+# Parity → parity-staging daily data sync
+#
+# Copies all pds_* table data from the live Parity DB to parity-staging
+# every day at 02:00 UTC. The engineer always has a fresh copy of real data.
+#
+# Required GitHub secrets (Settings > Secrets and variables > Actions):
+#   LIVE_DB_URL     — postgres://postgres:[password]@db.ifcdbhbuucmjgtjkluna.supabase.co:5432/postgres
+#   STAGING_DB_URL  — postgres://postgres:[password]@db.kstuensfekanfberjubz.supabase.co:5432/postgres
+#
+# One-time setup: before the first sync, apply the schema to parity-staging:
+#   psql $STAGING_DB_URL -f supabase/parity_staging_schema.sql
+#
+# RLS note: synced rows keep their original created_by UUIDs from live.
+# The backend uses the service_role key which bypasses RLS, so the engineer
+# can read all data via the API. For Supabase Studio access, connect as
+# service_role or the Supabase dashboard (which bypasses RLS).
+
+name: Sync parity-staging DB
+
+on:
+  schedule:
+    - cron: '0 2 * * *'   # 02:00 UTC daily
+  workflow_dispatch:        # run on-demand from GitHub Actions UI
+
+jobs:
+  sync:
+    name: Dump live → restore staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client
+
+      - name: Validate secrets present
+        run: |
+          if [ -z "$LIVE_DB_URL" ]; then
+            echo "::error::LIVE_DB_URL secret is missing."
+            exit 1
+          fi
+          if [ -z "$STAGING_DB_URL" ]; then
+            echo "::error::STAGING_DB_URL secret is missing."
+            exit 1
+          fi
+        env:
+          LIVE_DB_URL: ${{ secrets.LIVE_DB_URL }}
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+
+      # Dump all pds_* tables in insertion-safe order.
+      # --disable-triggers lets us restore without worrying about FK order.
+      # --use-copy is faster than INSERT for large tables.
+      - name: Dump pds_* data from live
+        env:
+          PGPASSWORD: ""   # password is embedded in the URL
+        run: |
+          pg_dump \
+            "${{ secrets.LIVE_DB_URL }}" \
+            --data-only \
+            --disable-triggers \
+            --use-copy \
+            --table=pds_deals \
+            --table=pds_documents \
+            --table=pds_raw_transactions \
+            --table=pds_transfer_links \
+            --table=pds_entities \
+            --table=pds_txn_entity_map \
+            --table=pds_overrides \
+            --table=pds_analysis_runs \
+            --table=pds_snapshots \
+            --table=pds_snapshot_enrichments \
+            --table=pds_classification_overrides \
+            --table=pds_custom_flags \
+            -f /tmp/pds_data.sql
+
+          LINES=$(wc -l < /tmp/pds_data.sql)
+          echo "Dump complete: ${LINES} lines"
+
+      # Truncate staging in reverse FK order, then restore.
+      # superuser / service_role bypasses RLS and triggers on Supabase.
+      - name: Truncate staging pds_* tables
+        run: |
+          psql "${{ secrets.STAGING_DB_URL }}" <<'SQL'
+            SET session_replication_role = replica;
+            TRUNCATE
+              pds_custom_flags,
+              pds_classification_overrides,
+              pds_snapshot_enrichments,
+              pds_snapshots,
+              pds_analysis_runs,
+              pds_overrides,
+              pds_txn_entity_map,
+              pds_entities,
+              pds_transfer_links,
+              pds_raw_transactions,
+              pds_documents,
+              pds_deals
+            CASCADE;
+            SET session_replication_role = DEFAULT;
+          SQL
+
+      - name: Restore pds_* data to staging
+        run: |
+          psql "${{ secrets.STAGING_DB_URL }}" \
+            --single-transaction \
+            -v ON_ERROR_STOP=1 \
+            -c "SET session_replication_role = replica;" \
+            -f /tmp/pds_data.sql \
+            -c "SET session_replication_role = DEFAULT;"
+
+      - name: Verify row counts on staging
+        run: |
+          psql "${{ secrets.STAGING_DB_URL }}" <<'SQL'
+            SELECT
+              'pds_deals'               AS tbl, COUNT(*) FROM pds_deals
+            UNION ALL SELECT 'pds_documents',         COUNT(*) FROM pds_documents
+            UNION ALL SELECT 'pds_raw_transactions',  COUNT(*) FROM pds_raw_transactions
+            UNION ALL SELECT 'pds_entities',          COUNT(*) FROM pds_entities
+            UNION ALL SELECT 'pds_txn_entity_map',    COUNT(*) FROM pds_txn_entity_map
+            UNION ALL SELECT 'pds_analysis_runs',     COUNT(*) FROM pds_analysis_runs
+            UNION ALL SELECT 'pds_snapshots',         COUNT(*) FROM pds_snapshots
+            ORDER BY tbl;
+          SQL
+
+      - name: Sync complete
+        run: echo "parity-staging refreshed at $(date -u)"
