@@ -60,16 +60,15 @@ jobs:
           LIVE_DB_URL: ${{ secrets.LIVE_DB_URL }}
           STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
 
-      # pg_dump --data-only dumps tables in FK-safe order (parents before children).
-      # No --disable-triggers needed — we truncate first so there's no existing data
-      # to violate constraints during restore.
+      # Use custom format (-Fc) — pg_restore handles FK ordering and trigger
+      # disabling automatically without the plain-SQL parsing quirks.
       - name: Dump pds_* data from live
         env:
           PGSSLMODE: require
-          PATH: /usr/lib/postgresql/17/bin:/usr/bin:/bin
         run: |
-          pg_dump \
+          /usr/lib/postgresql/17/bin/pg_dump \
             "${{ secrets.LIVE_DB_URL }}" \
+            --format=custom \
             --data-only \
             --table=pds_deals \
             --table=pds_documents \
@@ -83,10 +82,10 @@ jobs:
             --table=pds_snapshot_enrichments \
             --table=pds_classification_overrides \
             --table=pds_custom_flags \
-            -f /tmp/pds_data.sql
+            -f /tmp/pds_data.dump
 
-          LINES=$(wc -l < /tmp/pds_data.sql)
-          echo "Dump complete: ${LINES} lines"
+          SIZE=$(du -sh /tmp/pds_data.dump | cut -f1)
+          echo "Dump complete: ${SIZE}"
 
       # Apply schema to staging (idempotent — all DDL uses IF NOT EXISTS).
       # Safe to run every sync; ensures staging always matches live schema.
@@ -107,15 +106,19 @@ jobs:
             -v ON_ERROR_STOP=1 \
             -c "TRUNCATE pds_custom_flags, pds_classification_overrides, pds_snapshot_enrichments, pds_snapshots, pds_analysis_runs, pds_overrides, pds_txn_entity_map, pds_entities, pds_transfer_links, pds_raw_transactions, pds_documents, pds_deals CASCADE;"
 
-      # Restore — tables are empty so FK constraints are satisfied in dump order.
+      # pg_restore handles table ordering and disables triggers automatically.
       - name: Restore pds_* data to staging
         env:
           PGSSLMODE: require
         run: |
-          /usr/lib/postgresql/17/bin/psql "${{ secrets.STAGING_DB_URL }}" \
-            --single-transaction \
-            -v ON_ERROR_STOP=1 \
-            -f /tmp/pds_data.sql
+          /usr/lib/postgresql/17/bin/pg_restore \
+            --dbname "${{ secrets.STAGING_DB_URL }}" \
+            --data-only \
+            --disable-triggers \
+            --no-privileges \
+            --no-owner \
+            --exit-on-error \
+            /tmp/pds_data.dump
 
       - name: Verify row counts on staging
         env:
