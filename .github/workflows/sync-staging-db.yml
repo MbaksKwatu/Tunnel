@@ -114,7 +114,6 @@ jobs:
           /usr/lib/postgresql/17/bin/pg_restore \
             --dbname "${{ secrets.STAGING_DB_URL }}" \
             --data-only \
-            --disable-triggers \
             --no-privileges \
             --no-owner \
             --exit-on-error \
