@@ -17,8 +17,8 @@
 #
 # RLS note: synced rows keep their original created_by UUIDs from live.
 # The backend uses the service_role key which bypasses RLS, so the engineer
-# can read all data via the API. For Supabase Studio access, connect as
-# service_role or the Supabase dashboard (which bypasses RLS).
+# can read all data via the API. For Supabase Studio access connect via the
+# Supabase dashboard which bypasses RLS.
 
 name: Sync parity-staging DB
 
@@ -60,10 +60,9 @@ jobs:
           LIVE_DB_URL: ${{ secrets.LIVE_DB_URL }}
           STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
 
-      # Dump all pds_* tables in insertion-safe order.
-      # --disable-triggers lets us restore without worrying about FK order.
-      # pg_dump --data-only defaults to COPY statements (fast, compact).
-      # Use explicit pg17 path — system default may still resolve to pg16.
+      # pg_dump --data-only dumps tables in FK-safe order (parents before children).
+      # No --disable-triggers needed — we truncate first so there's no existing data
+      # to violate constraints during restore.
       - name: Dump pds_* data from live
         env:
           PGSSLMODE: require
@@ -72,7 +71,6 @@ jobs:
           pg_dump \
             "${{ secrets.LIVE_DB_URL }}" \
             --data-only \
-            --disable-triggers \
             --table=pds_deals \
             --table=pds_documents \
             --table=pds_raw_transactions \
@@ -90,50 +88,40 @@ jobs:
           LINES=$(wc -l < /tmp/pds_data.sql)
           echo "Dump complete: ${LINES} lines"
 
-      # Truncate staging in reverse FK order, then restore.
-      # superuser / service_role bypasses RLS and triggers on Supabase.
+      # TRUNCATE all pds_* tables at once — CASCADE handles FK ordering automatically.
+      # Using ON_ERROR_STOP so any missing table surfaces immediately.
       - name: Truncate staging pds_* tables
+        env:
+          PGSSLMODE: require
         run: |
-          psql "${{ secrets.STAGING_DB_URL }}" <<'SQL'
-            SET session_replication_role = replica;
-            TRUNCATE
-              pds_custom_flags,
-              pds_classification_overrides,
-              pds_snapshot_enrichments,
-              pds_snapshots,
-              pds_analysis_runs,
-              pds_overrides,
-              pds_txn_entity_map,
-              pds_entities,
-              pds_transfer_links,
-              pds_raw_transactions,
-              pds_documents,
-              pds_deals
-            CASCADE;
-            SET session_replication_role = DEFAULT;
-          SQL
+          /usr/lib/postgresql/17/bin/psql "${{ secrets.STAGING_DB_URL }}" \
+            -v ON_ERROR_STOP=1 \
+            -c "TRUNCATE pds_custom_flags, pds_classification_overrides, pds_snapshot_enrichments, pds_snapshots, pds_analysis_runs, pds_overrides, pds_txn_entity_map, pds_entities, pds_transfer_links, pds_raw_transactions, pds_documents, pds_deals CASCADE;"
 
+      # Restore — tables are empty so FK constraints are satisfied in dump order.
       - name: Restore pds_* data to staging
+        env:
+          PGSSLMODE: require
         run: |
-          psql "${{ secrets.STAGING_DB_URL }}" \
+          /usr/lib/postgresql/17/bin/psql "${{ secrets.STAGING_DB_URL }}" \
             --single-transaction \
             -v ON_ERROR_STOP=1 \
-            -c "SET session_replication_role = replica;" \
-            -f /tmp/pds_data.sql \
-            -c "SET session_replication_role = DEFAULT;"
+            -f /tmp/pds_data.sql
 
       - name: Verify row counts on staging
+        env:
+          PGSSLMODE: require
         run: |
-          psql "${{ secrets.STAGING_DB_URL }}" <<'SQL'
-            SELECT
-              'pds_deals'               AS tbl, COUNT(*) FROM pds_deals
-            UNION ALL SELECT 'pds_documents',         COUNT(*) FROM pds_documents
-            UNION ALL SELECT 'pds_raw_transactions',  COUNT(*) FROM pds_raw_transactions
-            UNION ALL SELECT 'pds_entities',          COUNT(*) FROM pds_entities
-            UNION ALL SELECT 'pds_txn_entity_map',    COUNT(*) FROM pds_txn_entity_map
-            UNION ALL SELECT 'pds_analysis_runs',     COUNT(*) FROM pds_analysis_runs
-            UNION ALL SELECT 'pds_snapshots',         COUNT(*) FROM pds_snapshots
-            ORDER BY tbl;
+          /usr/lib/postgresql/17/bin/psql "${{ secrets.STAGING_DB_URL }}" <<'SQL'
+            SELECT tbl, cnt FROM (
+              SELECT 'pds_deals'              AS tbl, COUNT(*) AS cnt FROM pds_deals
+              UNION ALL SELECT 'pds_documents',        COUNT(*) FROM pds_documents
+              UNION ALL SELECT 'pds_raw_transactions', COUNT(*) FROM pds_raw_transactions
+              UNION ALL SELECT 'pds_entities',         COUNT(*) FROM pds_entities
+              UNION ALL SELECT 'pds_txn_entity_map',   COUNT(*) FROM pds_txn_entity_map
+              UNION ALL SELECT 'pds_analysis_runs',    COUNT(*) FROM pds_analysis_runs
+              UNION ALL SELECT 'pds_snapshots',        COUNT(*) FROM pds_snapshots
+            ) t ORDER BY tbl;
           SQL
 
       - name: Sync complete
