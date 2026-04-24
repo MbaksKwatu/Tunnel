@@ -63,9 +63,11 @@ jobs:
       # Dump all pds_* tables in insertion-safe order.
       # --disable-triggers lets us restore without worrying about FK order.
       # pg_dump --data-only defaults to COPY statements (fast, compact).
+      # Use explicit pg17 path — system default may still resolve to pg16.
       - name: Dump pds_* data from live
         env:
           PGSSLMODE: require
+          PATH: /usr/lib/postgresql/17/bin:/usr/bin:/bin
         run: |
           pg_dump \
             "${{ secrets.LIVE_DB_URL }}" \
