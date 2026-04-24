@@ -87,24 +87,15 @@ jobs:
           SIZE=$(du -sh /tmp/pds_data.dump | cut -f1)
           echo "Dump complete: ${SIZE}"
 
-      # Apply schema to staging (idempotent — all DDL uses IF NOT EXISTS).
-      # Safe to run every sync; ensures staging always matches live schema.
-      - name: Apply schema to parity-staging
+      # Drop and recreate all tables from scratch — guarantees schema parity
+      # with live even if staging had a stale schema from a previous version.
+      - name: Reset staging schema
         env:
           PGSSLMODE: require
         run: |
           /usr/lib/postgresql/17/bin/psql "${{ secrets.STAGING_DB_URL }}" \
             -v ON_ERROR_STOP=1 \
             -f supabase/parity_staging_schema.sql
-
-      # TRUNCATE all pds_* tables at once — CASCADE handles FK ordering automatically.
-      - name: Truncate staging pds_* tables
-        env:
-          PGSSLMODE: require
-        run: |
-          /usr/lib/postgresql/17/bin/psql "${{ secrets.STAGING_DB_URL }}" \
-            -v ON_ERROR_STOP=1 \
-            -c "TRUNCATE pds_custom_flags, pds_classification_overrides, pds_snapshot_enrichments, pds_snapshots, pds_analysis_runs, pds_overrides, pds_txn_entity_map, pds_entities, pds_transfer_links, pds_raw_transactions, pds_documents, pds_deals CASCADE;"
 
       # pg_restore handles table ordering and disables triggers automatically.
       - name: Restore pds_* data to staging
