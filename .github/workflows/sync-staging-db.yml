@@ -4,8 +4,13 @@
 # every day at 02:00 UTC. The engineer always has a fresh copy of real data.
 #
 # Required GitHub secrets (Settings > Secrets and variables > Actions):
-#   LIVE_DB_URL     — postgres://postgres:[password]@db.ifcdbhbuucmjgtjkluna.supabase.co:5432/postgres
-#   STAGING_DB_URL  — postgres://postgres:[password]@db.kstuensfekanfberjubz.supabase.co:5432/postgres
+#   Use the SESSION POOLER URLs from Supabase (not the direct DB URLs).
+#   Find them: Supabase dashboard → Connect → Session pooler tab
+#
+#   LIVE_DB_URL     — postgres://postgres.[ref]:[password]@aws-0-eu-west-1.pooler.supabase.com:5432/postgres
+#   STAGING_DB_URL  — postgres://postgres.[ref]:[password]@aws-0-eu-west-1.pooler.supabase.com:5432/postgres
+#
+#   The direct db.*.supabase.co URLs use IPv6 which GitHub Actions cannot reach.
 #
 # One-time setup: before the first sync, apply the schema to parity-staging:
 #   psql $STAGING_DB_URL -f supabase/parity_staging_schema.sql
@@ -55,7 +60,7 @@ jobs:
       # pg_dump --data-only defaults to COPY statements (fast, compact).
       - name: Dump pds_* data from live
         env:
-          PGPASSWORD: ""   # password is embedded in the URL
+          PGSSLMODE: require
         run: |
           pg_dump \
             "${{ secrets.LIVE_DB_URL }}" \
