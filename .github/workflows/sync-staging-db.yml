@@ -52,7 +52,7 @@ jobs:
 
       # Dump all pds_* tables in insertion-safe order.
       # --disable-triggers lets us restore without worrying about FK order.
-      # --use-copy is faster than INSERT for large tables.
+      # pg_dump --data-only defaults to COPY statements (fast, compact).
       - name: Dump pds_* data from live
         env:
           PGPASSWORD: ""   # password is embedded in the URL
@@ -61,7 +61,6 @@ jobs:
             "${{ secrets.LIVE_DB_URL }}" \
             --data-only \
             --disable-triggers \
-            --use-copy \
             --table=pds_deals \
             --table=pds_documents \
             --table=pds_raw_transactions \
