@@ -1,0 +1,1163 @@
+"""
+Parity v1 — Deterministic API
+All money fields: integer cents.  All ratios: integer basis points.
+Snapshot only on explicit POST /v1/deals/{deal_id}/export.
+"""
+
+import csv
+import io
+import logging
+import time
+import uuid
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request, BackgroundTasks, Body
+from fastapi.responses import StreamingResponse
+from pypdf import PdfWriter
+
+from .utils.pdf_merge import validate_pdf_count
+
+logger = logging.getLogger(__name__)
+from datetime import datetime, timezone
+
+from .config import SCHEMA_VERSION, CONFIG_VERSION, GIT_COMMIT, BUILD_TIMESTAMP, DETERMINISTIC_MODE
+from .ingestion.service import IngestionService
+from .parsing.errors import CurrencyMismatchError, InvalidSchemaError
+from .core.pipeline import run_pipeline
+from .core.snapshot_engine import build_pds_payload, export_snapshot, decompress_canonical_json_if_needed
+from .core.pdf_generator import generate_pdf as _generate_snapshot_pdf
+
+router = APIRouter(prefix="/v1", tags=["v1"])
+
+# ---------------------------------------------------------------------------
+# System identity (deterministic, no DB, no runtime state)
+# ---------------------------------------------------------------------------
+
+_HEALTH_RESPONSE = {
+    "schema_version": SCHEMA_VERSION,
+    "config_version": CONFIG_VERSION,
+    "git_commit": GIT_COMMIT,
+    "build_timestamp": BUILD_TIMESTAMP,
+    "deterministic_mode": DETERMINISTIC_MODE,
+}
+
+_METRICS_TEMPLATE = {
+    "schema_version": SCHEMA_VERSION,
+    "config_version": CONFIG_VERSION,
+    "last_export_ms": None,
+    "last_export_at": None,
+}
+
+# Read-only lease: if status stays "processing" longer than this, status endpoint reports failed.
+PROCESSING_LEASE_SECONDS = 600
+
+
+def _document_processing_lease_expired(doc: Dict[str, Any]) -> bool:
+    """True if the row is still ``processing`` but older than :data:`PROCESSING_LEASE_SECONDS`."""
+    if doc.get("status") != "processing":
+        return False
+    lease_ref = doc.get("updated_at") or doc.get("created_at")
+    ref_dt = _parse_document_timestamp(lease_ref)
+    if ref_dt is None:
+        return False
+    age_s = (datetime.now(timezone.utc) - ref_dt).total_seconds()
+    return age_s > PROCESSING_LEASE_SECONDS
+
+
+def _document_row_for_list_response(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Align list payload with GET /documents/{{id}}/status: stale processing rows surface as failed
+    so clients polling list_documents can unblock (previously only status had lease semantics).
+    """
+    if not _document_processing_lease_expired(doc):
+        return doc
+    out = dict(doc)
+    out["status"] = "failed"
+    out["error_type"] = "ProcessingTimeout"
+    out["error_message"] = (
+        f"Document remained in processing for more than {PROCESSING_LEASE_SECONDS} seconds"
+    )
+    out["error_stage"] = "PROCESSING"
+    out["next_action"] = "retry_or_contact_support"
+    return out
+
+
+def _document_blocks_export(doc: Dict[str, Any]) -> bool:
+    """
+    True if this row should block POST /export.
+
+    - ``completed``: does not block.
+    - ``failed``: does not block (export uses ingested transactions; failed uploads add no rows).
+    - ``processing`` past lease: does not block (stale row; same idea as list/status overlay).
+    - ``processing`` within lease: blocks.
+    """
+    s = (doc.get("status") or "").strip().lower()
+    if s == "completed":
+        return False
+    if s == "failed":
+        return False
+    if s == "processing":
+        return not _document_processing_lease_expired(doc)
+    return True
+
+
+def _parse_document_timestamp(value: Any) -> Optional[datetime]:
+    """Parse created_at / updated_at from DB (ISO string or datetime). Returns timezone-aware UTC."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    s = str(value).strip()
+    if not s:
+        return None
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt
+
+
+@router.get("/system/health")
+def system_health():
+    return _HEALTH_RESPONSE
+
+
+@router.get("/system/metrics")
+def system_metrics(request: Request):
+    last_ms = getattr(request.app.state, "last_export_ms", None) if request else None
+    last_at = getattr(request.app.state, "last_export_at", None) if request else None
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "config_version": CONFIG_VERSION,
+        "last_export_ms": last_ms,
+        "last_export_at": last_at,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Standardised error response
+# ---------------------------------------------------------------------------
+
+_ERROR_CODES = {
+    "CURRENCY_MISMATCH": 409,
+    "INVALID_SCHEMA": 400,
+    "DOCUMENTS_NOT_READY": 409,
+    "NOT_FOUND": 404,
+    "BAD_REQUEST": 400,
+    "UNAUTHORIZED": 401,
+    "INTERNAL": 500,
+    "SERVICE_UNAVAILABLE": 503,
+}
+
+
+def _error(code: str, message: str, *, status: int = 0, next_action: Optional[str] = None, details: Optional[Dict] = None):
+    status = status or _ERROR_CODES.get(code, 500)
+    raise HTTPException(
+        status_code=status,
+        detail={
+            "error_code": code,
+            "error_message": message,
+            "next_action": next_action,
+            "details": details or {},
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Repository provider — overridable for tests via app.state
+# ---------------------------------------------------------------------------
+
+def _merge_pdf_bytes_parts(parts: List[bytes]) -> bytes:
+    """Merge PDF byte blobs in order (upload order)."""
+    writer = PdfWriter()
+    for blob in parts:
+        writer.append(io.BytesIO(blob))
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
+def _repos(request: Optional[Request] = None) -> Dict[str, Any]:
+    if request and hasattr(request.app.state, "repos_factory"):
+        return request.app.state.repos_factory()
+    from .db.supabase_repositories import (
+        DealsRepo, DocumentsRepo, RawTxRepo, TransferLinksRepo,
+        EntitiesRepo, TxnEntityMapRepo, OverridesRepo,
+        AnalysisRunsRepo, SnapshotsRepo,
+        EnrichmentsRepo, ClassificationOverridesRepo, CustomFlagsRepo,
+    )
+    return {
+        "deals": DealsRepo(),
+        "documents": DocumentsRepo(),
+        "raw": RawTxRepo(),
+        "links": TransferLinksRepo(),
+        "entities": EntitiesRepo(),
+        "txn_map": TxnEntityMapRepo(),
+        "overrides": OverridesRepo(),
+        "runs": AnalysisRunsRepo(),
+        "snapshots": SnapshotsRepo(),
+        "enrichments": EnrichmentsRepo(),
+        "cls_overrides": ClassificationOverridesRepo(),
+        "custom_flags": CustomFlagsRepo(),
+    }
+
+
+# ===================================================================
+# Deals
+# ===================================================================
+
+@router.post("/deals")
+def create_deal(
+    request: Request,
+    currency: str = Form(...),
+    name: Optional[str] = Form(None),
+    created_by: Optional[str] = Form(None),
+    accrual_revenue_cents: Optional[str] = Form(None),
+    accrual_period_start: Optional[str] = Form(None),
+    accrual_period_end: Optional[str] = Form(None),
+):
+    repos = _repos(request)
+    deal = {
+        "id": str(uuid.uuid4()),
+        "currency": currency.upper(),
+        "name": name,
+        "created_by": created_by or str(uuid.uuid4()),
+    }
+    if accrual_revenue_cents is not None and accrual_revenue_cents.strip():
+        try:
+            deal["accrual_revenue_cents"] = int(accrual_revenue_cents)
+        except ValueError:
+            pass
+    if accrual_period_start is not None and accrual_period_start.strip():
+        deal["accrual_period_start"] = accrual_period_start.strip()
+    if accrual_period_end is not None and accrual_period_end.strip():
+        deal["accrual_period_end"] = accrual_period_end.strip()
+    return {"deal": repos["deals"].create_deal(deal)}
+
+
+@router.get("/deals")
+def list_deals(request: Request, created_by: Optional[str] = None):
+    repos = _repos(request)
+    if not created_by:
+        _error("BAD_REQUEST", "created_by query parameter is required")
+    return {"deals": repos["deals"].list_deals(created_by)}
+
+
+@router.get("/deals/{deal_id}")
+def get_deal(request: Request, deal_id: str):
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+    runs = repos["runs"].list_runs(deal_id)
+    snaps = repos["snapshots"].list_snapshots(deal_id)
+    return {"deal": deal, "analysis_runs": runs, "snapshots": snaps}
+
+
+# ===================================================================
+# Documents / Ingestion
+# ===================================================================
+
+@router.post("/deals/{deal_id}/documents")
+async def upload_document(
+    request: Request,
+    deal_id: str,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    created_by: Optional[str] = Form(None),
+):
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    content = await file.read()
+    document_id = str(uuid.uuid4())
+    fname = file.filename or "upload.csv"
+    ext = ("." + fname.rsplit(".", 1)[-1].lower()) if "." in fname else ".csv"
+    ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".pdf"}
+    if ext not in ALLOWED_EXTENSIONS:
+        _error("BAD_REQUEST", f"Unsupported file type '{ext}'. Accepted: .csv, .xlsx, .pdf")
+    file_type = ext.lstrip(".")
+    created_by_val = created_by or deal.get("created_by") or str(uuid.uuid4())
+
+    document = {
+        "id": document_id,
+        "deal_id": deal_id,
+        "storage_url": f"inline://{fname}",
+        "file_type": file_type.lower(),
+        "status": "processing",
+        "currency_detected": None,
+        "currency_mismatch": False,
+        "created_by": created_by_val,
+    }
+    repos["documents"].create_document(document)
+
+    ingestion = IngestionService(
+        documents_repo=repos["documents"],
+        raw_tx_repo=repos["raw"],
+        analysis_repo=repos["runs"],
+    )
+    # CSV: local parse. PDF/XLSX: parity-ingestion (XLSX uses POST .../v1/ingest/excel — no openpyxl on this worker).
+    background_tasks.add_task(
+        ingestion.process_document_background,
+        document_id=document_id,
+        deal_id=deal_id,
+        created_by=created_by_val,
+        file_bytes=content,
+        file_name=file.filename,
+        file_type=file_type,
+        deal_currency=deal["currency"],
+    )
+
+    return {"ingestion": {"document_id": document_id, "status": "processing", "rows_count": 0}}
+
+
+@router.post(
+    "/deals/{deal_id}/documents/batch",
+    summary="Upload multiple PDFs at once (batch upload)",
+    description=(
+        "Upload 2–3 PDFs; they are merged in upload order and processed as one document. "
+        "Limit: 4 batch uploads per deal (tracked via batch_number)."
+    ),
+)
+async def upload_documents_batch(
+    request: Request,
+    deal_id: str,
+    background_tasks: BackgroundTasks,
+    files: List[UploadFile] = File(..., description="2–3 PDF files to merge"),
+    created_by: Optional[str] = Form(None),
+):
+    """
+    Batch upload: merge multiple PDFs in memory, one document row, background ingest.
+    """
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    try:
+        validate_pdf_count(len(files), max_files=3)
+    except ValueError as exc:
+        _error("BAD_REQUEST", str(exc))
+
+    if len(files) < 2:
+        _error("BAD_REQUEST", "Minimum 2 files required for batch upload")
+
+    docs_repo = repos["documents"]
+    batch_count_fn = getattr(docs_repo, "get_batch_upload_count", None)
+    batch_count = batch_count_fn(deal_id) if batch_count_fn else 0
+
+    if batch_count >= 4:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error_code": "BATCH_LIMIT_REACHED",
+                "error_message": (
+                    "Batch upload limit reached. This deal has used all 4 batch uploads. "
+                    "Use single-file uploads or contact support."
+                ),
+            },
+        )
+
+    next_batch_number = batch_count + 1
+    created_by_val = created_by or deal.get("created_by") or str(uuid.uuid4())
+
+    pdf_parts: List[bytes] = []
+    source_names: List[str] = []
+
+    for i, up in enumerate(files, start=1):
+        fname = up.filename or f"file{i}.pdf"
+        ext = ("." + fname.rsplit(".", 1)[-1].lower()) if "." in fname else ".pdf"
+        if ext != ".pdf":
+            _error("BAD_REQUEST", f"Batch upload accepts PDF only; got '{ext}' for {fname}")
+        content = await up.read()
+        if not content:
+            _error("BAD_REQUEST", f"Empty file: {fname}")
+        pdf_parts.append(content)
+        source_names.append(fname)
+        logger.info(
+            "Batch upload: received part %d/%d name=%s bytes=%d",
+            i,
+            len(files),
+            fname,
+            len(content),
+        )
+
+    try:
+        merged_bytes = _merge_pdf_bytes_parts(pdf_parts)
+    except Exception as exc:
+        logger.exception("PDF merge failed for deal %s", deal_id)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error_code": "MERGE_FAILED",
+                "error_message": f"Failed to merge PDFs: {exc}",
+            },
+        ) from exc
+
+    document_id = str(uuid.uuid4())
+    merged_label = f"batch_{next_batch_number}_merged.pdf"
+
+    document: Dict[str, Any] = {
+        "id": document_id,
+        "deal_id": deal_id,
+        "storage_url": f"inline://{merged_label}",
+        "file_type": "pdf",
+        "status": "processing",
+        "currency_detected": None,
+        "currency_mismatch": False,
+        "created_by": created_by_val,
+        "batch_number": next_batch_number,
+        "source_files": source_names,
+        "is_batch_upload": True,
+    }
+    repos["documents"].create_document(document)
+
+    ingestion = IngestionService(
+        documents_repo=repos["documents"],
+        raw_tx_repo=repos["raw"],
+        analysis_repo=repos["runs"],
+    )
+    background_tasks.add_task(
+        ingestion.process_document_background,
+        document_id=document_id,
+        deal_id=deal_id,
+        created_by=created_by_val,
+        file_bytes=merged_bytes,
+        file_name=merged_label,
+        file_type="pdf",
+        deal_currency=deal["currency"],
+    )
+
+    batches_remaining = max(0, 4 - next_batch_number)
+
+    return {
+        "document_id": document_id,
+        "batch_number": next_batch_number,
+        "batches_remaining": batches_remaining,
+        "files_merged": len(files),
+        "source_files": source_names,
+        "status": "processing",
+        "message": f"Batch upload {next_batch_number}/4 submitted successfully",
+        "ingestion": {
+            "document_id": document_id,
+            "status": "processing",
+            "rows_count": 0,
+        },
+    }
+
+
+@router.get("/deals/{deal_id}/documents")
+def list_documents(request: Request, deal_id: str):
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+    docs = repos["documents"].list_by_deal(deal_id)
+    return {"documents": [_document_row_for_list_response(d) for d in docs]}
+
+
+@router.get("/documents/{document_id}/status")
+def get_document_status(request: Request, document_id: str):
+    repos = _repos(request)
+    doc = repos["documents"].get_document(document_id)
+    if not doc:
+        _error("NOT_FOUND", f"Document {document_id} not found")
+
+    db_status = doc.get("status")
+    processing_timed_out = _document_processing_lease_expired(doc)
+    effective_status = "failed" if processing_timed_out else db_status
+
+    out = {
+        "document_id": doc["id"],
+        "deal_id": doc.get("deal_id"),
+        "status": effective_status,
+        "file_type": doc.get("file_type"),
+        "currency_mismatch": doc.get("currency_mismatch", False),
+        "currency_detected": doc.get("currency_detected"),
+        "created_at": doc.get("created_at"),
+    }
+    if effective_status == "completed":
+        if doc.get("analytics"):
+            out["analytics"] = doc.get("analytics")
+    if effective_status == "failed":
+        if processing_timed_out:
+            out["reason"] = "processing_timeout"
+            out["error_type"] = "ProcessingTimeout"
+            out["error_message"] = (
+                f"Document remained in processing for more than {PROCESSING_LEASE_SECONDS} seconds"
+            )
+            out["stage"] = "PROCESSING"
+            out["next_action"] = "retry_or_contact_support"
+        else:
+            out["error_type"] = doc.get("error_type") or "UnknownError"
+            out["error_message"] = doc.get("error_message") or "Document processing failed"
+            out["stage"] = doc.get("error_stage") or "UNKNOWN"
+            out["next_action"] = doc.get("next_action") or "retry_or_contact_support"
+        # Legacy: keep "error" for backward compat
+        out["error"] = out["error_message"]
+    return out
+
+
+@router.get("/documents/{document_id}/transactions")
+def get_document_transactions(request: Request, document_id: str):
+    repos = _repos(request)
+    doc = repos["documents"].get_document(document_id)
+    if not doc:
+        _error("NOT_FOUND", f"Document {document_id} not found")
+    txns = repos["raw"].list_by_document(document_id)
+    return {"document_id": document_id, "transactions": txns}
+
+
+# ===================================================================
+# Overrides
+# ===================================================================
+
+_REVENUE_ROLES = frozenset({"revenue_operational", "revenue_non_operational"})
+
+
+def _derive_override_weight(old_role: str, new_value: str) -> float:
+    """
+    Deterministic weight from role transition.
+    Revert (0.0): new_value equals current role (neutralizing override).
+    Major (1.0): revenue_operational/revenue_non_operational <-> anything else.
+    Minor (0.5): all other transitions.
+    """
+    old = (old_role or "").strip()
+    new = (new_value or "").strip()
+    if old == new:
+        return 0.0
+    old_in_revenue = old in _REVENUE_ROLES
+    new_in_revenue = new in _REVENUE_ROLES
+    if old_in_revenue != new_in_revenue:
+        return 1.0
+    return 0.5
+
+
+@router.post("/deals/{deal_id}/overrides")
+def add_override(
+    request: Request,
+    deal_id: str,
+    entity_id: str = Form(...),
+    field: str = Form("role"),
+    new_value: str = Form(...),
+    reason: Optional[str] = Form(None),
+    created_by: Optional[str] = Form(None),
+):
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    effective_role = None
+    for ov in sorted(repos["overrides"].list_overrides(deal_id), key=lambda o: o.get("created_at", ""), reverse=True):
+        if ov.get("entity_id") == entity_id:
+            effective_role = ov.get("new_value")
+            break
+    if effective_role is None:
+        for m in repos["txn_map"].list_by_deal(deal_id):
+            if m.get("entity_id") == entity_id:
+                effective_role = m.get("role")
+                break
+
+    weight = _derive_override_weight(effective_role or "", new_value)
+
+    ov = {
+        "id": str(uuid.uuid4()),
+        "deal_id": deal_id,
+        "entity_id": entity_id,
+        "field": field,
+        "old_value": effective_role,
+        "new_value": new_value,
+        "weight": weight,
+        "reason": reason,
+        "created_by": created_by or str(uuid.uuid4()),
+    }
+    repos["overrides"].insert_override(ov)
+    return {"override": ov}
+
+
+@router.get("/deals/{deal_id}/overrides")
+def list_overrides(request: Request, deal_id: str):
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+    return {"overrides": repos["overrides"].list_overrides(deal_id)}
+
+
+# ===================================================================
+# Analysis
+# ===================================================================
+
+@router.get("/deals/{deal_id}/analysis/latest")
+def get_latest_analysis(request: Request, deal_id: str):
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+    runs = repos["runs"].list_runs(deal_id)
+    if not runs:
+        return {"analysis_run": None}
+    latest = sorted(runs, key=lambda r: r.get("created_at", ""), reverse=True)[0]
+    return {"analysis_run": latest}
+
+
+# ===================================================================
+# Export / Snapshot
+# ===================================================================
+
+
+def _snapshot_for_public_response(snapshot: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    Drop canonical_json from the HTTP response. It can be multi‑MB for large deals and
+    is not required by the Fund IQ UI (only id / hashes); including it risks 500s from
+    response serialization or proxies.
+    """
+    if not snapshot:
+        return None
+    out = dict(snapshot)
+    out.pop("canonical_json", None)
+    return out
+
+
+@router.post("/deals/{deal_id}/export")
+def export(request: Request, deal_id: str, force: bool = False):
+    started = time.perf_counter()
+    stage = "EXPORT_START"
+    logger.info("[EXPORT] stage=%s deal_id=%s force=%s", stage, deal_id, force)
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+    docs = repos["documents"].list_by_deal(deal_id)
+    blocking = [d for d in docs if _document_blocks_export(d)]
+    if blocking:
+        _error("DOCUMENTS_NOT_READY", "Documents still processing", status=409, next_action="wait_or_retry")
+    raw = list(repos["raw"].list_by_deal(deal_id))
+    stage = "FETCH_INPUTS_DONE"
+    logger.info("[EXPORT] stage=%s raw_count=%d", stage, len(raw))
+    overrides = list(repos["overrides"].list_overrides(deal_id))
+
+    if not raw:
+        _error("BAD_REQUEST", "No transactions to export. Upload documents first.", next_action="upload_new_file")
+
+    # Short-circuit: return existing snapshot if no new docs/overrides since last export.
+    # Skipped when force=True to rebuild the snapshot unconditionally.
+    latest_snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    latest_doc_at = repos["documents"].get_latest_update_at(deal_id)
+    latest_override_at = repos["overrides"].get_latest_update_at(deal_id) or ""
+    snap_created_at = (latest_snapshot or {}).get("created_at") or ""
+    if not force and (
+        latest_snapshot
+        and snap_created_at
+        and (not latest_doc_at or snap_created_at >= latest_doc_at)
+        and snap_created_at > latest_override_at
+    ):
+        latest_run = repos["runs"].get_latest_run(deal_id)
+        if latest_run and latest_run.get("id") == latest_snapshot.get("analysis_run_id"):
+            entities = list(repos["entities"].list_by_deal(deal_id))
+            txn_map = list(repos["txn_map"].list_by_deal(deal_id))
+            run = dict(latest_run)
+            run.setdefault("bank_operational_inflow_cents", 0)
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            if request:
+                request.app.state.last_export_ms = duration_ms
+                request.app.state.last_export_at = datetime.now(timezone.utc).isoformat()
+            logger.info("[EXPORT] deal=%s ms=%d short_circuit=1", deal_id, duration_ms)
+            return {
+                "analysis_run": run,
+                "snapshot": _snapshot_for_public_response(latest_snapshot),
+                "entities": entities,
+                "txn_entity_map": txn_map,
+            }
+
+    stage = "PIPELINE_START"
+    run, links, entities, txn_map = run_pipeline(
+        deal_id=deal_id,
+        raw_transactions=raw,
+        overrides=overrides,
+        accrual={
+            "accrual_revenue_cents": deal.get("accrual_revenue_cents"),
+            "accrual_period_start": deal.get("accrual_period_start"),
+            "accrual_period_end": deal.get("accrual_period_end"),
+        },
+    )
+    stage = "PIPELINE_DONE"
+    logger.info("[EXPORT] stage=%s", stage)
+
+    txn_id_to_uuid = {tx["txn_id"]: tx["id"] for tx in raw if "id" in tx}
+    for rec in txn_map:
+        text_tid = rec["txn_id"]
+        if text_tid in txn_id_to_uuid:
+            rec["txn_id"] = txn_id_to_uuid[text_tid]
+
+    for lnk in links:
+        if lnk.get("id") is None:
+            del lnk["id"]
+
+    repos["txn_map"].delete_eq("deal_id", deal_id)
+    repos["links"].delete_eq("deal_id", deal_id)
+    repos["entities"].delete_eq("deal_id", deal_id)
+
+    run_for_db = {k: v for k, v in run.items() if k != "bank_operational_inflow_cents"}
+    repos["runs"].insert_run(run_for_db)
+    repos["links"].insert_batch(links)
+    repos["entities"].upsert_entities(entities)
+    repos["txn_map"].upsert_mappings(txn_map)
+
+    stage = "SNAPSHOT_BUILD_DONE"
+    logger.info("[EXPORT] stage=%s", stage)
+    payload = build_pds_payload(
+        schema_version=run["schema_version"],
+        config_version=run["config_version"],
+        deal_id=deal_id,
+        currency=deal["currency"],
+        raw_transactions=raw,
+        transfer_links=links,
+        entities=entities,
+        txn_entity_map=txn_map,
+        metrics={
+            "coverage_bp": run["coverage_pct_bp"],
+            "missing_month_count": run["missing_month_count"],
+            "missing_month_penalty_bp": run["missing_month_penalty_bp"],
+            "reconciliation_status": run["reconciliation_status"],
+            "reconciliation_bp": run["reconciliation_pct_bp"],
+        },
+        confidence={
+            "final_confidence_bp": run["final_confidence_bp"],
+            "tier": run["tier"],
+            "tier_capped": run["tier_capped"],
+            "override_penalty_bp": run["override_penalty_bp"],
+        },
+        overrides_applied=overrides,
+    )
+    snapshot = export_snapshot(
+        snapshot_repo=repos["snapshots"],
+        deal_id=deal_id,
+        analysis_run_id=run["id"],
+        payload=payload,
+        created_by=deal.get("created_by") or str(uuid.uuid4()),
+    )
+    stage = "SNAPSHOT_INSERT_DONE"
+    logger.info("[EXPORT] stage=%s", stage)
+    stage = "EXPORT_DONE"
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    if request:
+        request.app.state.last_export_ms = duration_ms
+        request.app.state.last_export_at = datetime.now(timezone.utc).isoformat()
+    logger.info("[EXPORT] stage=%s deal=%s ms=%d short_circuit=0", stage, deal_id, duration_ms)
+    return {
+        "analysis_run": run,
+        "snapshot": _snapshot_for_public_response(snapshot),
+        "entities": entities,
+        "txn_entity_map": txn_map,
+    }
+
+
+@router.get("/deals/{deal_id}/snapshots")
+def list_snapshots(request: Request, deal_id: str):
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+    return {"snapshots": repos["snapshots"].list_snapshots(deal_id)}
+
+
+@router.get("/snapshots/{snapshot_id}")
+def get_snapshot(request: Request, snapshot_id: str):
+    repos = _repos(request)
+    snap = repos["snapshots"].get_snapshot(snapshot_id)
+    if not snap:
+        _error("NOT_FOUND", f"Snapshot {snapshot_id} not found")
+    return {"snapshot": snap}
+
+
+@router.get("/deals/{deal_id}/export/transactions")
+def export_transactions_csv(request: Request, deal_id: str):
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+    raw = list(repos["raw"].list_by_deal(deal_id))
+    if not raw:
+        _error("NOT_FOUND", "No transactions found. Upload documents first.")
+
+    # Fetch entity/txn-map for entity_name enrichment
+    entities = list(repos["entities"].list_by_deal(deal_id))
+    txn_map_rows = list(repos["txn_map"].list_by_deal(deal_id))
+    # entity_id is a SHA256 hex string; cast to str to guard against int storage variants
+    entity_name_by_id = {str(e["entity_id"]): e.get("display_name") or "" for e in entities}
+    # txn_id in stored map is UUID (Supabase after export rewrite) or text id (memory/tests)
+    txn_id_to_entity_id = {
+        str(m["txn_id"]): str(m["entity_id"])
+        for m in txn_map_rows
+        if m.get("txn_id") and m.get("entity_id")
+    }
+    txn_id_to_role = {str(m["txn_id"]): m.get("role", "") for m in txn_map_rows}
+
+    raw.sort(key=lambda r: (
+        r.get("txn_date", ""),
+        r.get("account_id", ""),
+        r.get("txn_id", ""),
+    ))
+
+    fieldnames = ["txn_date", "description", "amount_cents", "account_id", "txn_id", "entity_name", "role"]
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for row in raw:
+        # Try UUID row id first (Supabase), fall back to text txn_id (memory/tests)
+        eid = (
+            txn_id_to_entity_id.get(str(row.get("id") or ""))
+            or txn_id_to_entity_id.get(str(row.get("txn_id") or ""))
+            or ""
+        )
+        entity_name = entity_name_by_id.get(str(eid), "")
+        # entity_name population: ~50%+ expected; was 0% before fix
+        role = (
+            txn_id_to_role.get(str(row.get("id", "")))
+            or txn_id_to_role.get(str(row.get("txn_id", "")))
+            or ""
+        )
+        writer.writerow({
+            "txn_date": row.get("txn_date", ""),
+            "description": row.get("normalized_descriptor", ""),
+            "amount_cents": row.get("signed_amount_cents", ""),
+            "account_id": row.get("account_id", ""),
+            "txn_id": row.get("txn_id", ""),
+            "entity_name": entity_name,
+            "role": role,
+        })
+
+    content = output.getvalue()
+    filename = f"transactions_{deal_id[:8]}.csv"
+    return StreamingResponse(
+        iter([content]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/deals/{deal_id}/transactions")
+def list_deal_transactions(request: Request, deal_id: str):
+    """
+    Return all transactions for a deal with their current roles and entity names.
+    Used by the Parity Review enrichment UI.
+    """
+    repos = _repos(request)
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    raw = list(repos["raw"].list_by_deal(deal_id))
+    entities = list(repos["entities"].list_by_deal(deal_id))
+    txn_map_rows = list(repos["txn_map"].list_by_deal(deal_id))
+
+    entity_name_by_id = {str(e["entity_id"]): e.get("display_name") or "" for e in entities}
+    txn_id_to_entity_id = {
+        str(m["txn_id"]): str(m["entity_id"])
+        for m in txn_map_rows
+        if m.get("txn_id") and m.get("entity_id")
+    }
+    txn_id_to_role = {str(m["txn_id"]): m.get("role", "") for m in txn_map_rows}
+
+    result = []
+    for row in sorted(raw, key=lambda r: (r.get("txn_date", ""), r.get("txn_id", ""))):
+        row_uuid = str(row.get("id") or "")
+        row_txn_id = str(row.get("txn_id") or "")
+        eid = txn_id_to_entity_id.get(row_uuid) or txn_id_to_entity_id.get(row_txn_id) or ""
+        role = txn_id_to_role.get(row_uuid) or txn_id_to_role.get(row_txn_id) or ""
+        result.append({
+            "id": row_uuid,
+            "txn_id": row_txn_id,
+            "txn_date": row.get("txn_date"),
+            "description": row.get("normalized_descriptor", ""),
+            "signed_amount_cents": row.get("signed_amount_cents", 0),
+            "account_id": row.get("account_id", ""),
+            "role": role,
+            "entity_name": entity_name_by_id.get(eid, ""),
+        })
+
+    return {"deal_id": deal_id, "transactions": result}
+
+
+@router.get("/deals/{deal_id}/snapshot/pdf")
+def get_snapshot_pdf(request: Request, deal_id: str):
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+    snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    if not snapshot:
+        _error("NOT_FOUND", "No snapshot found for this deal. Run POST /export first.")
+    stored_cj = snapshot.get("canonical_json") or ""
+    if not stored_cj:
+        _error("INTERNAL", "Snapshot exists but canonical_json is empty.")
+    import json
+    canonical = json.loads(decompress_canonical_json_if_needed(stored_cj))
+    snap_meta = {
+        "id":                   snapshot.get("id"),
+        "sha256_hash":          snapshot.get("sha256_hash"),
+        "financial_state_hash": snapshot.get("financial_state_hash"),
+    }
+    pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta)
+    filename = f"parity_snapshot_{deal_id}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/deals/{deal_id}/snapshot/pdf/enriched")
+def get_enriched_pdf(request: Request, deal_id: str, enrichment_id: Optional[str] = None):
+    """
+    Export PDF with Section A (base analytics) + Section B (analyst enrichment).
+    Uses the latest final enrichment unless enrichment_id is specified.
+    """
+    repos = _repos(request)
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    if not snapshot:
+        _error("NOT_FOUND", "No snapshot found. Run POST /export first.")
+
+    # Resolve enrichment
+    if enrichment_id:
+        enrichment = repos["enrichments"].get_enrichment(enrichment_id)
+        if not enrichment:
+            _error("NOT_FOUND", f"Enrichment {enrichment_id} not found")
+    else:
+        enrichment = repos["enrichments"].get_latest_for_snapshot(snapshot["id"])
+
+    # Hydrate enrichment with overrides + flags if found
+    if enrichment:
+        overrides = list(repos["cls_overrides"].list_by_enrichment(enrichment["id"]))
+        flags = list(repos["custom_flags"].list_by_enrichment(enrichment["id"]))
+        enrichment = {**enrichment, "overrides": overrides, "flags": flags}
+
+    stored_cj = snapshot.get("canonical_json") or ""
+    if not stored_cj:
+        _error("INTERNAL", "Snapshot canonical_json is empty.")
+
+    import json as _json
+    canonical = _json.loads(decompress_canonical_json_if_needed(stored_cj))
+    snap_meta = {
+        "id":                   snapshot.get("id"),
+        "sha256_hash":          snapshot.get("sha256_hash"),
+        "financial_state_hash": snapshot.get("financial_state_hash"),
+    }
+
+    pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta, enrichment)
+    suffix = "_enriched" if enrichment else ""
+    filename = f"parity_{deal_id}{suffix}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ===================================================================
+# Analyst Enrichment
+# ===================================================================
+
+from .core.enrichment_engine import (  # noqa: E402
+    build_enrichment_record,
+    build_override_records,
+    build_flag_records,
+    evaluate_threshold_flag,
+)
+
+
+@router.post("/deals/{deal_id}/enrichment")
+def create_enrichment(request: Request, deal_id: str, body: dict = Body(...)):
+    """
+    Create a new analyst enrichment layer on top of the latest base snapshot.
+
+    Body fields (all optional except analyst_id):
+      analyst_id     str   — email or user identifier
+      analyst_name   str
+      overrides      list  — [{txn_id, original_role, override_role, override_reason, original_reason?}]
+      flags          list  — [{flag_type, flag_name, flag_severity, flag_description, criteria}]
+                             criteria is evaluated against the base snapshot automatically
+      narrative      str
+      enrichment_reason str
+      is_final       bool
+    """
+    repos = _repos(request)
+
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    base_snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    if not base_snapshot:
+        _error("NOT_FOUND", "No snapshot found. Run export first.")
+
+    analyst_id = (body.get("analyst_id") or "").strip()
+    if not analyst_id:
+        _error("BAD_REQUEST", "analyst_id is required")
+
+    raw_overrides = body.get("overrides") or []
+    raw_flags = body.get("flags") or []
+    narrative = (body.get("narrative") or "").strip()
+    enrichment_reason = (body.get("enrichment_reason") or "").strip()
+    is_final = bool(body.get("is_final", False))
+
+    # Evaluate each flag's criteria against base snapshot
+    evaluated_flags = []
+    for f in raw_flags:
+        result = evaluate_threshold_flag(f, base_snapshot)
+        evaluated_flags.append({**f, **result})
+
+    enrichment = build_enrichment_record(
+        base_snapshot_id=base_snapshot["id"],
+        base_snapshot_hash=base_snapshot["sha256_hash"],
+        analyst_id=analyst_id,
+        analyst_name=body.get("analyst_name"),
+        overrides=raw_overrides,
+        flags=evaluated_flags,
+        narrative=narrative,
+        enrichment_reason=enrichment_reason,
+        is_final=is_final,
+    )
+
+    # Idempotent: return existing if same hash
+    existing = repos["enrichments"].get_by_hash(enrichment["enriched_hash"])
+    if existing:
+        return {"enrichment_id": existing["id"], "enriched_hash": existing["enriched_hash"], "created": False}
+
+    saved = repos["enrichments"].insert_enrichment(enrichment)
+
+    override_records = build_override_records(saved["id"], raw_overrides, analyst_id)
+    if override_records:
+        repos["cls_overrides"].insert_batch(override_records)
+
+    flag_records = build_flag_records(saved["id"], evaluated_flags, analyst_id)
+    if flag_records:
+        repos["custom_flags"].insert_batch(flag_records)
+
+    return {"enrichment_id": saved["id"], "enriched_hash": saved["enriched_hash"], "created": True}
+
+
+@router.get("/deals/{deal_id}/enrichment/latest")
+def get_latest_enrichment(request: Request, deal_id: str):
+    """Return the most recent enrichment for the latest base snapshot, or null."""
+    repos = _repos(request)
+
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    base_snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    if not base_snapshot:
+        return {"enrichment": None}
+
+    enrichment = repos["enrichments"].get_latest_for_snapshot(base_snapshot["id"])
+    if not enrichment:
+        return {"enrichment": None}
+
+    overrides = repos["cls_overrides"].list_by_enrichment(enrichment["id"])
+    flags = repos["custom_flags"].list_by_enrichment(enrichment["id"])
+
+    return {
+        "enrichment": {
+            **enrichment,
+            "overrides": list(overrides),
+            "flags": list(flags),
+        }
+    }
+
+
+@router.get("/enrichments/{enrichment_id}")
+def get_enrichment(request: Request, enrichment_id: str):
+    """Return a specific enrichment with its overrides and flags."""
+    repos = _repos(request)
+
+    enrichment = repos["enrichments"].get_enrichment(enrichment_id)
+    if not enrichment:
+        _error("NOT_FOUND", f"Enrichment {enrichment_id} not found")
+
+    overrides = repos["cls_overrides"].list_by_enrichment(enrichment_id)
+    flags = repos["custom_flags"].list_by_enrichment(enrichment_id)
+
+    return {
+        **enrichment,
+        "overrides": list(overrides),
+        "flags": list(flags),
+    }
+
+
+@router.post("/enrichments/{enrichment_id}/finalize")
+def finalize_enrichment(request: Request, enrichment_id: str):
+    """Mark an enrichment as final (ready for client export)."""
+    repos = _repos(request)
+
+    enrichment = repos["enrichments"].get_enrichment(enrichment_id)
+    if not enrichment:
+        _error("NOT_FOUND", f"Enrichment {enrichment_id} not found")
+
+    updated = repos["enrichments"].mark_final(enrichment_id)
+    return {"enrichment_id": enrichment_id, "is_final": True, "updated": updated is not None}
+
+
+@router.post("/enrichments/{enrichment_id}/evaluate-flags")
+def evaluate_flags(request: Request, enrichment_id: str, body: dict = Body(...)):
+    """
+    Evaluate a list of flag definitions against the base snapshot without persisting.
+    Useful for previewing flag results in the UI before saving an enrichment.
+
+    Body: { "flags": [...flag_defs...] }
+    """
+    repos = _repos(request)
+
+    enrichment = repos["enrichments"].get_enrichment(enrichment_id)
+    if not enrichment:
+        _error("NOT_FOUND", f"Enrichment {enrichment_id} not found")
+
+    base_snapshot = repos["snapshots"].get_snapshot(enrichment["base_snapshot_id"])
+    if not base_snapshot:
+        _error("NOT_FOUND", "Base snapshot not found")
+
+    raw_flags = body.get("flags") or []
+    results = []
+    for f in raw_flags:
+        result = evaluate_threshold_flag(f, base_snapshot)
+        results.append({**f, **result})
+
+    return {"flags": results}
+
+
+# ===================================================================
+# Parity Review — deterministic Q&A (LLM = intent classifier only)
+# ===================================================================
+
+from .ask import classify_intent, extract_aggregates, answer_intent  # noqa: E402
+
+
+@router.post("/deals/{deal_id}/ask")
+def ask_parity(request: Request, deal_id: str, body: dict = Body(...)):
+    question = (body.get("question") or "").strip()
+    if not question:
+        _error("BAD_REQUEST", "question is required")
+    repos = _repos(request)
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+    snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    if not snapshot:
+        _error("NOT_FOUND", "No snapshot found. Run export first.")
+    intent = classify_intent(question)
+    if intent is None:
+        return {"answer": "This question is outside supported scope.", "intent": None}
+    agg = extract_aggregates(snapshot)
+    return {"answer": answer_intent(intent, agg), "intent": intent}

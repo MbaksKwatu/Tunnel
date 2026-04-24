@@ -1,0 +1,231 @@
+import datetime
+import io
+import sys
+import unittest
+from copy import deepcopy
+from pathlib import Path
+
+from openpyxl import Workbook
+
+_TUNNEL = Path(__file__).resolve().parents[2]
+_PARITY = _TUNNEL / "parity-ingestion"
+if _PARITY.is_dir() and str(_PARITY) not in sys.path:
+    sys.path.insert(0, str(_PARITY))
+from app.parsing_errors import InvalidSchemaError as XlsxInvalidSchemaError  # noqa: E402
+
+from backend.v1.parsing.xlsx_parser import (
+    parse_xlsx,
+    _is_equity_excel,
+    _normalise_equity_excel_columns,
+)
+from backend.v1.parsing.csv_parser import parse_csv
+from backend.v1.parsing.errors import InvalidSchemaError
+
+_FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+EQUITY_JAN_XLSX = _FIXTURES_DIR / "test_equity_jan_fixture.xlsx"
+EQUITY_FEB_XLSX = _FIXTURES_DIR / "test_equity_feb_fixture.xlsx"
+
+
+def _make_wb(rows):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["date", "amount", "description"])
+    for r in rows:
+        ws.append(r)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+class TestDeterministicParsers(unittest.TestCase):
+    def test_xlsx_same_file_same_hash(self):
+        rows = [
+            ["2024-01-01", "100.00", "A"],
+            ["2024-01-02", "-50", "B"],
+        ]
+        content = _make_wb(rows)
+        parsed1, hash1, _ = parse_xlsx(content, "doc-1", "USD")
+        parsed2, hash2, _ = parse_xlsx(content, "doc-1", "USD")
+        self.assertEqual(parsed1, parsed2)
+        self.assertEqual(hash1, hash2)
+
+    def test_xlsx_reorder_rows_same_hash(self):
+        rows_a = [
+            ["2024-01-01", "100", "A"],
+            ["2024-01-02", "200", "B"],
+        ]
+        rows_b = deepcopy(rows_a)[::-1]
+        content_a = _make_wb(rows_a)
+        content_b = _make_wb(rows_b)
+        parsed_a, hash_a, _ = parse_xlsx(content_a, "doc-1", "USD")
+        parsed_b, hash_b, _ = parse_xlsx(content_b, "doc-1", "USD")
+        self.assertEqual(parsed_a, parsed_b)
+        self.assertEqual(hash_a, hash_b)
+
+    def test_xlsx_amount_equivalence(self):
+        rows = [
+            ["2024-01-01", "100", "A"],
+            ["2024-01-02", "100.00", "B"],
+        ]
+        content = _make_wb(rows)
+        parsed, _, _ = parse_xlsx(content, "doc-1", "USD")
+        cents = [r["signed_amount_cents"] for r in parsed]
+        self.assertIn(10000, cents)
+
+    def test_xlsx_invalid_schema_missing_header(self):
+        wb = Workbook()
+        ws = wb.active
+        ws.append(["date", "description"])  # missing amount
+        buf = io.BytesIO()
+        wb.save(buf)
+        with self.assertRaises(XlsxInvalidSchemaError):
+            parse_xlsx(buf.getvalue(), "doc-1", "USD")
+
+    def test_equity_transacti_on_date_header_variant_with_datetime_cell(self):
+        """'Transacti on Date' split-word header is detected; datetime cell is parsed correctly."""
+        wb = Workbook()
+        ws = wb.active
+        ws.append(
+            [
+                "Narrative",
+                "Transacti on Date",
+                "Debit",
+                "Credit",
+                "Running Balance",
+            ]
+        )
+        ws.append(["Test txn", datetime.datetime(2024, 12, 2), 100, None, None])
+        buf = io.BytesIO()
+        wb.save(buf)
+        rows, _, _ = parse_xlsx(buf.getvalue(), "doc-dec", "KES")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["txn_date"], "2024-12-02")
+        self.assertIsInstance(rows[0]["signed_amount_cents"], int)
+        self.assertNotIn("debit", str(rows[0]["raw_descriptor"]).lower())
+
+    def test_equity_skips_duplicate_column_title_row_under_header(self):
+        """Nov/Dec layout: second row repeats 'Debit'/'Credit' labels — must not parse as amounts."""
+        wb = Workbook()
+        ws = wb.active
+        ws.append(
+            [
+                "Narrative",
+                "Transacti on Date",
+                "Debit",
+                "Credit",
+                "Running Balance",
+            ]
+        )
+        ws.append(["Debit", "Credit", "Debit", "Credit", "Running Balance"])
+        ws.append(["Pay vendor", datetime.datetime(2025, 12, 15), 5000, None, None])
+        buf = io.BytesIO()
+        wb.save(buf)
+        rows, _, _ = parse_xlsx(buf.getvalue(), "doc-dup", "KES")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["signed_amount_cents"], -500000)
+        self.assertEqual(rows[0]["raw_descriptor"].strip().lower(), "pay vendor")
+
+    def test_csv_reorder_rows_same_hash(self):
+        content_a = "date,amount,description\n2024-01-01,100,A\n2024-01-02,200,B\n"
+        content_b = "date,amount,description\n2024-01-02,200,B\n2024-01-01,100,A\n"
+        parsed_a, hash_a, _ = parse_csv(content_a.encode(), "doc-1", "USD")
+        parsed_b, hash_b, _ = parse_csv(content_b.encode(), "doc-1", "USD")
+        self.assertEqual(parsed_a, parsed_b)
+        self.assertEqual(hash_a, hash_b)
+
+    def test_equity_excel_january_mapping(self):
+        from openpyxl import load_workbook
+
+        wb = load_workbook(EQUITY_JAN_XLSX, data_only=True)
+        ws = wb.worksheets[0]
+        header = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
+        self.assertTrue(_is_equity_excel(header))
+        mapping = _normalise_equity_excel_columns(header)
+        for col in ("date", "description", "debit", "credit", "balance"):
+            self.assertIn(col, mapping)
+
+        rows, _, _ = parse_xlsx(EQUITY_JAN_XLSX.read_bytes(), "doc-jan", "KES")
+        self.assertEqual(len(rows), 8)
+        signed = [r["signed_amount_cents"] for r in rows]
+        self.assertTrue(any(v > 0 for v in signed))
+        self.assertTrue(any(v < 0 for v in signed))
+
+    def test_equity_excel_february_mapping(self):
+        from openpyxl import load_workbook
+
+        wb = load_workbook(EQUITY_FEB_XLSX, data_only=True)
+        ws = wb.worksheets[0]
+        header = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
+        self.assertTrue(_is_equity_excel(header))
+        mapping = _normalise_equity_excel_columns(header)
+        for col in ("date", "description", "debit", "credit", "balance"):
+            self.assertIn(col, mapping)
+
+        rows, _, _ = parse_xlsx(EQUITY_FEB_XLSX.read_bytes(), "doc-feb", "KES")
+        self.assertEqual(len(rows), 8)
+
+    def test_equity_excel_march_2025_cheque_number_column(self):
+        """March 2025 variant — Cheque Number column instead of Customer Reference."""
+        wb = Workbook()
+        ws = wb.active
+        ws.append(
+            [
+                "Transacti on Date",
+                "Value Date",
+                "Narrative",
+                "Transaction Reference",
+                "Debit",
+                "Credit",
+                "Running Balance",
+                "Cheque Number",
+            ]
+        )
+        ws.append(
+            [
+                datetime.datetime(2025, 3, 1),
+                datetime.datetime(2025, 3, 1),
+                "MPS 254743391150 TC12VYJ3KK DENNIS KARONJI",
+                "S8011966",
+                None,
+                40.0,
+                1917059.0,
+                None,
+            ]
+        )
+        ws.append(
+            [
+                datetime.datetime(2025, 3, 1),
+                datetime.datetime(2025, 3, 1),
+                "REJECT:007010:INSUFFICIENT FUNDS - REFER TO DRAWER",
+                "S8158141",
+                19856.0,
+                None,
+                1897203.0,
+                None,
+            ]
+        )
+        ws.append(
+            [
+                datetime.datetime(2025, 3, 1),
+                datetime.datetime(2025, 3, 1),
+                "Unpaid Cheque Commission",
+                "S8159066",
+                2400.0,
+                None,
+                1894803.0,
+                None,
+            ]
+        )
+
+        buf = io.BytesIO()
+        wb.save(buf)
+
+        rows, _, _ = parse_xlsx(buf.getvalue(), "doc-mar", "KES")
+        self.assertEqual(len(rows), 3)
+        descs = [str(r.get("raw_descriptor", "")).upper() for r in rows]
+        self.assertTrue(any("INSUFFICIENT FUNDS" in d for d in descs))
+
+
+if __name__ == "__main__":
+    unittest.main()

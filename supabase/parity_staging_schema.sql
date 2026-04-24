@@ -7,6 +7,34 @@
 -- Run via: psql $STAGING_DB_URL -f parity_staging_schema.sql
 -- =============================================================================
 
+-- ── Drop existing tables (reverse FK order) to guarantee schema parity ───────
+-- Safe: sync workflow truncates all data before calling this script anyway.
+
+DROP TABLE IF EXISTS pds_custom_flags CASCADE;
+DROP TABLE IF EXISTS pds_classification_overrides CASCADE;
+DROP TABLE IF EXISTS pds_snapshot_enrichments CASCADE;
+DROP TABLE IF EXISTS pds_snapshots CASCADE;
+DROP TABLE IF EXISTS pds_analysis_runs CASCADE;
+DROP TABLE IF EXISTS pds_overrides CASCADE;
+DROP TABLE IF EXISTS pds_txn_entity_map CASCADE;
+DROP TABLE IF EXISTS pds_entities CASCADE;
+DROP TABLE IF EXISTS pds_transfer_links CASCADE;
+DROP TABLE IF EXISTS pds_raw_transactions CASCADE;
+DROP TABLE IF EXISTS pds_documents CASCADE;
+DROP TABLE IF EXISTS pds_deals CASCADE;
+DROP TABLE IF EXISTS benchmark_metrics CASCADE;
+DROP TABLE IF EXISTS deal_conversations CASCADE;
+DROP TABLE IF EXISTS judgments CASCADE;
+DROP TABLE IF EXISTS evidence CASCADE;
+DROP TABLE IF EXISTS notes CASCADE;
+DROP TABLE IF EXISTS anomalies CASCADE;
+DROP TABLE IF EXISTS extracted_rows CASCADE;
+DROP TABLE IF EXISTS documents CASCADE;
+DROP TABLE IF EXISTS thesis CASCADE;
+DROP TABLE IF EXISTS deals CASCADE;
+DROP TABLE IF EXISTS profiles CASCADE;
+
+
 -- ── Enums ────────────────────────────────────────────────────────────────────
 
 DO $$ BEGIN

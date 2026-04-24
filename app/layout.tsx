@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import Navigation from "@/components/Navigation";
+import { AuthProvider } from "@/components/AuthProvider";
 
 // Import Inter font
 const inter = Inter({ 
@@ -10,8 +12,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Parity - AI Investment Intelligence",
-  description: "AI-native financial analysis and due diligence platform for SME investments",
+  title: "Parity PDS - Deal Analysis",
+  description: "Deterministic v1 deal analysis and snapshot export",
 };
 
 export default function RootLayout({
@@ -22,7 +24,10 @@ export default function RootLayout({
   return (
     <html lang="en" className={`dark ${inter.variable}`}>
       <body className="font-body bg-base-950 text-gray-200 antialiased">
-        {children}
+        <AuthProvider>
+          <Navigation />
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );

@@ -4,16 +4,21 @@
 # every day at 02:00 UTC. The engineer always has a fresh copy of real data.
 #
 # Required GitHub secrets (Settings > Secrets and variables > Actions):
-#   LIVE_DB_URL     — postgres://postgres:[password]@db.ifcdbhbuucmjgtjkluna.supabase.co:5432/postgres
-#   STAGING_DB_URL  — postgres://postgres:[password]@db.kstuensfekanfberjubz.supabase.co:5432/postgres
+#   Use the SESSION POOLER URLs from Supabase (not the direct DB URLs).
+#   Find them: Supabase dashboard → Connect → Session pooler tab
+#
+#   LIVE_DB_URL     — postgres://postgres.[ref]:[password]@aws-0-eu-west-1.pooler.supabase.com:5432/postgres
+#   STAGING_DB_URL  — postgres://postgres.[ref]:[password]@aws-0-eu-west-1.pooler.supabase.com:5432/postgres
+#
+#   The direct db.*.supabase.co URLs use IPv6 which GitHub Actions cannot reach.
 #
 # One-time setup: before the first sync, apply the schema to parity-staging:
 #   psql $STAGING_DB_URL -f supabase/parity_staging_schema.sql
 #
 # RLS note: synced rows keep their original created_by UUIDs from live.
 # The backend uses the service_role key which bypasses RLS, so the engineer
-# can read all data via the API. For Supabase Studio access, connect as
-# service_role or the Supabase dashboard (which bypasses RLS).
+# can read all data via the API. For Supabase Studio access connect via the
+# Supabase dashboard which bypasses RLS.
 
 name: Sync parity-staging DB
 
@@ -31,10 +36,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install PostgreSQL client
+      - name: Install PostgreSQL 17 client
         run: |
+          sudo apt-get install -y curl ca-certificates
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
+          echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
-          sudo apt-get install -y postgresql-client
+          sudo apt-get install -y postgresql-client-17
 
       - name: Validate secrets present
         run: |
@@ -50,18 +60,16 @@ jobs:
           LIVE_DB_URL: ${{ secrets.LIVE_DB_URL }}
           STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
 
-      # Dump all pds_* tables in insertion-safe order.
-      # --disable-triggers lets us restore without worrying about FK order.
-      # --use-copy is faster than INSERT for large tables.
+      # Use custom format (-Fc) — pg_restore handles FK ordering and trigger
+      # disabling automatically without the plain-SQL parsing quirks.
       - name: Dump pds_* data from live
         env:
-          PGPASSWORD: ""   # password is embedded in the URL
+          PGSSLMODE: require
         run: |
-          pg_dump \
+          /usr/lib/postgresql/17/bin/pg_dump \
             "${{ secrets.LIVE_DB_URL }}" \
+            --format=custom \
             --data-only \
-            --disable-triggers \
-            --use-copy \
             --table=pds_deals \
             --table=pds_documents \
             --table=pds_raw_transactions \
@@ -74,55 +82,48 @@ jobs:
             --table=pds_snapshot_enrichments \
             --table=pds_classification_overrides \
             --table=pds_custom_flags \
-            -f /tmp/pds_data.sql
+            -f /tmp/pds_data.dump
 
-          LINES=$(wc -l < /tmp/pds_data.sql)
-          echo "Dump complete: ${LINES} lines"
+          SIZE=$(du -sh /tmp/pds_data.dump | cut -f1)
+          echo "Dump complete: ${SIZE}"
 
-      # Truncate staging in reverse FK order, then restore.
-      # superuser / service_role bypasses RLS and triggers on Supabase.
-      - name: Truncate staging pds_* tables
+      # Drop and recreate all tables from scratch — guarantees schema parity
+      # with live even if staging had a stale schema from a previous version.
+      - name: Reset staging schema
+        env:
+          PGSSLMODE: require
         run: |
-          psql "${{ secrets.STAGING_DB_URL }}" <<'SQL'
-            SET session_replication_role = replica;
-            TRUNCATE
-              pds_custom_flags,
-              pds_classification_overrides,
-              pds_snapshot_enrichments,
-              pds_snapshots,
-              pds_analysis_runs,
-              pds_overrides,
-              pds_txn_entity_map,
-              pds_entities,
-              pds_transfer_links,
-              pds_raw_transactions,
-              pds_documents,
-              pds_deals
-            CASCADE;
-            SET session_replication_role = DEFAULT;
-          SQL
-
-      - name: Restore pds_* data to staging
-        run: |
-          psql "${{ secrets.STAGING_DB_URL }}" \
-            --single-transaction \
+          /usr/lib/postgresql/17/bin/psql "${{ secrets.STAGING_DB_URL }}" \
             -v ON_ERROR_STOP=1 \
-            -c "SET session_replication_role = replica;" \
-            -f /tmp/pds_data.sql \
-            -c "SET session_replication_role = DEFAULT;"
+            -f supabase/parity_staging_schema.sql
+
+      # pg_restore handles table ordering and disables triggers automatically.
+      - name: Restore pds_* data to staging
+        env:
+          PGSSLMODE: require
+        run: |
+          /usr/lib/postgresql/17/bin/pg_restore \
+            --dbname "${{ secrets.STAGING_DB_URL }}" \
+            --data-only \
+            --no-privileges \
+            --no-owner \
+            --exit-on-error \
+            /tmp/pds_data.dump
 
       - name: Verify row counts on staging
+        env:
+          PGSSLMODE: require
         run: |
-          psql "${{ secrets.STAGING_DB_URL }}" <<'SQL'
-            SELECT
-              'pds_deals'               AS tbl, COUNT(*) FROM pds_deals
-            UNION ALL SELECT 'pds_documents',         COUNT(*) FROM pds_documents
-            UNION ALL SELECT 'pds_raw_transactions',  COUNT(*) FROM pds_raw_transactions
-            UNION ALL SELECT 'pds_entities',          COUNT(*) FROM pds_entities
-            UNION ALL SELECT 'pds_txn_entity_map',    COUNT(*) FROM pds_txn_entity_map
-            UNION ALL SELECT 'pds_analysis_runs',     COUNT(*) FROM pds_analysis_runs
-            UNION ALL SELECT 'pds_snapshots',         COUNT(*) FROM pds_snapshots
-            ORDER BY tbl;
+          /usr/lib/postgresql/17/bin/psql "${{ secrets.STAGING_DB_URL }}" <<'SQL'
+            SELECT tbl, cnt FROM (
+              SELECT 'pds_deals'              AS tbl, COUNT(*) AS cnt FROM pds_deals
+              UNION ALL SELECT 'pds_documents',        COUNT(*) FROM pds_documents
+              UNION ALL SELECT 'pds_raw_transactions', COUNT(*) FROM pds_raw_transactions
+              UNION ALL SELECT 'pds_entities',         COUNT(*) FROM pds_entities
+              UNION ALL SELECT 'pds_txn_entity_map',   COUNT(*) FROM pds_txn_entity_map
+              UNION ALL SELECT 'pds_analysis_runs',    COUNT(*) FROM pds_analysis_runs
+              UNION ALL SELECT 'pds_snapshots',        COUNT(*) FROM pds_snapshots
+            ) t ORDER BY tbl;
           SQL
 
       - name: Sync complete

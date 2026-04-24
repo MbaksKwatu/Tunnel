@@ -1,0 +1,985 @@
+=== FIXTURE NAME === Co-op
+Path: /Users/mbakswatu/Desktop/Demofiles/MAUCABANKCOP.pdf
+
+1) FILE STATS
+- file_size_bytes: 69093
+- page_count: 8
+- raw_text_extract_seconds: 0.932678
+
+2) EXTRACTION PERFORMANCE
+- total_wall_seconds: 2.646929
+- text_extract_seconds: 0.932678
+- parse_plus_postprocess_seconds_approx: 1.714250
+- memory_mb_before: 115.64
+- memory_mb_after: 129.06
+- memory_mb_delta: 13.42
+
+3) TRANSACTION OUTPUT
+- transaction_count: 170
+- first_3_transactions: ["{'row_index': 0, 'date_raw': '2025-02-15', 'description': 'AB75AD130125 Kplc Prepaid 14243228146 PROPERTIES KIAMBAA COMPANY LIMITED', 'debit_raw': '100.00', 'credit_raw': '0.00', 'balance_raw': '19...", "{'row_index': 1, 'date_raw': '2025-02-15', 'description': 'OMNI KPLCPREPAIDCOMM OMNI KPLCPREPAIDCOMM', 'debit_raw': '5.00', 'credit_raw': '0.00', 'balance_raw': '14.35 CR', 'source_file': '/Users/m...", "{'row_index': 2, 'date_raw': '2025-02-15', 'description': 'Excise Duty Omni OMNI KPLCPREPAIDCOMM', 'debit_raw': '1.00', 'credit_raw': '0.00', 'balance_raw': '13.35 CR', 'source_file': '/Users/mbaks..."]
+- last_3_transactions: ["{'row_index': 167, 'date_raw': '2026-01-31', 'description': 'Monthly maintenance fee: 01-01-2026 - 31-01-2026 Charges', 'debit_raw': '100.00', 'credit_raw': '0.00', 'balance_raw': '292.34 CR', 'sou...", "{'row_index': 168, 'date_raw': '2026-01-31', 'description': 'EXCISE Charges', 'debit_raw': '20.00', 'credit_raw': '0.00', 'balance_raw': '272.34 CR', 'source_file': '/Users/mbakswatu/Desktop/Demofi...", "{'row_index': 169, 'date_raw': '2026-01-31', 'description': '01192248207900:Int.Coll:01-01-2026 to 31-01-2026 Interest run TOTAL VALUE 2,451,953. 2,451,800.2 BOOK BALANCE AS AT 272.35 CR CLEARED BA..."]
+- classification_status_none_or_empty: 0
+- pattern_hint_none: 0
+- pattern_hint_set: 170
+- currency_none (normalised): 0
+- currency_set (normalised): 0
+
+4) ERROR SURFACE
+- extraction_exception_traceback: none
+- missing_required_fields: {'txn_date': 0, 'amount_cents': 0, 'descriptor': 0, 'role': 0}
+- txn_id_seen_count: 0
+- txn_id_duplicate_count: 0
+
+5) RAW TEXT SAMPLE
+- page_1_first_50_lines:
+Account Statement
+Statement Date 09-Feb-26
+Statement Period 2025-02-02 TO 2026-02-09
+Branch code 1041
+Account No 01192248207900
+MAUCA WELDERS AND FABRICATORS Branch Name
+P.O. BOX 240 CHOGORIA
+Currency KES
+Account MSME BRONZE
+60401
+KENYA
+Trans Details Channel Value Reference Credit Debit Book Balance
+15-2-2025 AB75AD130125 Kplc Prepaid 14243228146 PROPERTIES OMNI 15-2-2025 CB0392924 0.00 100.00 19.35 CR
+KIAMBAA COMPANY LIMITED
+15-2-2025 OMNI KPLCPREPAIDCOMM OMNI KPLCPREPAIDCOMM OMNI 15-2-2025 CB0392924 0.00 5.00 14.35 CR
+15-2-2025 Excise Duty Omni OMNI KPLCPREPAIDCOMM OMNI 15-2-2025 CB0392924 0.00 1.00 13.35 CR
+28-2-2025 MSME_BRONZE_MAINT_KES Charges CHANNEL 28-2-2025 S98497685 0.00 100.00 86.65 DR
+28-2-2025 EXCISE Charges CHANNEL 28-2-2025 S98497685 0.00 20.00 106.65 DR
+28-2-2025 01192248207900:Int.Coll:01-02-2025 to 28-02-2025 Interest run CHANNEL 28-2-2025 S98570664 0.00 0.10 106.75 DR
+31-3-2025 MSME_BRONZE_MAINT_KES Charges CHANNEL 31-3-2025 S07207143 0.00 100.00 206.75 DR
+31-3-2025 EXCISE Charges CHANNEL 31-3-2025 S07207143 0.00 20.00 226.75 DR
+31-3-2025 01192248207900:Int.Coll:01-03-2025 to 31-03-2025 Interest run CHANNEL 31-3-2025 S07292085 0.00 3.15 229.90 DR
+03-4-2025 FT2509359FHJ,1/FOURTH GENERATION CAPITAL CHANNEL 03-4-2025 S08074984 298,493.25 0.00 298,263.35 CR
+LIMITED/JGP MAUCA WELDERS AND FABRICATO
+03-4-2025 01192248207900:Int.Coll:01-04-2025 to 03-04-2025 Interest run CHANNEL 03-4-2025 CB0869150 0.00 0.45 298,262.90 CR
+07-4-2025 MAUREEN NJERI CHANNEL 07-4-2025 CB0143257 0.00 290,000.00 8,262.90 CR
+07-4-2025 CASH WITHDRAWAL FEE CASH WITHDRAWAL FEE CHANNEL 07-4-2025 CB0143257 0.00 50.00 8,212.90 CR
+07-4-2025 EXCISE CASH WITHDRAWAL FEE CHANNEL 07-4-2025 CB0143257 0.00 7.50 8,205.40 CR
+08-4-2025 AB81D7577525 Kplc Prepaid 14243228146 PROPERTIES OMNI 08-4-2025 CB0455239 0.00 200.00 8,005.40 CR
+KIAMBAA COMPANY LIMITED
+08-4-2025 OMNI KPLCPREPAIDCOMM OMNI KPLCPREPAIDCOMM OMNI 08-4-2025 CB0455239 0.00 5.00 8,000.40 CR
+08-4-2025 Excise Duty Omni OMNI KPLCPREPAIDCOMM OMNI 08-4-2025 CB0455239 0.00 1.00 7,999.40 CR
+15-4-2025 TDF6WQOFHC~254728056542~01192248207900~MPESAC2B_ MPESA C2B 15-4-2025 CB0933579 1,000.00 0.00 8,999.40 CR
+400200~Mourine Catherine
+16-4-2025 TDG7YB3Y8H~254728056542~01192248207900~MPESAC2B_4 MPESA C2B 16-4-2025 CB0277517 3,000.00 0.00 11,999.40 CR
+00200~Mourine Catherine
+17-4-2025 TDH374V2QN~254728056542~01192248207900~MPESAC2B_4 MPESA C2B 17-4-2025 CB0896390 10,000.00 0.00 21,999.40 CR
+00200~Mourine Catherine
+19-4-2025 TDJ0EKEIYA~254728056542~01192248207900~MPESAC2B_40 MPESA C2B 19-4-2025 CB0648456 2,200.00 0.00 24,199.40 CR
+0200~Mourine Catherine
+24-4-2025 AB8500E1D525 097431/480248-Safeways Express safeways OMNI 24-4-2025 CB0475496 0.00 20,000.00 4,199.40 CR
+Express AL-AQSA shop opp OL OIBONI HOTEL
+25-4-2025 TDP56SSK0X~254728056542~01192248207900~MPESAC2B_40MPESA C2B 25-4-2025 CB0874128 7,950.00 0.00 12,149.40 CR
+0200~Mourine Catherine
+Kindly examine this statement immediately. Any discrepancies must be reported to the Bank as soon as possible. 1 of 8
+Please note that the balance reflected could change if there are transactions that still need to be processed.
+- page_2_first_50_lines:
+Account Statement
+Statement Date 09-Feb-26
+Statement Period 2025-02-02 TO 2026-02-09
+Branch code 1041
+Account No 01192248207900
+MAUCA WELDERS AND FABRICATORS Branch Name
+P.O. BOX 240 CHOGORIA
+Currency KES
+Account MSME BRONZE
+60401
+KENYA
+Trans Details Channel Value Reference Credit Debit Book Balance
+28-4-2025 TDS6JPF1XS~254728056542~01192248207900~MPESAC2B_40 MPESA C2B 28-4-2025 CB0548642 8,500.00 0.00 20,649.40 CR
+0200~Mourine Catherine
+29-4-2025 TDT4MZUGBU~254728056542~01192248207900~MPESAC2B_4MPESA C2B 29-4-2025 CB0145321 10,000.00 0.00 30,649.40 CR
+00200~Mourine Catherine
+30-4-2025 MSME_BRONZE_MAINT_KES Charges CHANNEL 30-4-2025 S15340393 0.00 100.00 30,549.40 CR
+30-4-2025 EXCISE Charges CHANNEL 30-4-2025 S15340393 0.00 20.00 30,529.40 CR
+01-5-2025 AB86E5216525 097431/480248-Safeways Express safeways OMNI 01-5-2025 CB0227374 0.00 30,000.00 529.40 CR
+Express AL-AQSA shop opp OL OIBONI HOTEL
+02-5-2025 TE282WONIO~254728056542~01192248207900~MPESAC2B_4 MPESA C2B 02-5-2025 CB0294643 35,000.00 0.00 35,529.40 CR
+00200~Mourine Catherine
+09-5-2025 AB88E05D1B25 097431/480248-Safeways Express safeways OMNI 09-5-2025 CB0224277 0.00 35,000.00 529.40 CR
+Express AL-AQSA shop opp OL OIBONI HOTEL
+17-5-2025 TEH93UR7RZ~254728056542~01192248207900~MPESAC2B_4 MPESA C2B 17-5-2025 CB0368022 60,000.00 0.00 60,529.40 CR
+00200~Mourine Catherine
+19-5-2025 AB8B09006325 097431/480248-Safeways Express safeways OMNI 19-5-2025 CB0849853 0.00 50,000.00 10,529.40 CR
+Express AL-AQSA shop opp OL OIBONI HOTEL
+19-5-2025 TEJ0FDSFJK~254728056542~01192248207900~MPESAC2B_40 MPESA C2B 19-5-2025 CB1013653 35,000.00 0.00 45,529.40 CR
+0200~Mourine Catherine
+21-5-2025 AB8B5B285925 097431/480248-Safeways Express safeways OMNI 21-5-2025 CB0394400 0.00 40,000.00 5,529.40 CR
+Express AL-AQSA shop opp OL OIBONI HOTEL
+21-5-2025 TEL9OKWVNT~254728056542~01192248207900~MPESAC2B_4 MPESA C2B 21-5-2025 CB0868836 15,000.00 0.00 20,529.40 CR
+00200~Mourine Catherine
+23-5-2025 TEN6XIISGS~254728056542~01192248207900~MPESAC2B_40 MPESA C2B 23-5-2025 CB0881554 5,000.00 0.00 25,529.40 CR
+0200~Mourine Catherine
+31-5-2025 TEV6WHTV84~254728056542~01192248207900~MPESAC2B_4 MPESA C2B 31-5-2025 CB0179677 30,000.00 0.00 55,529.40 CR
+00200~Mourine Catherine
+31-5-2025 MSME_BRONZE_MAINT_KES Charges CHANNEL 31-5-2025 S23832819 0.00 100.00 55,429.40 CR
+31-5-2025 EXCISE Charges CHANNEL 31-5-2025 S23832819 0.00 20.00 55,409.40 CR
+31-5-2025 TEV6Z2E7PS~254728056542~01192248207900~MPESAC2B_40 MPESA C2B 31-5-2025 CB0758788 15,000.00 0.00 70,409.40 CR
+0200~Mourine Catherine
+02-6-2025 AB8E062A1C25 097431/480248-Safeways Express safeways OMNI 02-6-2025 CB0261303 0.00 50,000.00 20,409.40 CR
+Express AL-AQSA shop opp OL OIBONI HOTEL
+04-6-2025 TF42IELN56~254728056542~01192248207900~MPESAC2B_400 MPESA C2B 04-6-2025 CB0801159 5,000.00 0.00 25,409.40 CR
+200~Mourine Catherine
+09-6-2025 TF926UT8YU~254728056542~01192248207900~MPESAC2B_40 MPESA C2B 09-6-2025 CB0600321 35,000.00 0.00 60,409.40 CR
+0200~Mourine Catherine
+10-6-2025 AB8FF0715325 097431/480248-Safeways Express safeways OMNI 10-6-2025 CB0764276 0.00 30,000.00 30,409.40 CR
+Express AL-AQSA shop opp OL OIBONI HOTEL
+
+=== FIXTURE NAME === KCB
+Path: /Users/mbakswatu/Desktop/Demofiles/bankstatementsamples/KCB Bank Statement (1).pdf
+
+1) FILE STATS
+- file_size_bytes: 81739
+- page_count: 4
+- raw_text_extract_seconds: 0.210910
+
+2) EXTRACTION PERFORMANCE
+- total_wall_seconds: 0.333945
+- text_extract_seconds: 0.210910
+- parse_plus_postprocess_seconds_approx: 0.123034
+- memory_mb_before: 136.67
+- memory_mb_after: 125.91
+- memory_mb_delta: -10.77
+
+3) TRANSACTION OUTPUT
+- transaction_count: 60
+- first_3_transactions: ["{'row_index': 0, 'date_raw': '2023-07-20', 'description': 'BALANCE B/FWD', 'debit_raw': '', 'credit_raw': '', 'balance_raw': '2,199,932.60', 'source_file': '/Users/mbakswatu/Desktop/Demofiles/banks...", "{'row_index': 1, 'date_raw': '2023-07-24', 'description': 'Ltd 999999 FT230551CZ3Z', 'debit_raw': '', 'credit_raw': '210300.00', 'balance_raw': '2,410,232.60', 'source_file': '/Users/mbakswatu/Desk...", "{'row_index': 2, 'date_raw': '2023-07-24', 'description': 'Mobile Money Tr MM2305 59O0589 ABO9I61YFP C ustom', 'debit_raw': '174397.0', 'credit_raw': '', 'balance_raw': '2,235,835.60', 'source_file..."]
+- last_3_transactions: ["{'row_index': 57, 'date_raw': '2023-10-17', 'description': 'Mobile Money Tr MM2314 4IAJPX54 AEO4KKOWUI Custo', 'debit_raw': '1508.0', 'credit_raw': '', 'balance_raw': '2,137,017.75', 'source_file':...", "{'row_index': 58, 'date_raw': '2023-10-19', 'description': 'POS Txn 4243142016004 052 4243142016004052 NAIVA', 'debit_raw': '11448.0', 'credit_raw': '', 'balance_raw': '2,125,569.75', 'source_file'...", "{'row_index': 59, 'date_raw': '2023-10-20', 'description': 'Mobile Money Tr MM2314 93KOLN6 AET3KP6UNJ Custom BALANCE AT PERIOD E ND:', 'debit_raw': '', 'credit_raw': '1366739.75', 'balance_raw': '2..."]
+- classification_status_none_or_empty: 0
+- pattern_hint_none: 0
+- pattern_hint_set: 60
+- currency_none (normalised): 0
+- currency_set (normalised): 0
+
+4) ERROR SURFACE
+- extraction_exception_traceback: none
+- missing_required_fields: {'txn_date': 0, 'amount_cents': 1, 'descriptor': 0, 'role': 60}
+- txn_id_seen_count: 0
+- txn_id_duplicate_count: 0
+
+5) RAW TEXT SAMPLE
+- page_1_first_50_lines:
+20 October 2023
+9:7:28
+ACCOUNT STATEMENT
+Customer:
+Account: 1295528224 DOREEN ANYANGO
+Product Name: Bankika Personal
+Account Statement Period:
+20 JUL 2023 -
+Balance at Period Start 2,199,932.60 KES Balance at Period End: 2,114,678.75 KES
+TXN DATE DESCRIPTION VALUE DATE MONEY OUT MONEY IN LEDGER BALANCE
+20 JUL 2023 BALANCE B/FWD 20 JUL 2023 2,199,932.60
+24 JUL 2023 Autotronix Ltd 24 JUL 2023 210,300.00 2,410,232.60
+999999 FT230551CZ3Z
+24 JUL 2023 Mobile Money Tr MM2305 24 JUL 2023 -174,397.00 2,235,835.60
+59O0589 ABO9I61YFP C
+ustom
+25 JUL 2023 Mobile Money Tr MM2305 25 JUL 2023 -120,076.00 2,115,759.60
+6EKVUF18 ABP4I71RJ2
+Custo
+27 JUL 2023 Mobile Money Tr MM2305 27 JUL 2023 -5,050.00 2,110,709.60
+8IVE0042 ABR8I97ID8 C
+usto
+28 JUL 2023 Quick Serve ATM VS.424 28 JUL 2023 -516.00 2,110,193.60
+3142016004052-0
+03 AUG 2023 Mobile Money Tr MM2306 03 AUG 2023 -5,050.00 2,105,143.60
+26W7AG78 AC33IDNN2T
+Custo
+10 AUG 2023 ATM Charge 4243142016 10 AUG 2023 -36.00 2,105,107.60
+004052 AC-KES1000500
+57000
+10 AUG 2023 ATM Cash KCB 4243142 10 AUG 2023 -3,000.00 2,102,107.60
+016004052 42431420160
+04052
+11 AUG 2023 POS Txn 4243142016004 11 AUG 2023 -1,000.00 2,101,107.60
+052 4243142016004052
+82069
+14 AUG 2023 INHouse CHQ000030 BA NK 14 AUG 2023 38,323.00 2,139,430.60
+FT23073ZPPPM
+14 AUG 2023 Mobile Money Tr MM230 14 AUG 2023 -38,078.00 2,101,352.60
+73QGIIU97 ACE8IOGMG
+W Custo
+20 AUG 2023 POS Txn 4243142016004 20 AUG 2023 -1,000.00 2,100,352.60
+052 4243142016004052
+82077
+23 AUG 2023 Air Time Purcha MM2308 23 AUG 2023 -50.00 2,100,302.60
+2YX7LW95 ACN0IW9WZ
+E Custo
+23 AUG 2023 Autotronix Ltd 23 AUG 2023 211,500.00 2,311,802.60
+999999 FT230824BH81
+23 AUG 2023 Mobile Money Tr MM2308 23 AUG 2023 -100,357.40 2,211,445.20
+- page_2_first_50_lines:
+20 October 2023
+9:7:28
+Page 2 of 3
+
+=== FIXTURE NAME === ABSA
+Path: /Users/mbakswatu/Desktop/Demofiles/bankstatementsamples/absa.pdf
+
+1) FILE STATS
+- file_size_bytes: 1456214
+- page_count: 4
+- raw_text_extract_seconds: 0.602551
+
+2) EXTRACTION PERFORMANCE
+- total_wall_seconds: 2.146670
+- text_extract_seconds: 0.602551
+- parse_plus_postprocess_seconds_approx: 1.544119
+- memory_mb_before: 136.75
+- memory_mb_after: 146.34
+- memory_mb_delta: 9.59
+
+3) TRANSACTION OUTPUT
+- transaction_count: 152
+- first_3_transactions: ["{'row_index': 0, 'date_raw': '2023-09-01', 'description': 'OPENING BALANCE', 'debit_raw': '0.00', 'credit_raw': '10.95', 'balance_raw': '980,000.00', 'source_file': '/Users/mbakswatu/Desktop/Demofi...", "{'row_index': 1, 'date_raw': '2023-09-01', 'description': 'RHH0DDECRG 0722609724 2047205304 RHH6DJBVV6 0723343325 2047205304', 'debit_raw': '0.00', 'credit_raw': '100000.00', 'balance_raw': '1,080,...", "{'row_index': 2, 'date_raw': '2023-09-01', 'description': ':0710642294//BILL//MB BP: MPESAB2C-11/16', 'debit_raw': '0.00', 'credit_raw': '50000.00', 'balance_raw': '1,130,000.00', 'source_file': '/..."]
+- last_3_transactions: ["{'row_index': 149, 'date_raw': '2024-02-14', 'description': 'CASH DEPOSIT deposit', 'debit_raw': '0.00', 'credit_raw': '229000.00', 'balance_raw': '4,773,107.00', 'source_file': '/Users/mbakswatu/D...", "{'row_index': 150, 'date_raw': '2024-02-15', 'description': ':254721474166//BILL//MB BP: MPESAB2C-11/', 'debit_raw': '10000.00', 'credit_raw': '0.00', 'balance_raw': '4,763,107.00', 'source_file': ...", "{'row_index': 151, 'date_raw': '2024-02-16', 'description': ':254721474166//BILL//MB BP: MPESAB2C-11/ for your records and verify all details with receipts. Failing receipt by the bank within 15 of..."]
+- classification_status_none_or_empty: 0
+- pattern_hint_none: 0
+- pattern_hint_set: 152
+- currency_none (normalised): 0
+- currency_set (normalised): 0
+
+4) ERROR SURFACE
+- extraction_exception_traceback: none
+- missing_required_fields: {'txn_date': 0, 'amount_cents': 4, 'descriptor': 1, 'role': 152}
+- txn_id_seen_count: 0
+- txn_id_duplicate_count: 0
+
+5) RAW TEXT SAMPLE
+- page_1_first_50_lines:
+Statement
+Branch Name EASTLEIGH BRANCH
+MOHAMED FARAH MIRE
+PO BOX 610
+Account Number 2048765478
+Nairobi
+Currency KES
+00610
+Pricing Plan:
+KENYA
+Bundle Plans:
+La Riba Personal
+From 01/09/2023 To 16/02/2024
+Your Account Summary:
+Uncleared Balance: 0.00
+Opening Balance: 980,000.00
+Closing Balance: 4,743,107.00
+Total Debit Amount: 3,565,213.00
+Total Credit Amount: 8,142,365.95
+Your Transactions
+Txn Date Description User Narrative Money Out Money In Balance
+(Debit) (Credit)
+01/09/2023 OPENING BALANCE 0.00 10.95 980,000.00
+01/09/2023 RHH0DDECRG 0722609724 2047205304 0.00 100,000.00 1,080,000.00
+01/09/2023 RHH6DJBVV6 0723343325 2047205304 0.00 50,000.00 1,130,000.00
+01/09/2023 :0710642294//BILL//MB BP: MPESAB2C-11/16 50,000.00 0.00 1,080,000.00
+01/09/2023 00010003202308181102417866XTV5 Rashka 0.00 173,885.00 1,253,000.00
+02/09/2023 MOHAMED FARAH MIRE 36,500.00 0.00 1,216,500.00
+02/09/2023 RHJ5J5MBXP 0722609724 2047205304 0.00 80,000.00 1,296,500.00
+02/09/2023 :254721845072//BILL//MB BP: 71,500.00 0.00 1,225,000.00
+02/09/2023 MPESAB2C-11/ :254721845072//BILL//MB BP: 71,500.00 0.00 1,153,500.00
+02/09/2023 MPESAB2C-11/RHK3LQLF3R 0723343325 0.00 72,000.00 1,225,500.00
+03/09/2023 2047205304 RHL5NNZYG9 0722609724 0.00 73,000.00 1,298,500.00
+03/09/2023 2047205304 4,200.00 0.00 1,294,300.00
+03/09/2023 :0722113039//BILL//MB BP: MPESAB2C-11/16 0.00 45,000.00 1,339,300.00
+RHL1OCF15J 0723343325 2047205304
+04/09/2023 2,530.00 0.00 1,336,770.00
+:254798436072//BILL//MB BP:
+05/09/2023 600.00 0.00 1,336,170.00
+MPESAB2C-11/ :254705762082//BILL//MB BP:
+06/09/2023 7,000.00 0.00 1,329,170.00
+MPESAB2C-11/ :254726497704//BILL//MB BP:
+07/09/2023 0.00 20,000.00 1,349,170.00
+MPESAB2C-11/RHP1YP85LN 0723343325
+07/09/2023 2,000.00 0.00 1,347,170.00
+2047205304
+08/09/2023 1,000.00 0.00 1,346,170.00
+:0722933214//BILL//MB BP:
+08/09/2023 6,000.00 0.00 1,340,170.00
+MPESAB2C-11/16 :254745593121//BILL//MB
+- page_2_first_50_lines:
+Branch Name EASTLEIGH BRANCH
+Account Number 2048765478
+Your Transactions Continued
+Txn Date Description User Narrative Money Out Money In Balance
+(Debit) (Credit)
+12/09/2023 :254799781322//BILL//MB BP: MPESAB2C-11/ 10,000.00 0.00 1,305,170.00
+12/09/2023 :254799781322//BILL//MB BP: MPESAB2C-11/ 10,000.00 0.00 1,295,170.00
+12/09/2023 :0720513321//BILL//MB BP: MPESAB2C-11/16 5,000.00 0.00 1,290,170.00
+12/09/2023 :0720513321//BILL//MB BP: MPESAB2C-11/16 5,500.00 0.00 1,284,670.00
+12/09/2023 0068000320230912105457AP279293 ras 0.00 800,000.00 2,084,670.00
+12/09/2023 :0722926975//BILL//MB BP: MPESAB2C-11/16 3,000.00 0.00 2,081,670.00
+15/09/2023 :254726497704//BILL//MB BP: MPESAB2C-11/ 12,000.00 0.00 2,069,670.00
+16/09/2023 :0724244240//BILL//MB BP: MPESAB2C-11/16 8,700.00 0.00 2,060,970.00
+16/09/2023 :0717284647//BILL//MB BP: MPESAB2C-11/16 9,000.00 0.00 2,051,970.00
+18/09/2023 :0799121716//BILL//MB BP: MPESAB2C-11/16 5,000.00 0.00 2,046,970.00
+18/09/2023 :0726497704//BILL//MB BP: MPESAB2C-11/16 10,000.00 0.00 2,036,970.00
+19/09/2023 SHUKRI AHMED ABDIRAHMANRASHKA 0.00 150,000.00 2,186,970.00
+19/09/2023 RIJ97J58T1 0724823864 2047205304 SHUKRI 0.00 120,000.00 2,306,970.00
+20/09/2023 AHMED ABDIRAHMAN 0.00 100,000.00 2,406,970.00
+20/09/2023 MOHAMED FARAH MIRE 50,000.00 0.00 2,356,970.00
+20/09/2023 :0722547539//BILL//MB BP: 8,000.00 0.00 2,348,970.00
+21/09/2023 MPESAB2C-11/16 :0745088438//BILL//MB BP: 5,000.00 0.00 2,343,970.00
+21/09/2023 AIRTELMONEYKE-REVERSAL: :0745088438// 5,000.00 0.00 2,338,970.00
+BILL//MB BP: AIRTELMONEYKE-
+22/09/2023 RIM1FOK5T3 0722609724 2047205304 0.00 310,000.00 2,648,970.00
+22/09/2023 :254722251501//BILL//MB BP: 10,000.00 0.00 2,638,970.00
+22/09/2023 MPESAB2C-11/ :0722547539//BILL//MB BP: 20,000.00 0.00 2,618,970.00
+23/09/2023 MPESAB2C-11/16 :0721707523//BILL//MB BP: 20,000.00 0.00 2,598,970.00
+23/09/2023 MPESAB2C-11/16 RASHKA 0.00 90,000.00 2,688,970.00
+24/09/2023 RIO2LM3FGU 0721707523 2047205304 CASH 0.00 250,000.00 2,939,970.00
+24/09/2023 MOHAMED FARAH MIRE 0.00 10,000.00 2,948,970.00
+24/09/2023 :0724614078//BILL//MB BP: 0.00 100,000.00 3,048,970.00
+25/09/2023 MPESAB2C-11/16 :254722690005//BILL//MB 50,000.00 0.00 2,998,970.00
+25/09/2023 BP: MPESAB2C-11/ :254726497704//BILL//MB 10,000.00 0.00 2,988,970.00
+26/09/2023 BP: MPESAB2C-11/MB 4,000.00 0.00 2,984,970.00
+27/09/2023 BP:PESALINK-2/16958003230901 PESALINK Alab 10,000.00 0.00 2,978,970.00
+27/09/2023 FUNDS TRANSFER DEBIT FEE EXCISE DUTY 70.00 0.00 2,974,900.00
+27/09/2023 FOR THE FEE 10.5 0 2,978.889.50
+28/09/2023 :254722609724//BILL//MB BP: MPESAB2C-11/ 5,000.00 0.00 2,969,889.50
+28/09/2023 PESALINK FUNDS TRANSFER DEBIT FEE 100.00 0.00 2,969,789.50
+28/09/2023 EXCISE DUTY FOR THE FEE 15.00 0.00 2,969,774.50
+28/09/2023 MB BP:PESALINK-2/16958929910819 bakar 8,000.00 0.00 2,961,774.50
+28/09/2023 :254722609724//BILL//MB BP: MPESAB2C-11/ 6,000.00 0.00 2,955,774.50
+03/10/2023 0068000320231103125431AP254101 bakar 0.00 120,000.00 3,075,774.50
+03/10/2023 001100032023110314070814361823 Good payment 0.00 60,000.00 3,135,774.50
+03/10/2023 HASSAN :254799922147//BILL//MB BP: 0.00 230,000.00 3,365,774.50
+04/10/2023 MPESAB2C-11/FUNDS TRANSFER DEBIT 13,500.00 0.00 3,352,274.50
+04/10/2023 DEBIT 30,000.00 0.00 3,322,274.50
+04/10/2023 :254711853387//BILL//MB BP: MPESAB2C-11/ 2,500.00 0.00 3,324,774.50
+04/10/2023 BAKAR 0.00 413,500.00 3,738,274.50
+
+=== FIXTURE NAME === Equity
+Path: /Users/mbakswatu/Desktop/Demofiles/bankstatementsamples/Unlock PDF Equity Unlocked.pdf
+
+1) FILE STATS
+- file_size_bytes: 29835
+- page_count: 1
+- raw_text_extract_seconds: 0.037921
+
+2) EXTRACTION PERFORMANCE
+- total_wall_seconds: 0.151968
+- text_extract_seconds: 0.037921
+- parse_plus_postprocess_seconds_approx: 0.114047
+- memory_mb_before: 146.59
+- memory_mb_after: 147.84
+- memory_mb_delta: 1.25
+
+3) TRANSACTION OUTPUT
+- transaction_count: 3
+- first_3_transactions: ["{'row_index': 0, 'date_raw': '', 'description': 'Opening Balance', 'debit_raw': '', 'credit_raw': '', 'balance_raw': '0.00', 'source_file': '/Users/mbakswatu/Desktop/Demofiles/bankstatementsamples/...", "{'row_index': 1, 'date_raw': '2024-01-02', 'description': 'SEARCH FEESBEYO APP LIMITED', 'debit_raw': '600.00', 'credit_raw': '', 'balance_raw': '600.00', 'source_file': '/Users/mbakswatu/Desktop/D...", "{'row_index': 2, 'date_raw': '2024-01-31', 'description': '0730184876450:Int.Coll:30-12-2023 to 31-', 'debit_raw': '8.90', 'credit_raw': '', 'balance_raw': '608.90', 'source_file': '/Users/mbakswat..."]
+- last_3_transactions: ["{'row_index': 0, 'date_raw': '', 'description': 'Opening Balance', 'debit_raw': '', 'credit_raw': '', 'balance_raw': '0.00', 'source_file': '/Users/mbakswatu/Desktop/Demofiles/bankstatementsamples/...", "{'row_index': 1, 'date_raw': '2024-01-02', 'description': 'SEARCH FEESBEYO APP LIMITED', 'debit_raw': '600.00', 'credit_raw': '', 'balance_raw': '600.00', 'source_file': '/Users/mbakswatu/Desktop/D...", "{'row_index': 2, 'date_raw': '2024-01-31', 'description': '0730184876450:Int.Coll:30-12-2023 to 31-', 'debit_raw': '8.90', 'credit_raw': '', 'balance_raw': '608.90', 'source_file': '/Users/mbakswat..."]
+- classification_status_none_or_empty: 0
+- pattern_hint_none: 0
+- pattern_hint_set: 3
+- currency_none (normalised): 0
+- currency_set (normalised): 0
+
+4) ERROR SURFACE
+- extraction_exception_traceback: none
+- missing_required_fields: {'txn_date': 1, 'amount_cents': 1, 'descriptor': 0, 'role': 3}
+- txn_id_seen_count: 0
+- txn_id_duplicate_count: 0
+
+5) RAW TEXT SAMPLE
+- page_1_first_50_lines:
+Page 1
+STATEMENT OF ACCOUNT
+BEYODEVELOPER@GMAIL.COM
+BEYO APP LIMITED
+P.O.BOX 17624-00100
+NAIROBI
+A / C N o . 0730184876450 - EQUITY BUSINESS ACCOUNT - KES
+F r o m : 02-01-2024 T o : 01-02-2024
+Date Value Particulars Money Out Money In Balance
+0.00
+02-01-2024 SEARCH FEESBEYO APP LIMITED 600.00 600.00 Dr
+31-01-2024 0730184876450:Int.Coll:30-12-2023 to 31- 8.90 608.90 Dr
+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+Page Total: 608.90 0 608.90 Dr
+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+Grand Total: 608.90 0.00 608.90 Dr
+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+Uncleared Cheques: 0.00
+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+Do you need foreign exchange services? Contact your Manager or The Equity Treasury team on 0711026941-8/0732112941-8/0202262941-8
+Note: Any omission or errors in this document should be promptly advised in writing to the Branch Manager within 30 days from the date of receipt otherwise the account will be presumed to be in
+order
+- page_2_first_50_lines: <no page 2>
+
+=== FIXTURE NAME === M-Pesa
+Path: /Users/mbakswatu/Desktop/Demofiles/bankstatementsamples/OLIechodhiambompesasample.pdf
+
+1) FILE STATS
+- file_size_bytes: 185952
+- page_count: 11
+- raw_text_extract_seconds: 1.120954
+
+2) EXTRACTION PERFORMANCE
+- total_wall_seconds: 2.988173
+- text_extract_seconds: 1.120954
+- parse_plus_postprocess_seconds_approx: 1.867220
+- memory_mb_before: 167.97
+- memory_mb_after: 174.67
+- memory_mb_delta: 6.70
+
+3) TRANSACTION OUTPUT
+- transaction_count: 250
+- first_3_transactions: ["{'row_index': 0, 'date_raw': '2025-07-01', 'description': 'Customer Payment to Small Business to 254741***933 - Rita Anne Ochieng Mboya', 'debit_raw': '', 'credit_raw': '0.00', 'balance_raw': '13,0...", "{'row_index': 1, 'date_raw': '2025-07-01', 'description': 'Customer Transfer of Funds Charge', 'debit_raw': '', 'credit_raw': '0.00', 'balance_raw': '13,115.08', 'source_file': '/Users/mbakswatu/De...", "{'row_index': 2, 'date_raw': '2025-07-01', 'description': 'Pay Bill Charge', 'debit_raw': '', 'credit_raw': '0.00', 'balance_raw': '13,322.08', 'source_file': '/Users/mbakswatu/Desktop/Demofiles/ba..."]
+- last_3_transactions: ["{'row_index': 247, 'date_raw': '2025-05-24', 'description': 'Customer Transfer of Funds Charge', 'debit_raw': '', 'credit_raw': '0.00', 'balance_raw': '2,332.08', 'source_file': '/Users/mbakswatu/D...", "{'row_index': 248, 'date_raw': '2025-05-23', 'description': 'Recharge for Customer to 4093441 - SAFARICOM DATA BUNDLES by 0748***586 - Philip Kerry Odhiambo', 'debit_raw': '', 'credit_raw': '0.00',...", "{'row_index': 249, 'date_raw': '2025-05-23', 'description': 'Customer Transfer to 0701***033 - ALI MOHAMED AHMED', 'debit_raw': '', 'credit_raw': '0.00', 'balance_raw': '3,509.08', 'source_file': '..."]
+- classification_status_none_or_empty: 0
+- pattern_hint_none: 0
+- pattern_hint_set: 250
+- currency_none (normalised): 0
+- currency_set (normalised): 0
+
+4) ERROR SURFACE
+- extraction_exception_traceback: none
+- missing_required_fields: {'txn_date': 0, 'amount_cents': 0, 'descriptor': 0, 'role': 250}
+- txn_id_seen_count: 0
+- txn_id_duplicate_count: 0
+
+5) RAW TEXT SAMPLE
+- page_1_first_50_lines:
+Page 1 of 11
+MPESA FULL STATEMENT
+Customer Name: OLiech Odhiambo
+Mobile Number: 254748978586
+Date of Statement: 18th Dec 2025
+Statement Period: 01st Jan 2025 - 01st Jul 2025
+SUMMARY
+TRANSACTION TYPE PAID IN PAID OUT
+Cash Out 0.00 829.00
+Send Money 35,155.00 53,491.00
+Transaction Reversal 450.00 0.00
+B2C Payment 90,280.00 0.00
+Pay Bill 0.00 40,524.00
+KenyaRecharge 0.00 343.00
+Customer Merchant Payment 0.00 20,805.00
+Customer Airtime Purchase 0.00 350.00
+Customer Bundle Purchase 0.00 37.00
+TOTAL: 125,885.00 116,379.00
+DETAILED STATEMENT
+Receipt No Completion Time Details Transaction Status Paid in Withdraw Balance
+n
+TG1679EB0U 2025-07-01 19:59:34 Customer Payment to Small Business to COMPLETED 0.00 50.00 13,065.08
+254741***933 - Rita Anne Ochieng Mboya
+TG1475LCRW 2025-07-01 19:45:52 Customer Transfer of Funds Charge COMPLETED 0.00 7.00 13,115.08
+TG1475LCRW 2025-07-01 19:45:52 Customer Transfer to 254708***592 - COMPLETED 0.00 200.00 13,122.08
+ZIPPORAH WANJIRU KINYANJUI
+TG187444Z4 2025-07-01 19:40:45 Pay Bill Charge COMPLETED 0.00 5.00 13,322.08
+TG187444Z4 2025-07-01 19:40:45 Pay Bill to 247247 - Equity Paybill Account COMPLETED 0.00 450.00 13,327.08
+Acc. 0113***959
+TG1170TE9H 2025-07-01 19:29:22 Pay Bill Charge COMPLETED 0.00 10.00 13,777.08
+TG1170TE9H 2025-07-01 19:29:22 Pay Bill Online to 247247 - Equity Paybill COMPLETED 0.00 600.00 13,787.08
+Account Acc. 353852
+TG104NPRKQ 2025-07-01 12:09:47 Customer Payment to Small Business to COMPLETED 0.00 30.00 14,387.08
+0745***223 - MOSES WAFULA WANGA
+TG104N8IQQ 2025-07-01 12:06:49 Merchant Payment to 6790726 - COMPLETED 0.00 560.00 14,417.08
+BRIZMART SUPERMARKET
+TG134M13ZX 2025-07-01 11:59:10 Merchant Payment to 7097855 - GYM COMPLETED 0.00 3,200.00 14,977.08
+ROCKS FITNESS CENTER
+TG164HLY0K 2025-07-01 11:31:26 Pay Bill Charge COMPLETED 0.00 20.00 18,177.08
+TG164HLY0K 2025-07-01 11:31:26 Pay Bill Online to 964545 - PAYBOX COMPLETED 0.00 2,300.00 18,197.08
+LIMITED Acc. 0748***586
+TG154GYMC7 2025-07-01 11:27:28 Pay Bill Charge COMPLETED 0.00 20.00 20,497.08
+TG154GYMC7 2025-07-01 11:27:28 Pay Bill Online to 329329 - C2B Standard COMPLETED 0.00 2,000.00 20,517.08
+Chartered Bank Acc. 0100***294100
+TG1346URQF 2025-07-01 10:24:50 Funds received from 254720***677 - COMPLETED 2,000.00 0.00 22,517.08
+CYNTHIA AKINYI OMUDHO
+Disclaimer: This record is produced for your personal use and is not transferable. If this record is sought to be produced in court,
+please contact the nearest retail shop for further guidance or send an email to Safaricom Customer Care via
+Customercare@safaricom.co.ke
+Twitter: @SafaricomLtd | @safaricom_care| www.facebook.com/safaricomltd | For self-help dial *234# | Web: www.safaricom.co.ke | Terms and
+- page_2_first_50_lines:
+Page 2 of 11
+Receipt No Completion Time Details Transaction Status Paid in Withdraw Balance
+n
+TFU423Q69S 2025-06-30 19:49:56 Funds received from 254719***323 - DENIS COMPLETED 20,000.00 0.00 20,517.08
+KIHOHIA
+TFU41YZPA4 2025-06-30 19:33:32 Merchant Payment to 9342174 - JOSEPH COMPLETED 0.00 540.00 517.08
+MITARU NGIGE
+TFU61QMAAW 2025-06-30 19:04:09 Business Payment from 329299 - COMPLETED 1,000.00 0.00 1,057.08
+STANDARD CHARTERED BANK via API.
+Original conversation ID is 254748***586-
+KE-IBNK-YfVcrD.
+TFU61DJEOA 2025-06-30 18:14:08 Customer Transfer of Funds Charge COMPLETED 0.00 13.00 57.08
+TFU61DJEOA 2025-06-30 18:14:08 Customer Transfer to 0713***887 - Letishia COMPLETED 0.00 800.00 70.08
+Awino Olonde
+TFU0YR31RI 2025-06-30 12:58:11 Customer Payment to Small Business to COMPLETED 0.00 40.00 870.08
+0799***270 - James Gitau Maina
+TFU7YN6RAR 2025-06-30 12:34:51 Customer Payment to Small Business to COMPLETED 0.00 40.00 910.08
+254716***400 - PAUL MWANGI
+TFU4X2TZ50 2025-06-30 00:48:34 Small Business Payment to Customer via COMPLETED 500.00 0.00 950.08
+API from 0705***092 - Brenda Akinyi
+Amoko
+TFT4VZXNCA 2025-06-29 19:29:06 Customer Transfer of Funds Charge COMPLETED 0.00 7.00 450.08
+TFT4VZXNCA 2025-06-29 19:29:06 Customer Transfer to 0794***402 - LEAKEY COMPLETED 0.00 500.00 457.08
+ODHIAMBO OGWELLA
+TFT5V26HCH 2025-06-29 16:53:08 Customer Transfer of Funds Charge COMPLETED 0.00 7.00 957.08
+TFT5V26HCH 2025-06-29 16:53:08 Customer Transfer to 254725***073 - COMPLETED 0.00 370.00 964.08
+JARED ONDAGO
+TFT9UWCKNH 2025-06-29 16:20:11 Pay Utility Reversal by UBER B.V\apiuser COMPLETED 150.00 0.00 1,334.08
+TFT4UVJYE6 2025-06-29 16:15:29 Pay Bill Online to 7847061 - UBER B.V Acc. COMPLETED 0.00 150.00 1,184.08
+DTLU4VGBEN
+TFT2UVG9KG 2025-06-29 16:14:52 Pay Utility Reversal by UBER B.V\apiuser COMPLETED 150.00 0.00 1,334.08
+TFT8UV012Y 2025-06-29 16:12:14 Recharge for Customer to 4093441 - COMPLETED 0.00 20.00 1,184.08
+SAFARICOM DATA BUNDLES by
+0748***586 - Philip Kerry Odhiambo
+TFT8UUGC2I 2025-06-29 16:09:00 Customer Bundle Purchase to 4093441 - COMPLETED 0.00 17.00 1,204.08
+SAFARICOM DATA BUNDLES by
+0748***586 - Philip Kerry Odhiambo
+TFT1URL87D 2025-06-29 15:51:53 Pay Bill Online to 7847061 - UBER B.V Acc. COMPLETED 0.00 150.00 1,221.08
+OKJLFMUHQ5
+TFT0UNIILA 2025-06-29 15:27:35 Customer Transfer of Funds Charge COMPLETED 0.00 7.00 1,371.08
+TFT0UNIILA 2025-06-29 15:27:35 Customer Transfer to 254720***964 - COMPLETED 0.00 450.00 1,378.08
+PHARES MBUTHIA MWICHIGI
+TFT9UH2G63 2025-06-29 14:48:47 Customer Transfer of Funds Charge COMPLETED 0.00 33.00 1,828.08
+TFT9UH2G63 2025-06-29 14:48:47 Customer Payment to Small Business to COMPLETED 0.00 2,100.00 1,861.08
+254769***068 - JOHN DOMINIC MURIUKI
+WAHOME
+TFT6UGROU4 2025-06-29 14:46:58 Business Payment from 329299 - COMPLETED 3,000.00 0.00 3,961.08
+STANDARD CHARTERED BANK via API.
+Original conversation ID is 254748***586-
+KE-IBNK-iEkQVL.
+
+=== FIXTURE NAME === Sassy-Equity-Apr-2025
+Path: /Users/mbakswatu/Desktop/Demofiles/Sassy Cosmetics - Equity Bank - 1180279761781 - Apr 2025.pdf
+
+SASSY PRECHECK: Sassy-Equity-Apr-2025
+- Desktop path: /Users/mbakswatu/Desktop/Demofiles/Sassy Cosmetics - Equity Bank - 1180279761781 - Apr 2025.pdf
+- Desktop exists: FOUND
+- Desktop size_bytes: 635040
+
+1) FILE STATS
+- file_size_bytes: 635040
+- page_count: 189
+- raw_text_extract_seconds: 12.320884
+
+2) EXTRACTION PERFORMANCE
+- total_wall_seconds: 13.090346
+- text_extract_seconds: 12.320884
+- parse_plus_postprocess_seconds_approx: 0.769463
+- memory_mb_before: 834.80
+- memory_mb_after: 650.08
+- memory_mb_delta: -184.72
+
+3) TRANSACTION OUTPUT
+- transaction_count: 0
+- first_3_transactions: []
+- last_3_transactions: []
+- classification_status_none_or_empty: 0
+- pattern_hint_none: 0
+- pattern_hint_set: 0
+- currency_none (normalised): 0
+- currency_set (normalised): 0
+
+4) ERROR SURFACE
+- extraction_exception_traceback: none
+- missing_required_fields: {'txn_date': 0, 'amount_cents': 0, 'descriptor': 0, 'role': 0}
+- txn_id_seen_count: 0
+- txn_id_duplicate_count: 0
+
+5) RAW TEXT SAMPLE
+- page_1_first_50_lines:
+Account Statement
+SASSY COSMETICS AND BEAUTY PRODUCTS (K)
+Account number : 1180279761781 (KES)
+LIMITED
+From Date : 01/04/2025 To 30/04/2025
+Report generated on MAY 2, 2025 by JACKSON KINGORI
+Total Search Results: 3190
+Transacti Value Transaction Cheque
+Narrative Debit Credit Running Balance
+on Date Date Reference Number
+MPS
+254700289800
+01-04- 30-03-
+TCU4O61UKS S46462411 6,387.00 1,117,741.00
+2025 2025
+Paul Kanyoro
+Ndungu 11
+MPS
+254714556371
+01-04- 30-03-
+TCU4O8ONSW S46493373 1,608.00 1,119,349.00
+2025 2025
+239867# RUTH
+SYOMBUA M
+EAZZY-FUNDS
+TRNSF FRM
+01-04- 30-03-
+GEORGE S46533490 8,982.00 1,128,331.00
+2025 2025
+MUSYOKI
+MWINZI
+APP/GERALD
+01-04- 30-03-
+MACHARIA 5497360 19,800.00 1,148,131.00
+2025 2025
+KARIUKI/
+MPS
+254797492396
+01-04- 30-03-
+TCU0OL5HFI S46658355 1,700.00 1,149,831.00
+2025 2025
+239867#hosana
+Josphine
+MPS
+254790287175
+01-04- 30-03-
+TCU5OWANT7 S46794807 2,074.00 1,151,905.00
+2025 2025
+239867# PETER
+NDIRANGU
+- page_2_first_50_lines:
+Account Statement
+SASSY COSMETICS AND BEAUTY PRODUCTS (K)
+Account number : 1180279761781 (KES)
+LIMITED
+From Date : 01/04/2025 To 30/04/2025
+Report generated on MAY 2, 2025 by JACKSON KINGORI
+Total Search Results: 3190
+MPS
+254713491383
+01-04- 30-03-
+TCU0Q69OOQ S47292697 1,292.00 1,146,358.49
+2025 2025
+239867# LUCY
+WANJIKU K
+NULL
+01-04- 30-03- KENSWITCH
+S47312048 16,200.00 1,130,158.49
+2025 2025 TRANS/50893072
+6815/30-03
+MPS
+254729826560
+01-04- 30-03-
+TCU4QLRLNG S47450427 1,300.00 1,131,458.49
+2025 2025
+239867# SARAH
+AJWANG O
+APP/BENSON
+01-04- 30-03-
+NDORO 54281925 26,496.00 1,157,954.49
+2025 2025
+MWANGI/
+MPS
+254791343464
+01-04- 30-03-
+TCU0RC6046 S47674719 3,444.00 1,161,398.49
+2025 2025
+239867# ASUNTA
+WAMBUI
+MPS
+254720264891
+01-04- 30-03-
+TCU6RGROYS S47707742 648.00 1,162,046.49
+2025 2025
+239867# UNICE
+NIGHT OK
+VISA-
+01-04- 31-03- NETFLIX.COM
+S47737921 1,100.00 1,160,946.49
+2025 2025 /PUR/5090726403
+34/31-03-202
+
+=== FIXTURE NAME === Sassy-Equity-May-2025
+Path: /Users/mbakswatu/Desktop/Demofiles/Sassy Cosmetics - Equity Bank - 1180279761781 - May 2025.pdf
+
+SASSY PRECHECK: Sassy-Equity-May-2025
+- Desktop path: /Users/mbakswatu/Desktop/Demofiles/Sassy Cosmetics - Equity Bank - 1180279761781 - May 2025.pdf
+- Desktop exists: FOUND
+- Desktop size_bytes: 390870
+
+1) FILE STATS
+- file_size_bytes: 390870
+- page_count: 120
+- raw_text_extract_seconds: 9.138948
+
+2) EXTRACTION PERFORMANCE
+- total_wall_seconds: 9.479517
+- text_extract_seconds: 9.138948
+- parse_plus_postprocess_seconds_approx: 0.340569
+- memory_mb_before: 808.06
+- memory_mb_after: 711.06
+- memory_mb_delta: -97.00
+
+3) TRANSACTION OUTPUT
+- transaction_count: 2974
+- first_3_transactions: ["{'row_index': 0, 'date_raw': '2025-05-02', 'description': 'Date MPS 254742816450 TE18WEQ76I 239867#', 'debit_raw': '4464.00', 'credit_raw': '', 'balance_raw': '1,877,192.00', 'source_file': '/Users...", "{'row_index': 1, 'date_raw': '2025-05-02', 'description': 'ANDERSON WAMBU MPS 254740507513 TE15WHSMUL 239867#', 'debit_raw': '', 'credit_raw': '3908.00', 'balance_raw': '1,881,100.00', 'source_file...", "{'row_index': 2, 'date_raw': '2025-05-02', 'description': 'IRENE KHABETSA MPS 254722764672 TE10WJWT58 239867#', 'debit_raw': '', 'credit_raw': '4360.00', 'balance_raw': '1,885,460.00', 'source_file..."]
+- last_3_transactions: ["{'row_index': 2971, 'date_raw': '2025-05-31', 'description': 'PETER WAIRI TRANSACTION + SMS', 'debit_raw': '78.51', 'credit_raw': '', 'balance_raw': '1,354,976.66', 'source_file': '/Users/mbakswatu...", "{'row_index': 2972, 'date_raw': '2025-05-31', 'description': 'CHARGE MPS 254729327967 TEV9ZPYQA9 239867#', 'debit_raw': '', 'credit_raw': '1008.00', 'balance_raw': '1,355,984.66', 'source_file': '/...", "{'row_index': 2973, 'date_raw': '2025-05-31', 'description': 'PHILES MUTAVE MPS 254746813953 TEV9ZZEOBF', 'debit_raw': '', 'credit_raw': '2382.00', 'balance_raw': '1,358,366.66', 'source_file': '/U..."]
+- classification_status_none_or_empty: 0
+- pattern_hint_none: 0
+- pattern_hint_set: 2974
+- currency_none (normalised): 0
+- currency_set (normalised): 0
+
+4) ERROR SURFACE
+- extraction_exception_traceback: none
+- missing_required_fields: {'txn_date': 0, 'amount_cents': 0, 'descriptor': 0, 'role': 2974}
+- txn_id_seen_count: 0
+- txn_id_duplicate_count: 0
+
+5) RAW TEXT SAMPLE
+- page_1_first_50_lines:
+Account Statement
+SASSY COSMETICS AND BEAUTY PRODUCTS
+Account number : 1180279761781 (KES)
+(K) LIMITED
+From Date : 01/05/2025 To 31/05/2025
+Report generated on JUN 3, 2025 by JACKSON KINGORI
+Total Search Results: 2974
+Transaction
+Value Date Narrative Debit Credit Running Balance
+Date
+MPS 254742816450
+02-05-2025 01-05-2025 TE18WEQ76I 239867# 4,464.00 1,877,192.00
+ANDERSON WAMBU
+MPS 254740507513
+02-05-2025 01-05-2025 TE15WHSMUL 239867# 3,908.00 1,881,100.00
+IRENE KHABETSA
+MPS 254722764672
+02-05-2025 01-05-2025 TE10WJWT58 239867# 4,360.00 1,885,460.00
+CASCA MINI S
+MPS 254706960219
+02-05-2025 01-05-2025 TE19WNJK4L 239867#NV 9,768.00 1,895,228.00
+FRANCIS MWAN
+MPS 254112277827
+02-05-2025 01-05-2025 TE13WQMIAZ ROCKS 34,789.00 1,930,017.00
+CASH & CARRY LIM
+APP/SYLVIA WAMBUI
+02-05-2025 01-05-2025 8,316.00 1,938,333.00
+KIMANI/
+MPS 254740322233
+02-05-2025 01-05-2025 TE15WS04UB 239867# 1,182.00 1,939,515.00
+VINCENT TOO/7j
+MPS 254799608737
+02-05-2025 01-05-2025 TE14WSQ0MQ 239867# 2,124.00 1,941,639.00
+TOM NJOROGE MU
+MPS 254798361762
+02-05-2025 01-05-2025 TE12WT1LD6 239867# 5,808.00 1,947,447.00
+Juliet Ndungwa
+MPS 254722342674
+02-05-2025 01-05-2025 TE13WV0POB 239867# 25,188.00 1,972,635.00
+ANISMA VENTURE
+MPS 254796946409
+02-05-2025 01-05-2025 TE10WVMPOQ 239867# 3,014.00 1,975,649.00
+JACKLINE WANJI
+MPS 254702912503
+02-05-2025 01-05-2025 TE18X001O0 239867# 3,905.00 1,979,554.00
+Praxedes Namuk
+MPS 254790338753
+02-05-2025 01-05-2025 TE11XCSH5V 239867# 525.00 1,980,079.00
+MODESTER MAKOK
+MPS 254726161520
+- page_2_first_50_lines:
+Account Statement
+SASSY COSMETICS AND BEAUTY PRODUCTS
+Account number : 1180279761781 (KES)
+(K) LIMITED
+From Date : 01/05/2025 To 31/05/2025
+Report generated on JUN 3, 2025 by JACKSON KINGORI
+Total Search Results: 2974
+MPS 254725008393
+02-05-2025 01-05-2025 TE12Y2FV7I 239867# 4,699.00 2,064,731.49
+DORCAS VAATI M
+USSD/MPESA/254721239
+02-05-2025 01-05-2025 867/U7F80214A1C72/ 50,000.00 2,014,731.49
+JAMES KARIU
+TRANSACTION + SMS
+02-05-2025 01-05-2025 78.51 2,014,652.98
+CHARGE
+MPS 254711942397
+02-05-2025 01-05-2025 TE16Y7TNRG 239867# 3,224.00 2,017,876.98
+CATHERINE WANJ
+MPS 254769647445
+02-05-2025 01-05-2025 TE13YN3V6V 239867# 15,114.00 2,032,990.98
+Faith Gati Mar
+MPS 254720247370
+TE15YPEHUZ
+02-05-2025 01-05-2025 7,800.00 2,040,790.98
+239867#TALIA JOHN
+KAMA
+USSD/MPESA/254713671
+02-05-2025 01-05-2025 095/U0D2E399EC70A/ 75,000.00 1,965,790.98
+CHARLES MBU
+TRANSACTION + SMS
+02-05-2025 01-05-2025 78.51 1,965,712.47
+CHARGE
+MPS 254715561114
+02-05-2025 01-05-2025 TE19Z6FRW9 5,790.00 1,971,502.47
+239867#alrayaan Abdima
+MPS TE10ZRVE6C
+02-05-2025 01-05-2025 239867# COOP TO 5,520.00 1,977,022.47
+PAYBILL/ojPOx15WCe
+MPS 254705435425
+02-05-2025 01-05-2025 TE15ZVRAJD 239867# 1,104.00 1,978,126.47
+PAULINE WAMAIT
+USSD/MPESA/254790558
+02-05-2025 01-05-2025 330/UC96986185CDC/254 30,000.00 1,948,126.47
+790558330
+TRANSACTION + SMS
+02-05-2025 01-05-2025 78.51 1,948,047.96
+CHARGE
+MPS 254722855601
+02-05-2025 01-05-2025 TE1615A2NA 239867# 6,668.00 1,954,715.96
+
+=== FIXTURE NAME === Sassy-Equity-Jun-2025
+Path: /Users/mbakswatu/Desktop/Demofiles/Sassy Cosmetics - Equity Bank - 1180279761781 - Jun 2025.pdf
+
+SASSY PRECHECK: Sassy-Equity-Jun-2025
+- Desktop path: /Users/mbakswatu/Desktop/Demofiles/Sassy Cosmetics - Equity Bank - 1180279761781 - Jun 2025.pdf
+- Desktop exists: FOUND
+- Desktop size_bytes: 395563
+
+1) FILE STATS
+- file_size_bytes: 395563
+- page_count: 122
+- raw_text_extract_seconds: 9.267288
+
+2) EXTRACTION PERFORMANCE
+- total_wall_seconds: 10.014376
+- text_extract_seconds: 9.267288
+- parse_plus_postprocess_seconds_approx: 0.747088
+- memory_mb_before: 669.28
+- memory_mb_after: 439.06
+- memory_mb_delta: -230.22
+
+3) TRANSACTION OUTPUT
+- transaction_count: 3047
+- first_3_transactions: ["{'row_index': 0, 'date_raw': '2025-06-03', 'description': 'Date ODA Collection Dr From', 'debit_raw': '177362.29', 'credit_raw': '', 'balance_raw': '1,181,004.37', 'source_file': '/Users/mbakswatu/...", "{'row_index': 1, 'date_raw': '2025-06-03', 'description': '1180279761781 ODA Collection Dr From', 'debit_raw': '258749.67', 'credit_raw': '', 'balance_raw': '922,254.70', 'source_file': '/Users/mba...", "{'row_index': 2, 'date_raw': '2025-06-03', 'description': '1180279761781 MPS 254725452068 TF13359HI1 239867#', 'debit_raw': '', 'credit_raw': '42528.00', 'balance_raw': '964,782.70', 'source_file':..."]
+- last_3_transactions: ["{'row_index': 3044, 'date_raw': '2025-06-30', 'description': 'SAMSON EMONGOL MPS 254728229142 TFU01TCF76', 'debit_raw': '', 'credit_raw': '54884.00', 'balance_raw': '1,847,549.17', 'source_file': '...", "{'row_index': 3045, 'date_raw': '2025-06-30', 'description': '239867#0728229142 JOAN TPG 53hm3s8rn2 KCB Pesalink transfer', 'debit_raw': '', 'credit_raw': '5000.00', 'balance_raw': '1,852,549.17', ...", "{'row_index': 3046, 'date_raw': '2025-06-30', 'description': 'RACHAE/125063 MPS 254722679651 TFU82OR3HA 239867#', 'debit_raw': '', 'credit_raw': '3900.00', 'balance_raw': '1,856,449.17', 'source_fi..."]
+- classification_status_none_or_empty: 0
+- pattern_hint_none: 0
+- pattern_hint_set: 3047
+- currency_none (normalised): 0
+- currency_set (normalised): 0
+
+4) ERROR SURFACE
+- extraction_exception_traceback: none
+- missing_required_fields: {'txn_date': 0, 'amount_cents': 0, 'descriptor': 0, 'role': 3047}
+- txn_id_seen_count: 0
+- txn_id_duplicate_count: 0
+
+5) RAW TEXT SAMPLE
+- page_1_first_50_lines:
+Account Statement
+SASSY COSMETICS AND BEAUTY PRODUCTS
+Account number : 1180279761781 (KES)
+(K) LIMITED
+From Date : 01/06/2025 To 30/06/2025
+Report generated on JUL 1, 2025 by JACKSON KINGORI
+Total Search Results: 3047
+Transaction
+Value Date Narrative Debit Credit Running Balance
+Date
+ODA Collection Dr From
+03-06-2025 03-06-2025 177,362.29 1,181,004.37
+1180279761781
+ODA Collection Dr From
+03-06-2025 03-06-2025 258,749.67 922,254.70
+1180279761781
+MPS 254725452068
+03-06-2025 01-06-2025 TF13359HI1 239867# 42,528.00 964,782.70
+FRED ODHIAMBO
+MPS 254721305279
+03-06-2025 01-06-2025 TF123Z8B64 239867# 10,000.00 974,782.70
+EUNICE NGENDO
+VISA-NAIROBI JAVA
+03-06-2025 01-06-2025 HOU09/PUR/51521401219 1,470.00 973,312.70
+2/01-06-202
+MPS 254796426963
+03-06-2025 01-06-2025 TF164B21NA 10,044.00 983,356.70
+239867#200070083 PATRI
+APP/VALLERIE ACHIENG
+03-06-2025 01-06-2025 ORIMBA/PAYMENT FOR 17,194.00 1,000,550.70
+BEAUTY PRO
+EAZZY-FUNDS TRNSF
+03-06-2025 01-06-2025 FRM P.K. MINI 7,242.00 1,007,792.70
+SUPERMARKET
+MPS 254722538267
+03-06-2025 01-06-2025 TF125Q08JO 239867# 11,640.00 1,019,432.70
+jacob samarik
+MPS 254726615780
+03-06-2025 01-06-2025 TF105QF2RA 239867# 32,310.00 1,051,742.70
+ADAN ABDULLAHI
+MPS 254711788068
+TF2265MOXM
+03-06-2025 02-06-2025 11,748.00 1,063,490.70
+239867#200073561
+JAMES
+MPS 254742327499
+03-06-2025 02-06-2025 TF2168M7JT 15,543.00 1,079,033.70
+239867#200073786 marti
+EAZZY-FUNDS TRNSF
+03-06-2025 02-06-2025 FRM PAULINE 10,000.00 1,089,033.70
+- page_2_first_50_lines:
+Account Statement
+SASSY COSMETICS AND BEAUTY PRODUCTS
+Account number : 1180279761781 (KES)
+(K) LIMITED
+From Date : 01/06/2025 To 30/06/2025
+Report generated on JUL 1, 2025 by JACKSON KINGORI
+Total Search Results: 3047
+MPS TF2483OB80
+03-06-2025 02-06-2025 239867# COOP TO 65,087.00 1,256,405.70
+PAYBILL/KqwLY0CFUn
+MPS 254795784084
+03-06-2025 02-06-2025 TF2484WOKQ 239867# 236.00 1,256,641.70
+Isla Musyoki V
+MPS 254742380132
+03-06-2025 02-06-2025 TF2089JR84 239867# 13,708.00 1,270,349.70
+VIOLET KEMUNTO
+ROSE NYANSARORAT-
+03-06-2025 02-06-2025 BY:/515313033540/02-06- 30,000.00 1,300,349.70
+2025 17:06
+MPS 254704362376
+03-06-2025 02-06-2025 TF228SPYMK 239867# 8,346.00 1,308,695.70
+pauline achien
+VISA-THINDIGUA TOTAL
+03-06-2025 02-06-2025 10/PUR/515314011120/02- 5,360.00 1,303,335.70
+06-202
+0111328583 EAZZYBIZ
+03-06-2025 02-06-2025 3,578.00 1,299,757.70
+TRSF MPESA
+0111333190 EAZZYBIZ
+03-06-2025 02-06-2025 1,946.00 1,297,811.70
+TRSF MPESA
+0111459244 EAZZYBIZ
+03-06-2025 02-06-2025 3,137.00 1,294,674.70
+TRSF MPESA
+0111766067 EAZZYBIZ
+03-06-2025 02-06-2025 2,196.00 1,292,478.70
+TRSF MPESA
+0111769928 EAZZYBIZ
+03-06-2025 02-06-2025 1,712.00 1,290,766.70
+TRSF MPESA
+0111980580 EAZZYBIZ
+03-06-2025 02-06-2025 2,223.00 1,288,543.70
+TRSF MPESA
+0113592145 EAZZYBIZ
+03-06-2025 02-06-2025 3,151.00 1,285,392.70
+TRSF MPESA
+0113667034 EAZZYBIZ
+03-06-2025 02-06-2025 2,231.00 1,283,161.70
+TRSF MPESA
+0114418092 EAZZYBIZ
+
+
+=== SUMMARY TABLE ===
+Extractor | Pages | Txn Count | Total Time(s) | Text Extract(s) | Errors
+Co-op | 8 | 170 | 2.6469 | 0.9327 | 0
+KCB | 4 | 60 | 0.3339 | 0.2109 | 0
+ABSA | 4 | 152 | 2.1467 | 0.6026 | 0
+Equity | 1 | 3 | 0.1520 | 0.0379 | 0
+M-Pesa | 11 | 250 | 2.9882 | 1.1210 | 0
+Sassy-Equity-Apr-2025 | 189 | 0 | 13.0903 | 12.3209 | 0
+Sassy-Equity-May-2025 | 120 | 2974 | 9.4795 | 9.1389 | 0
+Sassy-Equity-Jun-2025 | 122 | 3047 | 10.0144 | 9.2673 | 0
