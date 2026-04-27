@@ -34,6 +34,8 @@ _EXPLICIT_ORIGINS = [
     # Primary Vercel deployment — explicit entry in addition to regex to ensure
     # CORS headers are injected even on 5xx error responses.
     "https://v0-fund-iq-1-0.vercel.app",
+    "https://parity-ingestion-gmkewhxbha-uc.a.run.app",
+    "http://localhost:8000"
 ]
 _ALL_ORIGINS = list({o.strip() for o in _CORS_ORIGINS + _EXPLICIT_ORIGINS if o.strip()})
 logger.info("[CORS] allow_origins=%s", _ALL_ORIGINS)
