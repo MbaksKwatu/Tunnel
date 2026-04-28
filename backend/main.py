@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 from v1 import api as v1_api
 from v1.ingestion.service import register_ingestion_startup
+from v1.integrations.musa_api import router as musa_router
 
 load_dotenv()
 
@@ -51,6 +52,9 @@ app.add_middleware(
 
 # V1 deterministic API — only active router
 app.include_router(v1_api.router)
+
+# Musa Ventures integration
+app.include_router(musa_router)
 
 register_ingestion_startup(app)
 
