@@ -5,6 +5,7 @@ import pytest
 from app.extractors.coop_extractor import (
     extract_coop_pdf,
     _parse_coop_date,
+    _parse_balance_to_signed_cents,
     _detect_pattern,
     _is_layout_b,
     _is_layout_c,
@@ -103,3 +104,43 @@ def test_fixture_c_pending_count():
     result = extract_coop_pdf(FIXTURE_C)
     pending = [t for t in result.raw_transactions if t.classification_status == "PENDING_CLASSIFICATION"]
     assert len(pending) == 418
+
+
+# --- balance parser ---
+
+def test_parse_balance_cr():
+    assert _parse_balance_to_signed_cents("15,000,000.00CR") == 1_500_000_000
+
+def test_parse_balance_dr():
+    assert _parse_balance_to_signed_cents("1,234.56DR") == -123_456
+
+def test_parse_balance_empty():
+    assert _parse_balance_to_signed_cents("") is None
+
+def test_parse_balance_no_suffix():
+    assert _parse_balance_to_signed_cents("5,000.00") == 500_000
+
+
+# --- Layout C credit/debit detection ---
+
+def test_fixture_c_mpesa_c2b_are_credits():
+    """MPESA_C2B transactions must come out as credits (credit_raw set, debit_raw empty)."""
+    result = extract_coop_pdf(FIXTURE_C)
+    mpesa_txns = [t for t in result.raw_transactions if t.pattern_hint == "MPESA_C2B"]
+    assert len(mpesa_txns) > 0, "No MPESA_C2B transactions found in fixture"
+    wrong = [t for t in mpesa_txns if not t.credit_raw or t.debit_raw]
+    assert len(wrong) == 0, (
+        f"{len(wrong)}/{len(mpesa_txns)} MPESA_C2B transactions have wrong debit/credit assignment. "
+        f"First offender: description={wrong[0].description!r}, "
+        f"debit={wrong[0].debit_raw!r}, credit={wrong[0].credit_raw!r}"
+    )
+
+def test_fixture_c_bank_charges_are_debits():
+    """BANK_CHARGE transactions must come out as debits (debit_raw set, credit_raw empty)."""
+    result = extract_coop_pdf(FIXTURE_C)
+    charge_txns = [t for t in result.raw_transactions if t.pattern_hint == "BANK_CHARGE"]
+    assert len(charge_txns) > 0, "No BANK_CHARGE transactions found in fixture"
+    wrong = [t for t in charge_txns if t.credit_raw or not t.debit_raw]
+    assert len(wrong) == 0, (
+        f"{len(wrong)}/{len(charge_txns)} BANK_CHARGE transactions have wrong debit/credit assignment."
+    )

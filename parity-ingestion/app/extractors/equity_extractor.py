@@ -5,10 +5,14 @@ Personal format:
   Columns: Date | Value | Particulars | Money Out | Money In | Balance
   Header: STATEMENT OF ACCOUNT + EQUITY + Particulars / Money Out / Money In
 
-Business format:
+Business format (DD-MM-YYYY):
   Header: Account Statement + Narrative / Debit / Credit / Running Balance
   Transaction Date + Value Date (value date ignored) + narrative + amounts
-  Date format: DD-MM-YYYY
+
+CLMS format (Cash and Liquidity Management System, DD/MM/YYYY):
+  Header: Account Statement + "EQUITY BANK ACCOUNT FOR CASH AND LIQUIDITY MGT SYSTEM"
+         + Narrative / Debit / Credit / Running Balance + "Total Count: N"
+  Coordinate-based extraction — amounts right-aligned in separate debit/credit/balance zones.
 """
 from __future__ import annotations
 
@@ -847,6 +851,186 @@ def extract_equity_pdf(file_path: str) -> ExtractionResult:
                 page_count,
                 preview,
             )
+
+    return ExtractionResult(
+        source_file=file_path,
+        extractor_type="equity_pdf",
+        row_count=len(transactions),
+        extraction_status="success",
+        warnings=warnings,
+        raw_transactions=transactions,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Equity CLMS (Cash and Liquidity Management System) format
+# DD/MM/YYYY dates — coordinate-based extraction
+# ─────────────────────────────────────────────────────────────────────────────
+
+_EQ_CLMS_DATE_PAT = re.compile(r"^\d{2}/\d{2}/\d{4}$")
+_EQ_CLMS_AMOUNT_PAT = re.compile(r"^[\d,]+\.\d{2}$")
+
+# X-thresholds measured from Buildex Equity CLMS statement (768pt wide page)
+_EQ_CLMS_TXN_DATE_X_MIN = 30.0
+_EQ_CLMS_TXN_DATE_X_MAX = 92.0
+_EQ_CLMS_DESC_X_MIN = 145.0
+_EQ_CLMS_DESC_X_MAX = 430.0
+_EQ_CLMS_CREDIT_X_MIN = 460.0   # credit amount left edge
+_EQ_CLMS_BALANCE_X_MIN = 520.0  # balance amount left edge
+_EQ_CLMS_ROW_TOLERANCE = 3.5
+_EQ_CLMS_DESC_ABOVE_MAX = 22.0
+
+
+def detect_equity_clms(file_path: str) -> bool:
+    """Return True if the PDF is an Equity CLMS (Cash and Liquidity Mgmt System) statement.
+
+    Distinct from the standard business format: header includes
+    "EQUITY BANK ACCOUNT FOR CASH AND LIQUIDITY MGT SYSTEM" and uses
+    DD/MM/YYYY dates instead of DD-MM-YYYY.
+    """
+    try:
+        with pdfplumber.open(file_path) as pdf:
+            if not pdf.pages:
+                return False
+            text = pdf.pages[0].extract_text() or ""
+            return (
+                "CASH AND LIQUIDITY" in text.upper()
+                and "Total Count:" in text
+                and bool(re.search(r"\d{2}/\d{2}/\d{4}", text))
+            )
+    except Exception:
+        return False
+
+
+def _parse_equity_clms_date(s: str) -> Optional[str]:
+    """Parse DD/MM/YYYY to ISO YYYY-MM-DD."""
+    try:
+        dt = datetime.strptime(s.strip(), "%d/%m/%Y")
+        return dt.strftime("%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def _clean_clms_amount(raw: str) -> str:
+    """Strip commas; return '' for zero or missing amounts."""
+    if not raw:
+        return ""
+    cleaned = raw.replace(",", "").strip()
+    if cleaned in ("0.00", "0", ""):
+        return ""
+    return cleaned
+
+
+def extract_equity_clms_pdf(file_path: str) -> ExtractionResult:
+    """Extract transactions from an Equity CLMS PDF statement.
+
+    Uses coordinate-based word extraction.  Description words at
+    x0 145–430 (TxnRef + Narrative + CustomerRef columns) are assigned
+    to the nearest date-anchor row within ±22 px.
+
+    Amount zones (right-aligned text):
+      debit:   x0 < 460
+      credit:  460 ≤ x0 < 520
+      balance: x0 ≥ 520
+    """
+    transactions: List[RawTransaction] = []
+    warnings: List[WarningItem] = []
+
+    with pdfplumber.open(file_path) as pdf:
+        for page in pdf.pages:
+            words = page.extract_words()
+            if not words:
+                continue
+
+            words_sorted = sorted(words, key=lambda w: (w["top"], w["x0"]))
+
+            # ── Anchor rows: first occurrence of DD/MM/YYYY in TXN_DATE zone ──
+            anchor_tops = [
+                w["top"]
+                for w in words_sorted
+                if _EQ_CLMS_TXN_DATE_X_MIN <= w["x0"] <= _EQ_CLMS_TXN_DATE_X_MAX
+                and _EQ_CLMS_DATE_PAT.match(w["text"])
+            ]
+            if not anchor_tops:
+                continue
+
+            # ── Per-anchor: collect amounts and inline description ─────────────
+            anchors = []
+            for at in anchor_tops:
+                row_words = [
+                    w for w in words_sorted
+                    if abs(w["top"] - at) <= _EQ_CLMS_ROW_TOLERANCE
+                ]
+                date_words = [
+                    w for w in row_words
+                    if _EQ_CLMS_TXN_DATE_X_MIN <= w["x0"] <= _EQ_CLMS_TXN_DATE_X_MAX
+                    and _EQ_CLMS_DATE_PAT.match(w["text"])
+                ]
+                if not date_words:
+                    continue
+
+                debit = credit = balance = ""
+                inline_desc: List[dict] = []
+
+                for w in row_words:
+                    x0, text = w["x0"], w["text"]
+                    is_amount = bool(_EQ_CLMS_AMOUNT_PAT.match(text))
+                    if is_amount:
+                        if x0 >= _EQ_CLMS_BALANCE_X_MIN:
+                            balance = text
+                        elif x0 >= _EQ_CLMS_CREDIT_X_MIN:
+                            credit = text
+                        else:
+                            debit = text
+                    elif _EQ_CLMS_DESC_X_MIN <= x0 <= _EQ_CLMS_DESC_X_MAX:
+                        inline_desc.append(w)
+
+                anchors.append({
+                    "top": at,
+                    "date_raw": _parse_equity_clms_date(date_words[0]["text"]) or "",
+                    "debit": debit,
+                    "credit": credit,
+                    "balance": balance,
+                    "inline_desc": inline_desc,
+                    "extra_desc": [],
+                })
+
+            # ── Assign floating description words to nearest anchor ────────────
+            for w in words_sorted:
+                x0, top, text = w["x0"], w["top"], w["text"]
+                if not (_EQ_CLMS_DESC_X_MIN <= x0 <= _EQ_CLMS_DESC_X_MAX):
+                    continue
+                if _EQ_CLMS_DATE_PAT.match(text) or _EQ_CLMS_AMOUNT_PAT.match(text):
+                    continue
+                if any(abs(a["top"] - top) <= _EQ_CLMS_ROW_TOLERANCE for a in anchors):
+                    continue  # already captured as inline_desc
+
+                nearest = min(anchors, key=lambda a: abs(a["top"] - top))
+                if nearest["top"] - top > _EQ_CLMS_DESC_ABOVE_MAX:
+                    continue  # header artifact
+                nearest["extra_desc"].append(w)
+
+            # ── Build transactions ─────────────────────────────────────────────
+            for anchor in anchors:
+                all_desc = sorted(
+                    anchor["extra_desc"] + anchor["inline_desc"],
+                    key=lambda w: (w["top"], w["x0"]),
+                )
+                description = " ".join(w["text"] for w in all_desc).strip()
+                is_b_fwd = "B/FWD" in description.upper() or "BALANCE B/FWD" in description.upper()
+
+                transactions.append(
+                    RawTransaction(
+                        row_index=len(transactions),
+                        date_raw=anchor["date_raw"],
+                        description=description,
+                        debit_raw="" if is_b_fwd else _clean_clms_amount(anchor["debit"]),
+                        credit_raw="" if is_b_fwd else _clean_clms_amount(anchor["credit"]),
+                        balance_raw=anchor["balance"].replace(",", "") if anchor["balance"] else "",
+                        source_file=file_path,
+                        extraction_confidence=1.0,
+                    )
+                )
 
     return ExtractionResult(
         source_file=file_path,
