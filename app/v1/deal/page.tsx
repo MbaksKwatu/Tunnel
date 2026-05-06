@@ -15,6 +15,7 @@ import {
   listDocuments,
   askParity,
   exportTransactionsCsv,
+  getNeedsReview,
 } from '@/lib/v1-api';
 import { BatchUpload } from '@/components/BatchUpload';
 import type {
@@ -129,6 +130,9 @@ function V1DealPageInner() {
   const [statementQueue, setStatementQueue] = useState<QueuedStatement[]>([]);
   const [activeTab, setActiveTab] = useState<'documents' | 'analysis' | 'review' | 'snapshot'>('documents');
   const docTypeByDocId = useRef<Map<string, 'bank' | 'audited'>>(new Map());
+  type ChatMessage = { role: 'analyst' | 'parity'; text: string; time: string }
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [needsReviewItems, setNeedsReviewItems] = useState<Array<Record<string, unknown>>>([]);
 
   // Unknown-parser request modal state
   interface ParserRequestDoc { docId: string; fileName: string; errorMessage: string }
@@ -593,17 +597,31 @@ function V1DealPageInner() {
 
   const handleAsk = async () => {
     if (!deal || !reviewQuestion.trim()) return;
+    const question = reviewQuestion.trim();
+    const now = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setChatHistory((prev) => [...prev, { role: 'analyst', text: question, time: now }]);
+    setReviewQuestion('');
     setReviewLoading(true);
     setReviewAnswer('');
     try {
-      const { answer } = await askParity(deal.id, reviewQuestion.trim());
+      const { answer } = await askParity(deal.id, question);
+      const answerTime = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setChatHistory((prev) => [...prev, { role: 'parity', text: answer, time: answerTime }]);
       setReviewAnswer(answer);
     } catch (e) {
-      setReviewAnswer(e instanceof Error ? e.message : 'Request failed');
+      const errText = e instanceof Error ? e.message : 'Request failed';
+      setChatHistory((prev) => [...prev, { role: 'parity', text: errText, time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }]);
     } finally {
       setReviewLoading(false);
     }
   };
+
+  // Load needs-review items when analysis completes
+  useEffect(() => {
+    if (analysisState === 'done' && deal?.id) {
+      getNeedsReview(deal.id).then((res) => setNeedsReviewItems(res.transactions as unknown as Array<Record<string, unknown>>)).catch(() => {});
+    }
+  }, [analysisState, deal?.id]);
 
   const handleParserRequestSubmit = async () => {
     if (!unknownParserDoc || !parserRequestForm.bankName.trim()) return;
@@ -1051,40 +1069,47 @@ function V1DealPageInner() {
           )}
 
           {/* ── ANALYSIS TAB ── */}
-          {activeTab === 'analysis' && (
+          {activeTab === 'analysis' && (() => {
+            const csi = creditScoringInputs as Record<string, unknown> | null;
+            const confPct = run ? (run.final_confidence_bp / 100).toFixed(1) : null;
+            const tier = run?.tier ?? null;
+            const roleBadgeColor: Record<string, string> = {
+              supplier: '#6366F1', revenue_operational: '#4ADE80', revenue_non_operational: '#22D3EE',
+              payroll: '#F59E0B', needs_review: '#F59E0B', loan_repayment: '#F87171', other: '#374151',
+            };
+            return (
             <div>
               {analysisState === 'idle' && !run && (
                 <div style={{ padding: '48px 0', textAlign: 'center' }}>
                   <div style={{ fontSize: 13, color: '#4A5568', marginBottom: 16 }}>No analysis run yet. Upload documents and initialise the pipeline.</div>
-                  <button
-                    onClick={() => setActiveTab('documents')}
-                    style={{ padding: '9px 18px', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
-                  >
-                    ← Go to Documents
-                  </button>
+                  <button onClick={() => setActiveTab('documents')} style={{ padding: '9px 18px', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>← Go to Documents</button>
                 </div>
               )}
               {(isProcessing || run) && (
                 <>
-                  {/* Run meta */}
-                  {run && (
-                    <div style={{ marginBottom: 20, fontSize: 12, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace", display: 'flex', gap: 16 }}>
-                      <span>{statementQueue.length} source document{statementQueue.length !== 1 ? 's' : ''}</span>
-                      {rawTransactions.length > 0 && <span>· {rawTransactions.length} transactions</span>}
+                  {/* Run meta + confidence badge */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+                    <div style={{ fontSize: 12, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace", display: 'flex', gap: 14 }}>
+                      {run && <><span>{statementQueue.length} source document{statementQueue.length !== 1 ? 's' : ''}</span><span>·</span><span>{rawTransactions.length} transactions</span></>}
                     </div>
-                  )}
+                    {confPct && (
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                        <span style={{ fontSize: 28, fontWeight: 700, color: '#4ADE80', fontFamily: "'IBM Plex Mono', monospace", lineHeight: 1 }}>{confPct}</span>
+                        <span style={{ fontSize: 11, color: '#4A5568' }}>% CONFIDENCE</span>
+                        {tier && <span style={{ fontSize: 10, fontWeight: 700, color: '#4ADE80', background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.3)', padding: '2px 8px', borderRadius: 3, letterSpacing: '0.08em' }}>{tier.toUpperCase()}</span>}
+                      </div>
+                    )}
+                  </div>
 
                   {/* Pipeline stages */}
-                  <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden' }}>
+                  <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid #1A2235' }}>
                       <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>PIPELINE STAGES</span>
                       <span style={{ fontSize: 11, color: '#2D3748', fontFamily: "'IBM Plex Mono', monospace" }}>Deterministic · No AI in financial pipeline</span>
                     </div>
                     <div style={{ padding: '0 20px' }}>
                       <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr 120px 80px', gap: 12, padding: '10px 0', borderBottom: '1px solid #1A2235' }}>
-                        {['STAGE', 'DETAIL', 'PROGRESS', 'STATUS'].map((h) => (
-                          <span key={h} style={{ fontSize: 10, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>{h}</span>
-                        ))}
+                        {['STAGE', 'DETAIL', 'PROGRESS', 'STATUS'].map((h) => <span key={h} style={{ fontSize: 10, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>{h}</span>)}
                       </div>
                       {pipelineStages.map((stage) => (
                         <div key={stage.name} style={{ display: 'grid', gridTemplateColumns: '200px 1fr 120px 80px', gap: 12, padding: '14px 0', borderBottom: '1px solid #1A2235', alignItems: 'center' }}>
@@ -1109,120 +1134,372 @@ function V1DealPageInner() {
                     </div>
                   </div>
 
-                  {/* Results (when done) */}
+                  {/* Rich results — only when done */}
                   {run && analysisState === 'done' && (
-                    <div style={{ marginTop: 20, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-                      {[
-                        { label: 'Transactions', value: rawTransactions.length > 0 ? rawTransactions.length.toString() : '—' },
-                        { label: 'Coverage', value: `${(run.coverage_pct_bp / 100).toFixed(1)}%` },
-                        { label: 'Confidence', value: `${(run.final_confidence_bp / 100).toFixed(1)}%` },
-                        { label: 'Tier', value: run.tier || '—' },
-                        { label: 'Reconciliation', value: run.reconciliation_status || '—' },
-                        { label: 'Entities', value: entities.length.toString() },
-                      ].map((m) => (
-                        <div key={m.label} style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 6, padding: 16 }}>
-                          <div style={{ fontSize: 11, color: '#4A5568', marginBottom: 6, letterSpacing: '0.06em' }}>{m.label.toUpperCase()}</div>
-                          <div style={{ fontSize: 18, fontWeight: 700, color: '#F1F5F9', fontFamily: "'IBM Plex Mono', monospace" }}>{m.value}</div>
+                    <>
+                      {/* 01 · Credit Scoring Inputs */}
+                      <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid #1A2235', borderLeft: '3px solid #4ADE80' }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>01 · CREDIT SCORING INPUTS</span>
+                          <span style={{ fontSize: 10, color: '#4ADE80', background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.2)', padding: '2px 8px', borderRadius: 3, letterSpacing: '0.06em' }}>Parity Format</span>
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-
-          {/* ── PARITY REVIEW TAB ── */}
-          {activeTab === 'review' && (
-            <div style={{ maxWidth: 720 }}>
-              {!run ? (
-                <div style={{ padding: '48px 0', textAlign: 'center', color: '#374151', fontSize: 13 }}>
-                  Run analysis first to enable Parity Review.
-                </div>
-              ) : (
-                <>
-                  {/* Q&A */}
-                  <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: 20, marginBottom: 16 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1', marginBottom: 14 }}>ASK PARITY</div>
-                    <p style={{ fontSize: 12, color: '#4A5568', marginBottom: 12, lineHeight: 1.5 }}>
-                      Ask a question about this deal. Answers are computed deterministically from the latest snapshot — no hallucination.
-                    </p>
-                    <textarea
-                      value={reviewQuestion}
-                      onChange={(e) => setReviewQuestion(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void handleAsk(); }}
-                      placeholder="e.g. What percentage of revenue is payroll?"
-                      rows={2}
-                      style={{ width: '100%', background: '#080C18', border: '1px solid #1E2A3A', borderRadius: 6, padding: '10px 12px', fontSize: 13, color: '#CBD5E1', resize: 'none', outline: 'none', fontFamily: "'IBM Plex Sans', sans-serif", boxSizing: 'border-box' }}
-                    />
-                    <button
-                      onClick={handleAsk}
-                      disabled={reviewLoading || !reviewQuestion.trim()}
-                      style={{ marginTop: 10, padding: '8px 16px', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: reviewLoading || !reviewQuestion.trim() ? 'not-allowed' : 'pointer', opacity: reviewLoading || !reviewQuestion.trim() ? 0.5 : 1 }}
-                    >
-                      {reviewLoading ? 'Thinking…' : 'Ask →'}
-                    </button>
-                    {reviewAnswer && (
-                      <div style={{ marginTop: 14, background: '#080C18', border: '1px solid #1E2A3A', borderRadius: 6, padding: 14 }}>
-                        <p style={{ fontSize: 13, color: '#CBD5E1', lineHeight: 1.6, whiteSpace: 'pre-line', margin: 0 }}>{reviewAnswer}</p>
+                        <div style={{ padding: '0 20px' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 200px 1fr', gap: 12, padding: '10px 0', borderBottom: '1px solid #1A2235' }}>
+                            {['SCORING METRIC', 'VALUE', 'BASIS'].map((h) => <span key={h} style={{ fontSize: 10, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>{h}</span>)}
+                          </div>
+                          {(() => {
+                            const fmt = (cents: unknown) => cents != null ? new Intl.NumberFormat('en-KE', { style: 'currency', currency: currency, minimumFractionDigits: 2 }).format(Number(cents) / 100) : '—';
+                            const fmtBps = (bps: unknown) => bps != null ? `${(Number(bps) / 100).toFixed(1)}%` : '—';
+                            const rows = [
+                              { label: 'Average Monthly Inflow', value: csi ? fmt(csi.average_monthly_inflow_cents) : (monthlyCashflow.length > 0 ? fmt(monthlyCashflow.reduce((s: number, m: any) => s + (m.inflow_cents || 0), 0) / monthlyCashflow.length) : '—'), basis: '12-month arithmetic mean', positive: true },
+                              { label: 'Median Monthly Inflow', value: csi ? fmt(csi.median_monthly_inflow_cents) : '—', basis: '12-month median', positive: true },
+                              { label: 'Average Monthly Outflow', value: csi ? fmt(csi.average_monthly_outflow_cents) : '—', basis: '12-month arithmetic mean', positive: null },
+                              { label: 'Average Net Monthly Position', value: csi ? fmt(csi.average_net_monthly_cents) : '—', basis: 'Inflow minus outflow mean', positive: csi ? Number(csi.average_net_monthly_cents) >= 0 : null },
+                              { label: 'Peak Net Position', value: csi ? fmt(csi.peak_net_position_cents) : '—', basis: 'Best month', positive: true },
+                              { label: 'Trough Net Position', value: csi ? fmt(csi.trough_net_position_cents) : '—', basis: 'Worst month', positive: csi ? Number(csi.trough_net_position_cents) >= 0 : false },
+                              { label: 'Revenue Growth', value: csi ? fmtBps(csi.revenue_growth_bps) : '—', basis: 'First vs last month with inflow', positive: csi ? Number(csi.revenue_growth_bps) >= 0 : null },
+                              { label: 'Loan Repayment Burden', value: csi ? fmtBps(csi.loan_repayment_burden_bps) : '—', basis: '% of total outflows', positive: null },
+                              { label: 'Payroll Stability', value: csi ? (csi.payroll_stability as string) || 'NOT DETECTED' : 'NOT DETECTED', basis: csi?.payroll_stability === 'CONSISTENT' ? 'Consistent monthly pattern' : 'No payroll pattern in statement', positive: csi?.payroll_stability === 'CONSISTENT' ? true : csi?.payroll_stability ? null : null },
+                              { label: 'KRA Compliance', value: csi ? (csi.kra_compliance as string) || 'NOT DETECTED' : 'NOT DETECTED', basis: 'No KRA/VAT/PAYE transactions found', positive: csi?.kra_compliance === 'COMPLIANT' ? true : null },
+                            ];
+                            return rows.map((row) => (
+                              <div key={row.label} style={{ display: 'grid', gridTemplateColumns: '1fr 200px 1fr', gap: 12, padding: '11px 0', borderBottom: '1px solid #1A2235', alignItems: 'center' }}>
+                                <span style={{ fontSize: 13, color: '#CBD5E1' }}>{row.label}</span>
+                                <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, color: row.positive === true ? '#4ADE80' : row.positive === false ? '#F87171' : '#CBD5E1' }}>{row.value}</span>
+                                <span style={{ fontSize: 12, color: '#4A5568' }}>{row.basis}</span>
+                              </div>
+                            ));
+                          })()}
+                        </div>
                       </div>
-                    )}
-                  </div>
 
-                  {/* Override Panel */}
-                  {entities.length > 0 && (
-                    <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: 20 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1', marginBottom: 14 }}>OVERRIDE CLASSIFICATION</div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
-                        <div>
-                          <label style={{ display: 'block', fontSize: 11, color: '#4A5568', marginBottom: 4 }}>Entity</label>
-                          <select value={overrideEntityId} onChange={(e) => setOverrideEntityId(e.target.value)}
-                            style={{ background: '#080C18', border: '1px solid #1E2A3A', borderRadius: 4, padding: '6px 10px', color: '#CBD5E1', fontSize: 12, minWidth: 160 }}>
-                            <option value="">Select…</option>
-                            {entities.map((e) => <option key={e.entity_id} value={e.entity_id}>{e.display_name}</option>)}
-                          </select>
+                      {/* MoM Cashflow */}
+                      {monthlyCashflow.length > 0 && (
+                        <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
+                          <div style={{ padding: '14px 20px', borderBottom: '1px solid #1A2235', borderLeft: '3px solid #818CF8' }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>02 · MONTH-ON-MONTH CASHFLOW</span>
+                          </div>
+                          <div style={{ padding: '0 20px' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr 1fr 1fr', gap: 12, padding: '10px 0', borderBottom: '1px solid #1A2235' }}>
+                              {['MONTH', 'INFLOW', 'OUTFLOW', 'NET'].map((h) => <span key={h} style={{ fontSize: 10, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>{h}</span>)}
+                            </div>
+                            {(monthlyCashflow as Array<Record<string, unknown>>).slice(0, 12).map((m) => {
+                              const net = Number(m.net_cents ?? 0);
+                              return (
+                                <div key={m.month as string} style={{ display: 'grid', gridTemplateColumns: '100px 1fr 1fr 1fr', gap: 12, padding: '10px 0', borderBottom: '1px solid #1A2235', alignItems: 'center' }}>
+                                  <span style={{ fontSize: 12, color: '#94A3B8', fontFamily: "'IBM Plex Mono', monospace" }}>{m.month as string}</span>
+                                  <span style={{ fontSize: 13, color: '#4ADE80', fontFamily: "'IBM Plex Mono', monospace" }}>{formatCents(Number(m.inflow_cents ?? 0))}</span>
+                                  <span style={{ fontSize: 13, color: '#F87171', fontFamily: "'IBM Plex Mono', monospace" }}>{formatCents(Number(m.outflow_cents ?? 0))}</span>
+                                  <span style={{ fontSize: 13, fontWeight: 600, color: net >= 0 ? '#4ADE80' : '#F87171', fontFamily: "'IBM Plex Mono', monospace" }}>{formatCents(net)}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                        <div>
-                          <label style={{ display: 'block', fontSize: 11, color: '#4A5568', marginBottom: 4 }}>New role</label>
-                          <select value={overrideRole} onChange={(e) => setOverrideRole(e.target.value)}
-                            style={{ background: '#080C18', border: '1px solid #1E2A3A', borderRadius: 4, padding: '6px 10px', color: '#CBD5E1', fontSize: 12 }}>
-                            {['supplier', 'revenue_operational', 'revenue_non_operational', 'payroll', 'other'].map((r) => <option key={r} value={r}>{r}</option>)}
-                          </select>
-                        </div>
-                        <div>
-                          <label style={{ display: 'block', fontSize: 11, color: '#4A5568', marginBottom: 4 }}>Note</label>
-                          <input type="text" value={overrideNote} onChange={(e) => setOverrideNote(e.target.value)} placeholder="Optional"
-                            style={{ background: '#080C18', border: '1px solid #1E2A3A', borderRadius: 4, padding: '6px 10px', color: '#CBD5E1', fontSize: 12, width: 140 }} />
-                        </div>
-                        <button onClick={handleAddOverride} disabled={!overrideEntityId || overrideSaving}
-                          style={{ padding: '7px 14px', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: !overrideEntityId || overrideSaving ? 'not-allowed' : 'pointer', opacity: !overrideEntityId || overrideSaving ? 0.5 : 1 }}>
-                          {overrideSaving ? 'Saving…' : 'Save override'}
-                        </button>
+                      )}
+
+                      {/* Entity Breakdown + Needs Review */}
+                      <div style={{ display: 'grid', gridTemplateColumns: needsReviewItems.length > 0 ? '1fr 1fr' : '1fr', gap: 16, marginBottom: 16 }}>
+                        {/* Entity Breakdown */}
+                        {entityBreakdownByCategory.length > 0 && (
+                          <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid #1A2235', borderLeft: '3px solid #6366F1' }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>ENTITY BREAKDOWN</span>
+                              <span style={{ fontSize: 10, color: '#6366F1', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', padding: '2px 7px', borderRadius: 3, letterSpacing: '0.06em' }}>ONTOLOGY v2.0</span>
+                            </div>
+                            <div style={{ padding: '0 20px' }}>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 120px 50px', gap: 8, padding: '10px 0', borderBottom: '1px solid #1A2235' }}>
+                                {['ENTITY', 'ROLE', 'AMOUNT', 'TXNS'].map((h) => <span key={h} style={{ fontSize: 10, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>{h}</span>)}
+                              </div>
+                              {entityBreakdown.slice(0, 10).map((r) => (
+                                <div key={r.entityId} style={{ display: 'grid', gridTemplateColumns: '1fr 100px 120px 50px', gap: 8, padding: '10px 0', borderBottom: '1px solid #1A2235', alignItems: 'center' }}>
+                                  <span style={{ fontSize: 12, color: r.role === 'needs_review' ? '#F59E0B' : '#CBD5E1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: r.role === 'needs_review' ? 600 : 400 }}>{r.entityName}</span>
+                                  <span style={{ fontSize: 10, fontWeight: 600, color: roleBadgeColor[r.role] ?? '#374151', background: `${roleBadgeColor[r.role] ?? '#374151'}18`, padding: '2px 5px', borderRadius: 3, letterSpacing: '0.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.role.replace(/_/g, '_')}</span>
+                                  <span style={{ fontSize: 12, color: '#94A3B8', fontFamily: "'IBM Plex Mono', monospace" }}>{formatCents(r.totalAbsCents)}</span>
+                                  <span style={{ fontSize: 12, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace" }}>{r.txnCount}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Items Requiring Review */}
+                        {needsReviewItems.length > 0 && (
+                          <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid #1A2235', borderLeft: '3px solid #F59E0B' }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>ITEMS REQUIRING REVIEW</span>
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <span style={{ fontSize: 10, fontWeight: 700, color: '#F59E0B', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.25)', padding: '2px 7px', borderRadius: 3 }}>{needsReviewItems.length} flagged</span>
+                                <button onClick={() => setActiveTab('review')} style={{ fontSize: 10, color: '#6366F1', background: 'transparent', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 3, padding: '2px 8px', cursor: 'pointer' }}>Review →</button>
+                              </div>
+                            </div>
+                            <div style={{ padding: '8px 0' }}>
+                              {needsReviewItems.slice(0, 5).map((item, idx) => (
+                                <div key={(item.row_id as string) ?? idx} style={{ padding: '12px 20px', borderBottom: '1px solid #1A2235' }}>
+                                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#F59E0B', display: 'inline-block', flexShrink: 0 }} />
+                                        <span style={{ fontSize: 13, fontWeight: 600, color: '#F59E0B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(item.entity_name || item.description) as string}</span>
+                                      </div>
+                                      <div style={{ fontSize: 11, color: '#374151', fontFamily: "'IBM Plex Mono', monospace" }}>
+                                        needs_review · {item.txn_date as string}
+                                        {item.flag_reason != null && <div style={{ color: '#F59E0B', marginTop: 2, fontFamily: "'IBM Plex Sans', sans-serif", fontSize: 11 }}>{String(item.flag_reason)}</div>}
+                                      </div>
+                                    </div>
+                                    <span style={{ fontSize: 13, fontWeight: 700, color: '#F87171', fontFamily: "'IBM Plex Mono', monospace", flexShrink: 0 }}>{formatCents(Math.abs(Number(item.signed_amount_cents ?? 0)))}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      {overrideSuccess && <div style={{ marginTop: 10, fontSize: 12, color: '#4ADE80' }}>{overrideSuccess}</div>}
-                      {overrideError && <div style={{ marginTop: 10, fontSize: 12, color: '#F87171' }}>{overrideError}</div>}
-                      {overridesList.length > 0 && (
-                        <div style={{ marginTop: 14 }}>
-                          <div style={{ fontSize: 11, color: '#4A5568', marginBottom: 8 }}>Applied overrides this session</div>
-                          {overridesList.map((ov, i) => {
-                            const ent = entities.find((e) => e.entity_id === ov.entity_id);
+
+                      {/* Concentration: Suppliers / Revenue / Payroll */}
+                      {entityBreakdown.length > 0 && (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
+                          {[
+                            { label: 'SUPPLIERS', role: 'supplier', color: '#6366F1' },
+                            { label: 'REVENUE', roles: ['revenue_operational', 'revenue_non_operational'], color: '#4ADE80' },
+                            { label: 'PAYROLL', role: 'payroll', color: '#F59E0B' },
+                          ].map((section) => {
+                            const rows = entityBreakdown.filter((r) =>
+                              section.role ? r.role === section.role : (section.roles ?? []).includes(r.role)
+                            ).slice(0, 5);
+                            const total = rows.reduce((s, r) => s + r.totalAbsCents, 0);
                             return (
-                              <div key={(ov.id as string) ?? i} style={{ display: 'flex', gap: 8, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace", background: '#080C18', borderRadius: 4, padding: '6px 10px', marginBottom: 4 }}>
-                                <span style={{ color: '#CBD5E1' }}>{ent?.display_name ?? (ov.entity_id as string)}</span>
-                                <span style={{ color: '#374151' }}>→</span>
-                                <span style={{ color: '#A5B4FC' }}>{ov.new_value as string}</span>
-                                {typeof ov.reason === 'string' && ov.reason && <span style={{ color: '#374151' }}>({ov.reason})</span>}
+                              <div key={section.label} style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden' }}>
+                                <div style={{ padding: '12px 16px', borderBottom: '1px solid #1A2235', borderLeft: `3px solid ${section.color}` }}>
+                                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>{section.label}</span>
+                                </div>
+                                <div style={{ padding: '4px 0' }}>
+                                  {rows.length === 0 && <div style={{ padding: '12px 16px', fontSize: 12, color: '#374151' }}>None detected</div>}
+                                  {rows.map((r) => (
+                                    <div key={r.entityId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 16px', borderBottom: '1px solid #1A2235' }}>
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: 12, color: '#CBD5E1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.entityName}</div>
+                                        <div style={{ fontSize: 10, color: section.color, fontFamily: "'IBM Plex Mono', monospace", marginTop: 2 }}>{(r.pctBps / 100).toFixed(1)}% of category</div>
+                                      </div>
+                                      <span style={{ fontSize: 12, color: '#94A3B8', fontFamily: "'IBM Plex Mono', monospace", flexShrink: 0 }}>{formatCents(r.totalAbsCents)}</span>
+                                    </div>
+                                  ))}
+                                  {rows.length > 0 && (
+                                    <div style={{ padding: '9px 16px', display: 'flex', justifyContent: 'space-between' }}>
+                                      <span style={{ fontSize: 11, color: '#374151' }}>Total</span>
+                                      <span style={{ fontSize: 12, fontWeight: 700, color: section.color, fontFamily: "'IBM Plex Mono', monospace" }}>{formatCents(total)}</span>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             );
                           })}
                         </div>
                       )}
-                    </div>
+
+                      {/* Debit / Credit lists */}
+                      {rawTransactions.length > 0 && (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+                          {[
+                            { label: 'TOP DEBITS', filter: (t: Record<string,unknown>) => Number(t.signed_amount_cents ?? 0) < 0, color: '#F87171' },
+                            { label: 'TOP CREDITS', filter: (t: Record<string,unknown>) => Number(t.signed_amount_cents ?? 0) > 0, color: '#4ADE80' },
+                          ].map((section) => {
+                            const txns = (rawTransactions as Array<Record<string,unknown>>)
+                              .filter(section.filter)
+                              .sort((a, b) => Math.abs(Number(b.signed_amount_cents ?? 0)) - Math.abs(Number(a.signed_amount_cents ?? 0)))
+                              .slice(0, 8);
+                            return (
+                              <div key={section.label} style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden' }}>
+                                <div style={{ padding: '12px 16px', borderBottom: '1px solid #1A2235', borderLeft: `3px solid ${section.color}` }}>
+                                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>{section.label}</span>
+                                </div>
+                                <div style={{ padding: '4px 0' }}>
+                                  {txns.map((t, i) => (
+                                    <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', borderBottom: '1px solid #1A2235', gap: 8 }}>
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: 12, color: '#CBD5E1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(t.description || t.narrative || '—') as string}</div>
+                                        <div style={{ fontSize: 10, color: '#374151', fontFamily: "'IBM Plex Mono', monospace" }}>{t.txn_date as string}</div>
+                                      </div>
+                                      <span style={{ fontSize: 13, fontWeight: 600, color: section.color, fontFamily: "'IBM Plex Mono', monospace", flexShrink: 0 }}>{formatCents(Math.abs(Number(t.signed_amount_cents ?? 0)))}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
                   )}
                 </>
               )}
             </div>
-          )}
+            );
+          })()}
+
+          {/* ── PARITY REVIEW TAB ── Intelligence Console */}
+          {activeTab === 'review' && (() => {
+            const classified = entities.length > 0 ? entities.length : (exportData ? entities.length : 0);
+            const txnTotal = rawTransactions.length;
+            const reconDelta = creditScoringInputs ? (creditScoringInputs.average_net_monthly_cents as number ?? 0) : 0;
+            const confidence = snapshot?.confidence_score ?? (exportData?.analysis_run as any)?.confidence_score ?? null;
+            const corpusReady = analysisState === 'done';
+            const SUGGESTION_CHIPS = [
+              'What is the average monthly net cashflow?',
+              'Which entities represent the highest concentration risk?',
+              'Are there any irregular payroll patterns?',
+              'What is the peak debt service coverage ratio?',
+            ];
+            return (
+              <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+                {/* Left: Chat area */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {/* Header */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                    <span style={{ fontSize: 15, fontWeight: 700, color: '#CBD5E1', letterSpacing: '0.02em' }}>Ask Parity</span>
+                    <span style={{
+                      fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', padding: '2px 8px', borderRadius: 3,
+                      background: corpusReady ? 'rgba(74,222,128,0.12)' : 'rgba(99,102,241,0.12)',
+                      color: corpusReady ? '#4ADE80' : '#818CF8',
+                      border: `1px solid ${corpusReady ? 'rgba(74,222,128,0.25)' : 'rgba(99,102,241,0.25)'}`,
+                    }}>
+                      {corpusReady ? 'READY' : 'PENDING'}
+                    </span>
+                  </div>
+
+                  {/* Corpus description card */}
+                  {!corpusReady && (
+                    <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: '14px 18px', marginBottom: 16 }}>
+                      <div style={{ fontSize: 12, color: '#4A5568', lineHeight: 1.6 }}>
+                        Parity Intelligence is available once analysis completes. Run analysis from the Documents tab to activate.
+                      </div>
+                    </div>
+                  )}
+                  {corpusReady && chatHistory.length === 0 && (
+                    <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: '14px 18px', marginBottom: 16 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#374151', letterSpacing: '0.08em', marginBottom: 6 }}>CORPUS LOADED</div>
+                      <div style={{ fontSize: 12, color: '#4A5568', lineHeight: 1.6 }}>
+                        {txnTotal > 0 ? `${txnTotal} transactions` : 'Transactions'} across {statementQueue.filter(s => s.status === 'ready').length || 1} statement{statementQueue.filter(s => s.status === 'ready').length !== 1 ? 's' : ''} indexed. Ask any question about this borrower's financial history.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Chat history */}
+                  {chatHistory.length > 0 && (
+                    <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      {chatHistory.map((msg, i) => (
+                        <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: msg.role === 'analyst' ? 'flex-end' : 'flex-start' }}>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                            <span style={{ fontSize: 9, fontWeight: 700, color: msg.role === 'analyst' ? '#6366F1' : '#4ADE80', letterSpacing: '0.1em', fontFamily: "'IBM Plex Mono', monospace" }}>
+                              {msg.role === 'analyst' ? 'ANALYST' : 'PARITY'}
+                            </span>
+                            <span style={{ fontSize: 9, color: '#2D3748', fontFamily: "'IBM Plex Mono', monospace" }}>{msg.time}</span>
+                          </div>
+                          <div style={{
+                            maxWidth: '85%',
+                            background: msg.role === 'analyst' ? 'rgba(99,102,241,0.1)' : '#0D1220',
+                            border: `1px solid ${msg.role === 'analyst' ? 'rgba(99,102,241,0.2)' : '#1E2A3A'}`,
+                            borderRadius: msg.role === 'analyst' ? '8px 8px 2px 8px' : '8px 8px 8px 2px',
+                            padding: '10px 14px',
+                          }}>
+                            <p style={{ fontSize: 13, color: msg.role === 'analyst' ? '#A5B4FC' : '#CBD5E1', lineHeight: 1.6, whiteSpace: 'pre-line', margin: 0 }}>{msg.text}</p>
+                          </div>
+                        </div>
+                      ))}
+                      {reviewLoading && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                          <span style={{ fontSize: 9, fontWeight: 700, color: '#4ADE80', letterSpacing: '0.1em', fontFamily: "'IBM Plex Mono', monospace" }}>PARITY</span>
+                          <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: '8px 8px 8px 2px', padding: '10px 14px' }}>
+                            <span style={{ fontSize: 13, color: '#374151' }}>Computing…</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Suggestion chips */}
+                  {corpusReady && chatHistory.length === 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+                      {SUGGESTION_CHIPS.map((chip) => (
+                        <button
+                          key={chip}
+                          onClick={() => { setReviewQuestion(chip); }}
+                          style={{ padding: '5px 12px', background: 'transparent', border: '1px solid #1E2A3A', borderRadius: 20, fontSize: 11, color: '#4A5568', cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif", transition: 'all 0.15s' }}
+                          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '#6366F1'; (e.currentTarget as HTMLElement).style.color = '#A5B4FC'; }}
+                          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '#1E2A3A'; (e.currentTarget as HTMLElement).style.color = '#4A5568'; }}
+                        >
+                          {chip}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Input */}
+                  <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: 14 }}>
+                    <textarea
+                      value={reviewQuestion}
+                      onChange={(e) => setReviewQuestion(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void handleAsk(); }}
+                      placeholder={corpusReady ? "Ask anything about this borrower's financials…" : 'Run analysis first to enable Parity Review…'}
+                      disabled={!corpusReady || reviewLoading}
+                      rows={2}
+                      style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', padding: 0, fontSize: 13, color: '#CBD5E1', resize: 'none', fontFamily: "'IBM Plex Sans', sans-serif", boxSizing: 'border-box', opacity: !corpusReady ? 0.4 : 1 }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10, gap: 8, alignItems: 'center' }}>
+                      <span style={{ fontSize: 10, color: '#2D3748', fontFamily: "'IBM Plex Mono', monospace" }}>⌘↵ to send</span>
+                      <button
+                        onClick={() => void handleAsk()}
+                        disabled={!corpusReady || reviewLoading || !reviewQuestion.trim()}
+                        style={{ padding: '7px 16px', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 600, cursor: !corpusReady || reviewLoading || !reviewQuestion.trim() ? 'not-allowed' : 'pointer', opacity: !corpusReady || reviewLoading || !reviewQuestion.trim() ? 0.4 : 1 }}
+                      >
+                        {reviewLoading ? 'Computing…' : 'Ask →'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right: Corpus state sidebar */}
+                <div style={{ width: 220, flexShrink: 0 }}>
+                  <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: 16, marginBottom: 12 }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: '#374151', marginBottom: 14 }}>CORPUS STATE</div>
+                    {[
+                      { label: 'Transactions', value: txnTotal > 0 ? String(txnTotal) : '—' },
+                      { label: 'Classified', value: classified > 0 ? `${classified} entities` : '—' },
+                      { label: 'Entities', value: entities.length > 0 ? String(entities.length) : '—' },
+                      { label: 'Needs review', value: needsReviewItems.length > 0 ? String(needsReviewItems.length) : '0' },
+                      { label: 'Recon delta', value: reconDelta !== 0 ? `${(reconDelta / 100).toLocaleString('en-KE', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—' },
+                      { label: 'Confidence', value: confidence != null ? `${(Number(confidence) * 100).toFixed(1)}%` : '—' },
+                    ].map(({ label, value }) => (
+                      <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
+                        <span style={{ fontSize: 11, color: '#4A5568' }}>{label}</span>
+                        <span style={{ fontSize: 12, color: '#94A3B8', fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600 }}>{value}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Override queue */}
+                  <button
+                    onClick={() => setActiveTab('analysis')}
+                    style={{ width: '100%', padding: '9px 12px', background: 'transparent', border: '1px solid #1E2A3A', borderRadius: 6, color: '#64748B', fontSize: 12, cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif", textAlign: 'left', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '#6366F1'; (e.currentTarget as HTMLElement).style.color = '#A5B4FC'; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '#1E2A3A'; (e.currentTarget as HTMLElement).style.color = '#64748B'; }}
+                  >
+                    <span>Override queue</span>
+                    <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: needsReviewItems.length > 0 ? '#F59E0B' : '#374151' }}>({needsReviewItems.length}) →</span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('snapshot')}
+                    style={{ width: '100%', padding: '9px 12px', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 6, color: '#A5B4FC', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(99,102,241,0.18)'; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(99,102,241,0.1)'; }}
+                  >
+                    Export snapshot
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ── SNAPSHOT TAB ── */}
           {activeTab === 'snapshot' && (

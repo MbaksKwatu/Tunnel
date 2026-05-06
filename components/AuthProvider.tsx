@@ -65,7 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Only redirect if coming from login/auth pages — don't interrupt an active session
           const path = window.location.pathname
           if (path === '/login' || path.startsWith('/auth')) {
-            router.push('/deals/new')
+            router.push('/deals')
           }
         }
 

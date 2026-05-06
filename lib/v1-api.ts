@@ -531,3 +531,37 @@ export async function logIntelligenceEntry(
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
+
+export interface DealListItem {
+  id: string
+  name?: string
+  company_name?: string
+  analyst_initials?: string
+  currency?: string
+  created_at?: string
+  [key: string]: unknown
+}
+
+export async function listDeals(userId: string): Promise<{ deals: DealListItem[] }> {
+  const res = await fetchApi(`${BASE}/deals?created_by=${encodeURIComponent(userId)}`)
+  if (!res.ok) return { deals: [] }
+  return res.json()
+}
+
+export interface NeedsReviewItem {
+  row_id: string
+  txn_hash: string
+  txn_date: string
+  description: string
+  signed_amount_cents: number
+  entity_name?: string
+  entity_id?: string
+  role?: string
+  flag_reason?: string
+}
+
+export async function getNeedsReview(dealId: string): Promise<{ transactions: NeedsReviewItem[]; total: number }> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/transactions/needs-review`)
+  if (!res.ok) return { transactions: [], total: 0 }
+  return res.json()
+}
