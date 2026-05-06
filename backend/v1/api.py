@@ -197,7 +197,7 @@ def _repos(request: Optional[Request] = None) -> Dict[str, Any]:
         EntitiesRepo, TxnEntityMapRepo, OverridesRepo,
         AnalysisRunsRepo, SnapshotsRepo,
         EnrichmentsRepo, ClassificationOverridesRepo, CustomFlagsRepo,
-        AccountCoverageRepo,
+        AccountCoverageRepo, OverrideLogRepo,
     )
     return {
         "deals": DealsRepo(),
@@ -207,6 +207,7 @@ def _repos(request: Optional[Request] = None) -> Dict[str, Any]:
         "entities": EntitiesRepo(),
         "txn_map": TxnEntityMapRepo(),
         "overrides": OverridesRepo(),
+        "override_log": OverrideLogRepo(),
         "runs": AnalysisRunsRepo(),
         "snapshots": SnapshotsRepo(),
         "enrichments": EnrichmentsRepo(),
@@ -624,6 +625,124 @@ def list_overrides(request: Request, deal_id: str):
     if not deal:
         _error("NOT_FOUND", f"Deal {deal_id} not found")
     return {"overrides": repos["overrides"].list_overrides(deal_id)}
+
+
+# ===================================================================
+# Needs-Review / Override Gate (transaction-level)
+# ===================================================================
+
+_VALID_OVERRIDE_ROLES = frozenset({
+    "revenue_operational", "revenue_non_operational", "revenue_investment",
+    "mpesa_inflow", "loan_inflow", "equity_inflow", "fund_inflow",
+    "supplier_payment", "supplier", "payroll", "tax", "loan_repayment",
+    "capital_transfer", "related_party_transfer", "owner_withdrawal",
+    "owner_distribution", "utility_payment", "rent_payment", "insurance_payment",
+    "legal_professional", "bank_charges", "interest_income",
+    "cash_deposit", "cash_withdrawal", "internal_transfer", "transfer",
+    "pos_settlement", "reversal", "currency_conversion",
+    "needs_review", "other",
+})
+
+
+@router.get("/deals/{deal_id}/transactions/needs-review")
+def get_needs_review_transactions(request: Request, deal_id: str):
+    """Return all transactions flagged as needs_review for a deal."""
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    all_maps = list(repos["txn_map"].list_by_deal(deal_id))
+    nr_maps = [m for m in all_maps if (m.get("role") or "").lower() == "needs_review"]
+
+    if not nr_maps:
+        return {"transactions": [], "total": 0}
+
+    all_txns = list(repos["raw"].list_by_deal(deal_id))
+    txn_by_id = {str(t.get("id")): t for t in all_txns if t.get("id")}
+
+    all_entities = list(repos["entities"].list_by_deal(deal_id))
+    entity_name_by_id = {e.get("entity_id"): e.get("display_name") or "" for e in all_entities}
+
+    results = []
+    for m in nr_maps:
+        txn_uuid = str(m.get("txn_id") or "")
+        tx = txn_by_id.get(txn_uuid)
+        if not tx:
+            continue
+        results.append({
+            "row_id": txn_uuid,
+            "txn_hash": tx.get("txn_id") or "",
+            "txn_date": str(tx.get("txn_date") or ""),
+            "description": tx.get("normalized_descriptor") or tx.get("parsed_descriptor") or "",
+            "signed_amount_cents": int(tx.get("signed_amount_cents") or 0),
+            "entity_name": entity_name_by_id.get(m.get("entity_id") or "", ""),
+            "current_role": "needs_review",
+        })
+
+    results.sort(key=lambda r: r["txn_date"])
+    return {"transactions": results, "total": len(results)}
+
+
+@router.post("/deals/{deal_id}/transactions/resolve")
+def resolve_transaction(
+    request: Request,
+    deal_id: str,
+    row_id: str = Form(...),
+    new_role: str = Form(...),
+    analyst_initials: str = Form(...),
+):
+    """Override a single needs_review transaction with an analyst-assigned role."""
+    if new_role not in _VALID_OVERRIDE_ROLES:
+        _error("BAD_REQUEST", f"Invalid role '{new_role}'. Must be one of the valid classifier roles.")
+
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    # Fetch the txn-entity map row to get original role and entity
+    all_maps = repos["txn_map"].list_by_deal(deal_id)
+    txn_map_row = next((m for m in all_maps if str(m.get("txn_id")) == row_id), None)
+    if not txn_map_row:
+        _error("NOT_FOUND", f"Transaction mapping {row_id} not found for deal {deal_id}")
+
+    original_role = txn_map_row.get("role") or "needs_review"
+
+    # Fetch the raw transaction for its SHA256 hash
+    all_txns = repos["raw"].list_by_deal(deal_id)
+    tx_row = next((t for t in all_txns if str(t.get("id")) == row_id), None)
+    txn_hash = tx_row.get("txn_id") or "" if tx_row else ""
+
+    user_id = _extract_user_id_from_request(request)
+
+    # Insert immutable audit log entry
+    log_entry = {
+        "id": str(uuid.uuid4()),
+        "deal_id": deal_id,
+        "txn_uuid": row_id,
+        "txn_hash": txn_hash,
+        "original_role": original_role,
+        "override_role": new_role,
+        "analyst_initials": analyst_initials.strip()[:3].upper(),
+    }
+    if user_id:
+        log_entry["user_id"] = user_id
+    if repos.get("override_log"):
+        repos["override_log"].insert_log(log_entry)
+
+    # Update the role in pds_txn_entity_map
+    if hasattr(repos["txn_map"], "update_role"):
+        repos["txn_map"].update_role(row_id, new_role)
+
+    # Count remaining needs_review for this deal
+    remaining = sum(
+        1 for m in repos["txn_map"].list_by_deal(deal_id)
+        if (m.get("role") or "").lower() == "needs_review"
+        and str(m.get("txn_id")) != row_id
+    )
+
+    return {"success": True, "remaining_count": remaining}
 
 
 # ===================================================================

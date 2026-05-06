@@ -422,3 +422,39 @@ export async function downloadEnrichedPdf(
   const params = enrichmentId ? `?enrichment_id=${enrichmentId}` : ''
   return fetchApi(`${BASE}/deals/${dealId}/snapshot/pdf/enriched${params}`)
 }
+
+export interface NeedsReviewTransaction {
+  row_id: string
+  txn_hash: string
+  txn_date: string
+  description: string
+  signed_amount_cents: number
+  entity_name: string
+  current_role: string
+}
+
+export async function getNeedsReviewTransactions(
+  dealId: string
+): Promise<{ transactions: NeedsReviewTransaction[]; total: number }> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/transactions/needs-review`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function resolveTransaction(
+  dealId: string,
+  rowId: string,
+  newRole: string,
+  analystInitials: string
+): Promise<{ success: boolean; remaining_count: number }> {
+  const form = new FormData()
+  form.append('row_id', rowId)
+  form.append('new_role', newRole)
+  form.append('analyst_initials', analystInitials)
+  const res = await fetchApiFormData(`${BASE}/deals/${dealId}/transactions/resolve`, {
+    method: 'POST',
+    body: form,
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}

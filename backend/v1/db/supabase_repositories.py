@@ -335,6 +335,24 @@ class TxnEntityMapRepo(TxnEntityMapRepository, BaseRepo):
     def list_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         return self.select_eq("deal_id", deal_id)
 
+    def update_role(self, txn_uuid: str, new_role: str) -> None:
+        self.client.table(self.table).update({"role": new_role}).eq("txn_id", txn_uuid).execute()
+
+    def count_needs_review(self, deal_id: str) -> int:
+        rows = self.select_eq("deal_id", deal_id)
+        return sum(1 for r in rows if (r.get("role") or "") == "needs_review")
+
+
+class OverrideLogRepo(BaseRepo):
+    def __init__(self):
+        super().__init__("pds_override_log")
+
+    def insert_log(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+        return self.insert(entry)
+
+    def list_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
+        return self.select_eq("deal_id", deal_id)
+
 
 class OverridesRepo(OverridesRepository, BaseRepo):
     def __init__(self):
@@ -472,3 +490,37 @@ class CustomFlagsRepo(CustomFlagsRepository, BaseRepo):
 
     def list_by_enrichment(self, enrichment_id: str) -> Sequence[Dict[str, Any]]:
         return self.select_eq("enrichment_id", enrichment_id)
+
+
+class AuditedFinancialsRepo(BaseRepo):
+    def __init__(self):
+        super().__init__("pds_audited_financials")
+
+    def upsert(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Insert or update on (deal_id, financial_year) unique constraint."""
+        res = (
+            self.client.table(self.table)
+            .upsert(data, on_conflict="deal_id,financial_year")
+            .execute()
+        )
+        return res.data[0] if res.data else data
+
+    def get_by_deal_id(self, deal_id: str) -> List[Dict[str, Any]]:
+        return self.select_eq("deal_id", deal_id)
+
+    def patch_coverage_summary(self, deal_id: str, financial_year: int, summary: Dict[str, Any]) -> None:
+        self.client.table(self.table).update(summary).eq("deal_id", deal_id).eq("financial_year", financial_year).execute()
+
+
+class AccountCoverageRepo(BaseRepo):
+    def __init__(self):
+        super().__init__("pds_account_coverage")
+
+    def replace_for_deal(self, deal_id: str, rows: List[Dict[str, Any]]) -> None:
+        """Delete existing rows for the deal then insert fresh ones."""
+        self.client.table(self.table).delete().eq("deal_id", deal_id).execute()
+        if rows:
+            self.insert_many(rows)
+
+    def list_by_deal(self, deal_id: str) -> List[Dict[str, Any]]:
+        return self.select_eq("deal_id", deal_id)
