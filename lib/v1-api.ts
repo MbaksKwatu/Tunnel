@@ -492,6 +492,33 @@ export async function intelligenceAsk(
   return res.json()
 }
 
+export interface ExportSummary {
+  deal_id: string
+  deal_name: string
+  company_name: string
+  analyst_initials: string
+  files_uploaded: number
+  total_transactions: number
+  override_count: number
+  logged_entries: number
+  tier: string
+  has_snapshot: boolean
+}
+
+export async function getExportSummary(dealId: string): Promise<ExportSummary> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/export-summary`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function downloadSnapshotPdf(dealId: string): Promise<Response> {
+  return fetchApi(`${BASE}/deals/${dealId}/snapshot/pdf`)
+}
+
+export async function exportTransactionsCsvBlob(dealId: string): Promise<Response> {
+  return fetchApi(`${BASE}/deals/${dealId}/export/transactions`)
+}
+
 export async function logIntelligenceEntry(
   dealId: string,
   entryId: string

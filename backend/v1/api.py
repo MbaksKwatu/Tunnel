@@ -1505,6 +1505,40 @@ def intelligence_ask(request: Request, deal_id: str, body: dict = Body(...)):
     }
 
 
+@router.get("/deals/{deal_id}/export-summary")
+def get_export_summary(request: Request, deal_id: str):
+    """Aggregated deal stats for the export/completion page."""
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    docs = list(repos["documents"].list_by_deal(deal_id))
+    raw = list(repos["raw"].list_by_deal(deal_id))
+    override_log = list(repos["override_log"].list_by_deal(deal_id)) if repos.get("override_log") else []
+    intelligence_log = list(repos["intelligence_log"].list_by_deal(deal_id)) if repos.get("intelligence_log") else []
+    latest_run = repos["runs"].get_latest_run(deal_id)
+
+    files_uploaded = len([d for d in docs if d.get("status") == "ready"])
+    override_count = len(override_log)
+    logged_entries = len([e for e in intelligence_log if e.get("is_logged")])
+    total_transactions = len(raw)
+    tier = (latest_run or {}).get("tier") or "—"
+
+    return {
+        "deal_id": deal_id,
+        "deal_name": deal.get("name") or deal.get("company_name") or "Untitled",
+        "company_name": deal.get("company_name") or "",
+        "analyst_initials": deal.get("analyst_initials") or "",
+        "files_uploaded": files_uploaded,
+        "total_transactions": total_transactions,
+        "override_count": override_count,
+        "logged_entries": logged_entries,
+        "tier": tier,
+        "has_snapshot": latest_run is not None,
+    }
+
+
 @router.post("/deals/{deal_id}/intelligence/{entry_id}/log")
 def log_intelligence_entry(request: Request, deal_id: str, entry_id: str):
     """Mark an intelligence entry as logged (immutable record)."""
