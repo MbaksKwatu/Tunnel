@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useCallback, useEffect, useMemo, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
 import { supabase } from '@/lib/supabase';
 import {
@@ -77,14 +77,25 @@ function normalizePctBpsTo100(
   return result;
 }
 
-export default function V1DealPage() {
+function V1DealPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
   useEffect(() => {
     if (!supabase) { router.replace('/login'); return; }
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) router.replace('/login');
     });
   }, [router]);
+
+  // Pre-load deal from URL param (set by /deals/new)
+  useEffect(() => {
+    const urlDealId = searchParams.get('deal_id');
+    if (!urlDealId || deal) return;
+    setDeal({ id: urlDealId, currency: 'USD' });
+    void refreshBatchUploadCount(urlDealId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const [file, setFile] = useState<File | null>(null);
   const [currency, setCurrency] = useState('USD');
@@ -631,27 +642,52 @@ export default function V1DealPage() {
       minimumFractionDigits: 2,
     }).format(c / 100);
 
-  return (
-    <div className="min-h-screen bg-base-950 text-gray-200 p-6 max-w-5xl mx-auto">
-      <h1 className="text-2xl font-bold text-white mb-4">Deal Analysis (v1)</h1>
+  const dealId = deal?.id ?? searchParams.get('deal_id') ?? null;
 
-      <div className="mb-6 space-y-2 text-sm text-gray-300 leading-relaxed">
-        <p>
-          <span className="text-gray-400">Step 1 —</span>{' '}
-          <span className="text-gray-200">
-            Upload your first statement and click Analyze to create the deal.
-          </span>
-        </p>
-        <p>
-          <span className="text-gray-400">Step 2 —</span>{' '}
-          <span className="text-gray-200">
-            Upload additional monthly statements below, then click Analyze again for the full report.
-          </span>
-        </p>
-      </div>
+  return (
+    <div style={{ display: 'flex', minHeight: '100vh', background: '#080C18', fontFamily: "'IBM Plex Sans', sans-serif" }}>
+      {/* Sidebar */}
+      <aside style={{ width: 220, background: '#0D1220', borderRight: '1px solid #1E2A3A', display: 'flex', flexDirection: 'column', padding: '24px 0', position: 'fixed', top: 0, left: 0, bottom: 0, zIndex: 50 }}>
+        <div style={{ padding: '0 20px 24px', borderBottom: '1px solid #1E2A3A' }}>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: '#6366F1', letterSpacing: '0.1em', fontWeight: 700 }}>P/ PARITY</div>
+          <div style={{ fontSize: 11, color: '#4A5568', marginTop: 2, letterSpacing: '0.08em' }}>INTELLIGENCE INFRASTRUCTURE</div>
+        </div>
+        <nav style={{ flex: 1, padding: '16px 0' }}>
+          <div style={{ padding: '0 12px 8px', fontSize: 10, color: '#4A5568', letterSpacing: '0.12em', fontWeight: 600 }}>DEAL WORKFLOW</div>
+          {[
+            { label: 'Upload', active: true, onClick: () => {} },
+            { label: 'Overrides', active: false, onClick: () => dealId && router.push(`/deals/${dealId}/overrides`) },
+            { label: 'Review', active: false, onClick: () => dealId && router.push(`/deals/${dealId}/review`) },
+            { label: 'Export', active: false, onClick: () => dealId && router.push(`/deals/${dealId}/export`) },
+          ].map((item) => (
+            <button key={item.label} onClick={item.onClick} style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '10px 20px', background: item.active ? 'rgba(99,102,241,0.12)' : 'transparent', borderLeft: item.active ? '2px solid #6366F1' : '2px solid transparent', border: 'none', color: item.active ? '#A5B4FC' : '#64748B', fontSize: 13, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left' }}>
+              {item.label}
+            </button>
+          ))}
+          {['Benchmark', 'Monitor', 'Registry'].map((label) => (
+            <div key={label} style={{ padding: '10px 20px', color: '#2D3748', fontSize: 13, borderLeft: '2px solid transparent', display: 'flex', alignItems: 'center', gap: 8 }}>
+              {label}
+              <span style={{ fontSize: 9, background: '#1A2235', color: '#374151', padding: '1px 5px', borderRadius: 3 }}>SOON</span>
+            </div>
+          ))}
+        </nav>
+        <div style={{ padding: '16px 20px', borderTop: '1px solid #1E2A3A' }}>
+          <button onClick={() => { if (supabase) supabase.auth.signOut(); router.push('/login'); }} style={{ width: '100%', padding: '7px 0', background: 'transparent', border: '1px solid #1E2A3A', borderRadius: 4, color: '#4A5568', fontSize: 12, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer' }}>
+            Sign out
+          </button>
+        </div>
+      </aside>
+
+      {/* Main content */}
+      <div style={{ marginLeft: 220, flex: 1, padding: '40px 48px', maxWidth: 900, color: '#E2E8F0' }}>
+        <div style={{ marginBottom: 32 }}>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: '#4A5568', letterSpacing: '0.12em', marginBottom: 8 }}>P/ UPLOAD</div>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: '#E2E8F0', margin: 0 }}>Bank Statement Analysis</h1>
+          {deal && <div style={{ fontSize: 12, color: '#4A5568', marginTop: 4, fontFamily: "'IBM Plex Mono', monospace" }}>Deal: {deal.id.slice(0, 8)}…</div>}
+        </div>
 
       {/* Upload + Accrual (Step 1) */}
-      <section className="bg-gray-800 rounded-lg p-6 mb-6">
+      <section className="rounded-lg p-6 mb-6" style={{background: "#0D1220", border: "1px solid #1E2A3A"}}>
         <h2 className="text-lg font-semibold mb-4">Upload &amp; Accrual</h2>
         <p className="text-sm text-gray-400 mb-3">
           Upload a bank-export CSV or XLSX (must include <code className="text-gray-300">date</code>,{' '}
@@ -828,7 +864,7 @@ export default function V1DealPage() {
       {run && snapshot && (
         <>
           {/* 1. Deal Summary */}
-          <section className="bg-gray-800 rounded-lg p-6 mb-6">
+          <section className="rounded-lg p-6 mb-6" style={{background: "#0D1220", border: "1px solid #1E2A3A"}}>
             <h2 className="text-lg font-semibold mb-4">Deal Summary</h2>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <div>
@@ -855,7 +891,7 @@ export default function V1DealPage() {
           </section>
 
           {/* 2. Reconciliation Block */}
-          <section className="bg-gray-800 rounded-lg p-6 mb-6">
+          <section className="rounded-lg p-6 mb-6" style={{background: "#0D1220", border: "1px solid #1E2A3A"}}>
             <h2 className="text-lg font-semibold mb-4">Reconciliation</h2>
             <div className="space-y-2">
               <p>
@@ -891,7 +927,7 @@ export default function V1DealPage() {
 
           {/* 3. Entity Breakdown - need transactions */}
           {entityBreakdownByCategory.length > 0 && (
-            <section className="bg-gray-800 rounded-lg p-6 mb-6">
+            <section className="rounded-lg p-6 mb-6" style={{background: "#0D1220", border: "1px solid #1E2A3A"}}>
               <h2 className="text-lg font-semibold mb-4">Entity Breakdown</h2>
               <div className="overflow-x-auto space-y-6">
                 {entityBreakdownByCategory.map(({ role, rows, totalCents }) => (
@@ -932,7 +968,7 @@ export default function V1DealPage() {
 
           {/* 4. Concentration */}
           {entityBreakdown.length > 0 && (
-            <section className="bg-gray-800 rounded-lg p-6 mb-6">
+            <section className="rounded-lg p-6 mb-6" style={{background: "#0D1220", border: "1px solid #1E2A3A"}}>
               <h2 className="text-lg font-semibold mb-4">Concentration</h2>
               <div className="space-y-4">
                 <div>
@@ -965,7 +1001,7 @@ export default function V1DealPage() {
           )}
 
           {/* 5. Override Panel */}
-          <section className="bg-gray-800 rounded-lg p-6 mb-6">
+          <section className="rounded-lg p-6 mb-6" style={{background: "#0D1220", border: "1px solid #1E2A3A"}}>
             <h2 className="text-lg font-semibold mb-4">Override Classification</h2>
             <div className="flex flex-wrap gap-4 items-end">
               <div>
@@ -1049,7 +1085,7 @@ export default function V1DealPage() {
           </section>
 
           {/* 6. Save & Export Snapshot */}
-          <section className="bg-gray-800 rounded-lg p-6 mb-6">
+          <section className="rounded-lg p-6 mb-6" style={{background: "#0D1220", border: "1px solid #1E2A3A"}}>
             <h2 className="text-lg font-semibold mb-4">Save &amp; Export Snapshot</h2>
             <div className="flex items-center gap-4 mb-4">
               <button
@@ -1091,7 +1127,7 @@ export default function V1DealPage() {
           </section>
 
           {/* 7. Parity Review */}
-          <section className="bg-gray-800 rounded-lg p-6 mb-6">
+          <section className="rounded-lg p-6 mb-6" style={{background: "#0D1220", border: "1px solid #1E2A3A"}}>
             <h2 className="text-lg font-semibold mb-1">Parity Review</h2>
             <p className="text-xs text-gray-400 mb-4">
               Ask a question about this deal. Answers are computed deterministically from the latest snapshot — no hallucination.
@@ -1122,6 +1158,15 @@ export default function V1DealPage() {
         </>
       )}
 
+      </div>
     </div>
+  );
+}
+
+export default function V1DealPage() {
+  return (
+    <Suspense fallback={<div style={{ minHeight: '100vh', background: '#080C18', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 }}>LOADING…</div>}>
+      <V1DealPageInner />
+    </Suspense>
   );
 }

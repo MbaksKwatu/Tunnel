@@ -61,9 +61,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(session?.user ?? null)
         setApiToken(session?.access_token ?? null)
         if (event === 'SIGNED_IN') {
-          // Set hint cookie so middleware can detect session without localStorage access
           document.cookie = 'sb-auth-hint=1; path=/; max-age=86400; SameSite=Lax'
-          router.push('/deals/new')
+          // Only redirect if coming from login/auth pages — don't interrupt an active session
+          const path = window.location.pathname
+          if (path === '/login' || path.startsWith('/auth')) {
+            router.push('/deals/new')
+          }
         }
 
         if (event === 'SIGNED_OUT') {
