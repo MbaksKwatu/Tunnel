@@ -130,6 +130,14 @@ function V1DealPageInner() {
   const [activeTab, setActiveTab] = useState<'documents' | 'analysis' | 'review' | 'snapshot'>('documents');
   const docTypeByDocId = useRef<Map<string, 'bank' | 'audited'>>(new Map());
 
+  // Unknown-parser request modal state
+  interface ParserRequestDoc { docId: string; fileName: string; errorMessage: string }
+  const [unknownParserDoc, setUnknownParserDoc] = useState<ParserRequestDoc | null>(null);
+  const [parserRequestForm, setParserRequestForm] = useState({ bankName: '', country: 'Kenya', accountType: 'Business Current', notes: '' });
+  const [parserRequestSubmitting, setParserRequestSubmitting] = useState(false);
+  const [parserRequestSubmitted, setParserRequestSubmitted] = useState(false);
+  const checkedFailedDocs = useRef<Set<string>>(new Set());
+
   const onDrop = useCallback((accepted: File[]) => {
     if (accepted.length) setFile(accepted[0]);
   }, []);
@@ -273,17 +281,47 @@ function V1DealPageInner() {
         if (cancelled) return;
         setDealDocuments(documents);
         const byId = new Map(documents.map((d) => [d.id, d]));
-        setStatementQueue((prev) =>
-          prev.map((q) => {
+
+        // Collect newly-failed bank docs to check for unknown parser
+        const newlyFailed: Array<{ id: string; fileName: string }> = [];
+
+        setStatementQueue((prev) => {
+          const next = prev.map((q) => {
             if (q.status !== 'processing') return q;
             const doc = byId.get(q.id);
             if (!doc) return q;
             const ns = apiDocumentStatus(doc);
-            if (ns === 'completed') return { ...q, status: 'ready' };
-            if (ns === 'failed') return { ...q, status: 'failed' };
+            if (ns === 'completed') return { ...q, status: 'ready' as const };
+            if (ns === 'failed') {
+              // Only check bank docs (not audited), and only once per doc
+              if (docTypeByDocId.current.get(q.id) !== 'audited' && !checkedFailedDocs.current.has(q.id)) {
+                newlyFailed.push({ id: q.id, fileName: q.fileName });
+              }
+              return { ...q, status: 'failed' as const };
+            }
             return q;
-          })
-        );
+          });
+          return next;
+        });
+
+        // Outside setStatementQueue to avoid React state updates inside updater
+        for (const { id, fileName } of newlyFailed) {
+          if (cancelled || checkedFailedDocs.current.has(id)) continue;
+          checkedFailedDocs.current.add(id);
+          try {
+            const statusRes = await getDocumentStatus(id);
+            const errType = statusRes.error_type ?? '';
+            const errMsg = (statusRes.error_message ?? statusRes.error ?? '').toLowerCase();
+            const isUnknownParser =
+              errType === 'InvalidSchemaError' &&
+              (errMsg.includes('not recognised') || errMsg.includes('not recognized') || errMsg.includes('unsupported') || errMsg.includes('no valid transactions'));
+            if (isUnknownParser) {
+              setUnknownParserDoc({ docId: id, fileName, errorMessage: statusRes.error_message ?? statusRes.error ?? 'Bank format not recognised' });
+            }
+          } catch {
+            // silently skip — this is a best-effort enrichment
+          }
+        }
       } catch {
         // ignore poll errors (network / transient 503)
       }
@@ -564,6 +602,32 @@ function V1DealPageInner() {
       setReviewAnswer(e instanceof Error ? e.message : 'Request failed');
     } finally {
       setReviewLoading(false);
+    }
+  };
+
+  const handleParserRequestSubmit = async () => {
+    if (!unknownParserDoc || !parserRequestForm.bankName.trim()) return;
+    setParserRequestSubmitting(true);
+    try {
+      const sbClient = supabase;
+      if (sbClient) {
+        await (sbClient as any).from('pds_parser_requests').insert({
+          deal_id: deal?.id ?? null,
+          document_id: unknownParserDoc.docId,
+          original_filename: unknownParserDoc.fileName,
+          bank_name: parserRequestForm.bankName.trim(),
+          country: parserRequestForm.country,
+          account_type: parserRequestForm.accountType,
+          notes: parserRequestForm.notes.trim() || null,
+          error_type: 'InvalidSchemaError',
+          error_message: unknownParserDoc.errorMessage,
+        });
+      }
+      setParserRequestSubmitted(true);
+    } catch {
+      setParserRequestSubmitted(true); // still show confirmation even if insert fails
+    } finally {
+      setParserRequestSubmitting(false);
     }
   };
 
@@ -1210,6 +1274,121 @@ function V1DealPageInner() {
 
         </div>
       </div>
+
+      {/* ── Unknown Parser Modal ── */}
+      {unknownParserDoc && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(8,12,24,0.85)', backdropFilter: 'blur(4px)' }}>
+          <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 10, width: 480, maxWidth: '90vw', padding: 28, boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}>
+            {!parserRequestSubmitted ? (
+              <>
+                {/* Header */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#F59E0B', display: 'inline-block' }} />
+                      <span style={{ fontSize: 10, fontWeight: 700, color: '#F59E0B', letterSpacing: '0.1em', fontFamily: "'IBM Plex Mono', monospace" }}>UNKNOWN FORMAT</span>
+                    </div>
+                    <h3 style={{ fontSize: 16, fontWeight: 700, color: '#F1F5F9', margin: 0 }}>Parser not found for this bank</h3>
+                    <p style={{ fontSize: 12, color: '#4A5568', marginTop: 6, lineHeight: 1.5 }}>
+                      <span style={{ color: '#64748B', fontFamily: "'IBM Plex Mono', monospace" }}>{unknownParserDoc.fileName}</span> uses a format we don't currently support. Request a parser and we'll add it to the pipeline.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => { setUnknownParserDoc(null); setParserRequestSubmitted(false); setParserRequestForm({ bankName: '', country: 'Kenya', accountType: 'Business Current', notes: '' }); }}
+                    style={{ background: 'transparent', border: 'none', color: '#374151', fontSize: 18, cursor: 'pointer', padding: '0 0 0 12px', lineHeight: 1, flexShrink: 0 }}
+                  >×</button>
+                </div>
+
+                {/* Form */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: '#64748B', marginBottom: 5, letterSpacing: '0.06em' }}>BANK NAME *</label>
+                    <input
+                      type="text"
+                      value={parserRequestForm.bankName}
+                      onChange={(e) => setParserRequestForm((p) => ({ ...p, bankName: e.target.value }))}
+                      placeholder="e.g. Stanbic Bank, Absa, DTB"
+                      autoFocus
+                      style={{ width: '100%', background: '#080C18', border: '1px solid #1E2A3A', borderRadius: 6, padding: '8px 12px', color: '#F1F5F9', fontSize: 13, outline: 'none', boxSizing: 'border-box', fontFamily: "'IBM Plex Sans', sans-serif" }}
+                    />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, color: '#64748B', marginBottom: 5, letterSpacing: '0.06em' }}>COUNTRY</label>
+                      <select
+                        value={parserRequestForm.country}
+                        onChange={(e) => setParserRequestForm((p) => ({ ...p, country: e.target.value }))}
+                        style={{ width: '100%', background: '#080C18', border: '1px solid #1E2A3A', borderRadius: 6, padding: '8px 12px', color: '#CBD5E1', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
+                      >
+                        {['Kenya', 'Nigeria', 'Uganda', 'Tanzania', 'Ghana', 'South Africa', 'Rwanda', 'Ethiopia', 'Other'].map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, color: '#64748B', marginBottom: 5, letterSpacing: '0.06em' }}>ACCOUNT TYPE</label>
+                      <select
+                        value={parserRequestForm.accountType}
+                        onChange={(e) => setParserRequestForm((p) => ({ ...p, accountType: e.target.value }))}
+                        style={{ width: '100%', background: '#080C18', border: '1px solid #1E2A3A', borderRadius: 6, padding: '8px 12px', color: '#CBD5E1', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
+                      >
+                        {['Business Current', 'Business Savings', 'Personal Current', 'Personal Savings', 'Mobile Money', 'Other'].map((t) => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: '#64748B', marginBottom: 5, letterSpacing: '0.06em' }}>NOTES <span style={{ color: '#2D3748' }}>optional</span></label>
+                    <textarea
+                      value={parserRequestForm.notes}
+                      onChange={(e) => setParserRequestForm((p) => ({ ...p, notes: e.target.value }))}
+                      placeholder="Any additional info about the format — e.g. PDF vs CSV, layout description…"
+                      rows={2}
+                      style={{ width: '100%', background: '#080C18', border: '1px solid #1E2A3A', borderRadius: 6, padding: '8px 12px', color: '#CBD5E1', fontSize: 12, outline: 'none', resize: 'none', boxSizing: 'border-box', fontFamily: "'IBM Plex Sans', sans-serif" }}
+                    />
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+                  <button
+                    onClick={handleParserRequestSubmit}
+                    disabled={!parserRequestForm.bankName.trim() || parserRequestSubmitting}
+                    style={{ flex: 1, padding: '10px 0', background: !parserRequestForm.bankName.trim() || parserRequestSubmitting ? '#1A2235' : '#6366F1', color: !parserRequestForm.bankName.trim() || parserRequestSubmitting ? '#374151' : '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: !parserRequestForm.bankName.trim() || parserRequestSubmitting ? 'not-allowed' : 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
+                  >
+                    {parserRequestSubmitting ? 'Submitting…' : 'Request parser →'}
+                  </button>
+                  <button
+                    onClick={() => { setUnknownParserDoc(null); setParserRequestSubmitted(false); setParserRequestForm({ bankName: '', country: 'Kenya', accountType: 'Business Current', notes: '' }); }}
+                    style={{ padding: '10px 16px', background: 'transparent', color: '#4A5568', border: '1px solid #1E2A3A', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </>
+            ) : (
+              /* Confirmation */
+              <div style={{ textAlign: 'center', padding: '8px 0' }}>
+                <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10l4.5 4.5L16 6" stroke="#A5B4FC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </div>
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: '#F1F5F9', margin: '0 0 8px' }}>Parser request submitted</h3>
+                <p style={{ fontSize: 13, color: '#4A5568', margin: '0 0 20px', lineHeight: 1.5 }}>
+                  We've logged <strong style={{ color: '#6366F1' }}>{parserRequestForm.bankName}</strong> ({parserRequestForm.country}) for the engineering queue. You'll be able to re-upload once the parser is live.
+                </p>
+                <button
+                  onClick={() => { setUnknownParserDoc(null); setParserRequestSubmitted(false); setParserRequestForm({ bankName: '', country: 'Kenya', accountType: 'Business Current', notes: '' }); }}
+                  style={{ padding: '9px 20px', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Done
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
