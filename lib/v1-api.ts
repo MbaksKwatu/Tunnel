@@ -110,11 +110,15 @@ export interface ExportResponse {
 export async function createDeal(
   currency: string,
   name?: string,
-  accrual?: AccrualInput
+  accrual?: AccrualInput,
+  companyName?: string,
+  analystInitials?: string
 ): Promise<{ deal: Deal }> {
   const form = new FormData()
   form.append('currency', currency)
   if (name) form.append('name', name)
+  if (companyName) form.append('company_name', companyName)
+  if (analystInitials) form.append('analyst_initials', analystInitials)
   if (accrual?.accrual_revenue_cents != null)
     form.append('accrual_revenue_cents', String(accrual.accrual_revenue_cents))
   if (accrual?.accrual_period_start)

@@ -26,7 +26,8 @@ export default function AuthCallback() {
         }
 
         if (data.session) {
-          router.push('/v1/deal')
+          document.cookie = 'sb-auth-hint=1; path=/; max-age=86400; SameSite=Lax'
+          router.push('/deals/new')
         } else {
           // No session, redirect to login
           router.push('/login?error=no_session')

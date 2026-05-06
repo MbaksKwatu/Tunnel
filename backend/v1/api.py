@@ -4,8 +4,10 @@ All money fields: integer cents.  All ratios: integer basis points.
 Snapshot only on explicit POST /v1/deals/{deal_id}/export.
 """
 
+import base64
 import csv
 import io
+import json
 import logging
 import time
 import uuid
@@ -26,6 +28,7 @@ from .parsing.errors import CurrencyMismatchError, InvalidSchemaError
 from .core.pipeline import run_pipeline
 from .core.snapshot_engine import build_pds_payload, export_snapshot, decompress_canonical_json_if_needed
 from .core.pdf_generator import generate_pdf as _generate_snapshot_pdf
+from .flags import seed_default_flags as _seed_default_flags
 
 router = APIRouter(prefix="/v1", tags=["v1"])
 
@@ -194,6 +197,7 @@ def _repos(request: Optional[Request] = None) -> Dict[str, Any]:
         EntitiesRepo, TxnEntityMapRepo, OverridesRepo,
         AnalysisRunsRepo, SnapshotsRepo,
         EnrichmentsRepo, ClassificationOverridesRepo, CustomFlagsRepo,
+        AccountCoverageRepo,
     )
     return {
         "deals": DealsRepo(),
@@ -208,6 +212,7 @@ def _repos(request: Optional[Request] = None) -> Dict[str, Any]:
         "enrichments": EnrichmentsRepo(),
         "cls_overrides": ClassificationOverridesRepo(),
         "custom_flags": CustomFlagsRepo(),
+        "account_coverage": AccountCoverageRepo(),
     }
 
 
@@ -215,23 +220,48 @@ def _repos(request: Optional[Request] = None) -> Dict[str, Any]:
 # Deals
 # ===================================================================
 
+def _extract_user_id_from_request(request: Request) -> Optional[str]:
+    """Decode the Supabase JWT from Authorization header to get the user sub."""
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+    token = auth_header[7:]
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return None
+        padding = "=" * (4 - len(parts[1]) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(parts[1] + padding))
+        return payload.get("sub")
+    except Exception:
+        return None
+
+
 @router.post("/deals")
 def create_deal(
     request: Request,
     currency: str = Form(...),
     name: Optional[str] = Form(None),
     created_by: Optional[str] = Form(None),
+    company_name: Optional[str] = Form(None),
+    analyst_initials: Optional[str] = Form(None),
     accrual_revenue_cents: Optional[str] = Form(None),
     accrual_period_start: Optional[str] = Form(None),
     accrual_period_end: Optional[str] = Form(None),
 ):
     repos = _repos(request)
+    user_id = _extract_user_id_from_request(request)
     deal = {
         "id": str(uuid.uuid4()),
         "currency": currency.upper(),
         "name": name,
-        "created_by": created_by or str(uuid.uuid4()),
+        "created_by": created_by or user_id or str(uuid.uuid4()),
+        "user_id": user_id,
     }
+    if company_name and company_name.strip():
+        deal["company_name"] = company_name.strip()
+    if analyst_initials and analyst_initials.strip():
+        deal["analyst_initials"] = analyst_initials.strip()[:3].upper()
     if accrual_revenue_cents is not None and accrual_revenue_cents.strip():
         try:
             deal["accrual_revenue_cents"] = int(accrual_revenue_cents)
@@ -658,11 +688,13 @@ def export(request: Request, deal_id: str, force: bool = False):
     latest_doc_at = repos["documents"].get_latest_update_at(deal_id)
     latest_override_at = repos["overrides"].get_latest_update_at(deal_id) or ""
     snap_created_at = (latest_snapshot or {}).get("created_at") or ""
+    snap_config_version = (latest_snapshot or {}).get("config_version")
     if not force and (
         latest_snapshot
         and snap_created_at
         and (not latest_doc_at or snap_created_at >= latest_doc_at)
         and snap_created_at > latest_override_at
+        and snap_config_version == CONFIG_VERSION
     ):
         latest_run = repos["runs"].get_latest_run(deal_id)
         if latest_run and latest_run.get("id") == latest_snapshot.get("analysis_run_id"):
@@ -674,13 +706,15 @@ def export(request: Request, deal_id: str, force: bool = False):
             if request:
                 request.app.state.last_export_ms = duration_ms
                 request.app.state.last_export_at = datetime.now(timezone.utc).isoformat()
-            logger.info("[EXPORT] deal=%s ms=%d short_circuit=1", deal_id, duration_ms)
+            logger.info("[EXPORT] deal=%s ms=%d short_circuit=1 config_version=%s", deal_id, duration_ms, snap_config_version)
             return {
                 "analysis_run": run,
                 "snapshot": _snapshot_for_public_response(latest_snapshot),
                 "entities": entities,
                 "txn_entity_map": txn_map,
             }
+    if latest_snapshot and snap_config_version != CONFIG_VERSION:
+        logger.info("[EXPORT] deal=%s config_version mismatch snap=%s current=%s — bypassing cache", deal_id, snap_config_version, CONFIG_VERSION)
 
     stage = "PIPELINE_START"
     run, links, entities, txn_map = run_pipeline(
@@ -718,6 +752,9 @@ def export(request: Request, deal_id: str, force: bool = False):
 
     stage = "SNAPSHOT_BUILD_DONE"
     logger.info("[EXPORT] stage=%s", stage)
+    from .db.supabase_repositories import AuditedFinancialsRepo
+    af_rows = AuditedFinancialsRepo().get_by_deal_id(deal_id)
+    audited_financials = af_rows[0] if af_rows else None
     payload = build_pds_payload(
         schema_version=run["schema_version"],
         config_version=run["config_version"],
@@ -741,6 +778,7 @@ def export(request: Request, deal_id: str, force: bool = False):
             "override_penalty_bp": run["override_penalty_bp"],
         },
         overrides_applied=overrides,
+        audited_financials=audited_financials,
     )
     snapshot = export_snapshot(
         snapshot_repo=repos["snapshots"],
@@ -751,6 +789,45 @@ def export(request: Request, deal_id: str, force: bool = False):
     )
     stage = "SNAPSHOT_INSERT_DONE"
     logger.info("[EXPORT] stage=%s", stage)
+
+    # Persist account coverage advisory (non-fatal — advisory only)
+    try:
+        from .analysis.reconciliation_engine import calculate_account_coverage
+        from .db.supabase_repositories import AuditedFinancialsRepo
+        coverage = calculate_account_coverage(deal_id)
+        if coverage.get("advisory_tier"):
+            rows = [
+                {
+                    "deal_id": deal_id,
+                    "declared_bank_name": a["bank_name"],
+                    "declared_balance_cents": a["declared_balance_cents"],
+                    "is_submitted": a["status"] == "SUBMITTED",
+                    "materiality_tier": a["materiality"],
+                }
+                for a in coverage.get("account_details", [])
+            ]
+            repos["account_coverage"].replace_for_deal(deal_id, rows)
+            if audited_financials:
+                AuditedFinancialsRepo().patch_coverage_summary(
+                    deal_id,
+                    audited_financials["financial_year"],
+                    {
+                        "declared_accounts_count": coverage["declared_accounts_count"],
+                        "submitted_accounts_count": coverage["submitted_accounts_count"],
+                        "account_coverage_pct": coverage["coverage_pct"],
+                        "account_coverage_advisory": coverage["advisory_tier"],
+                    },
+                )
+    except Exception as exc:
+        logger.warning("[EXPORT] account_coverage persist failed (non-fatal): %s", exc)
+
+    # Seed default flags on first snapshot (idempotent — skipped if flags already exist)
+    try:
+        avg_inflow = int(run.get("average_monthly_inflow_cents") or 0)
+        _seed_default_flags(deal_id, avg_inflow, repos.get("custom_flags"))
+    except Exception as exc:
+        logger.warning("[EXPORT] seed_default_flags failed (non-fatal): %s", exc)
+
     stage = "EXPORT_DONE"
     duration_ms = int((time.perf_counter() - started) * 1000)
     if request:
@@ -910,7 +987,8 @@ def get_snapshot_pdf(request: Request, deal_id: str):
         "sha256_hash":          snapshot.get("sha256_hash"),
         "financial_state_hash": snapshot.get("financial_state_hash"),
     }
-    pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta)
+    account_coverage = repos["account_coverage"].list_by_deal(deal_id)
+    pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta, account_coverage=account_coverage)
     filename = f"parity_snapshot_{deal_id}.pdf"
     return StreamingResponse(
         iter([pdf_bytes]),
@@ -959,7 +1037,8 @@ def get_enriched_pdf(request: Request, deal_id: str, enrichment_id: Optional[str
         "financial_state_hash": snapshot.get("financial_state_hash"),
     }
 
-    pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta, enrichment)
+    account_coverage = repos["account_coverage"].list_by_deal(deal_id)
+    pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta, enrichment, account_coverage=account_coverage)
     suffix = "_enriched" if enrichment else ""
     filename = f"parity_{deal_id}{suffix}.pdf"
     return StreamingResponse(
@@ -1160,4 +1239,292 @@ def ask_parity(request: Request, deal_id: str, body: dict = Body(...)):
     if intent is None:
         return {"answer": "This question is outside supported scope.", "intent": None}
     agg = extract_aggregates(snapshot)
-    return {"answer": answer_intent(intent, agg), "intent": intent}
+    result = answer_intent(intent, agg)
+    # kra_summary returns a structured dict; other intents return strings
+    if isinstance(result, dict):
+        return {"answer": result.get("answer"), "intent": intent, "data": result.get("data"), "add_to_snapshot": result.get("add_to_snapshot", False)}
+    return {"answer": result, "intent": intent}
+
+
+# ===================================================================
+# Parity Review — Suggestions Engine
+# ===================================================================
+
+from .analytics import loan_drawdowns as _loan_drawdowns  # noqa: E402
+from .suggestions import generate_suggestions  # noqa: E402
+
+
+@router.get("/deals/{deal_id}/analytics/loan-drawdowns")
+def get_loan_drawdowns(request: Request, deal_id: str):
+    """Returns all loan inflow transactions for a deal. Used by Parity Review."""
+    repos = _repos(request)
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+    snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    if not snapshot:
+        _error("NOT_FOUND", "No snapshot found. Run export first.")
+
+    import json
+    from .core.snapshot_engine import decompress_canonical_json_if_needed
+
+    data = json.loads(decompress_canonical_json_if_needed(snapshot["canonical_json"]))
+    transactions = data.get("transactions", [])
+    txn_entity_map = data.get("txn_entity_map", [])
+    entities = data.get("entities", [])
+
+    role_lookup = {m["txn_id"]: m["role"] for m in txn_entity_map}
+    entities_by_id = {str(e["entity_id"]): e for e in entities}
+    txn_entity_id = {str(m.get("txn_id") or ""): str(m.get("entity_id") or "") for m in txn_entity_map}
+
+    tagged = []
+    for t in transactions:
+        txn_id = str(t.get("id") or t.get("txn_id") or "")
+        role = role_lookup.get(txn_id, role_lookup.get(str(t.get("txn_id", "")), "other"))
+        entity_id = txn_entity_id.get(txn_id, "")
+        entity = entities_by_id.get(entity_id, {})
+        entity_name = entity.get("display_name") or str(t.get("normalized_descriptor", ""))[:40]
+        tagged.append({
+            "role": role,
+            "amount_cents": int(t.get("signed_amount_cents", 0)),
+            "txn_date": str(t.get("txn_date", "")),
+            "txn_id": txn_id,
+            "entity_name": entity_name,
+        })
+
+    return _loan_drawdowns(tagged)
+
+
+@router.get("/deals/{deal_id}/review/suggestions")
+def get_review_suggestions(request: Request, deal_id: str):
+    """Returns Parity Review suggestion cards for a deal. Called when analyst opens Parity Review."""
+    repos = _repos(request)
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+    snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    if not snapshot:
+        _error("NOT_FOUND", "No snapshot found. Run export first.")
+
+    import json
+    from .core.snapshot_engine import decompress_canonical_json_if_needed
+
+    data = json.loads(decompress_canonical_json_if_needed(snapshot["canonical_json"]))
+    transactions = data.get("transactions", [])
+    txn_entity_map = data.get("txn_entity_map", [])
+    entities = data.get("entities", [])
+    metrics = data.get("metrics", {})
+
+    role_lookup = {m["txn_id"]: m["role"] for m in txn_entity_map}
+    entities_by_id = {str(e["entity_id"]): e for e in entities}
+    txn_entity_id = {str(m.get("txn_id") or ""): str(m.get("entity_id") or "") for m in txn_entity_map}
+
+    tagged = []
+    for t in transactions:
+        txn_id = str(t.get("id") or t.get("txn_id") or "")
+        role = role_lookup.get(txn_id, role_lookup.get(str(t.get("txn_id", "")), "other"))
+        entity_id = txn_entity_id.get(txn_id, "")
+        entity = entities_by_id.get(entity_id, {})
+        entity_name = entity.get("display_name") or str(t.get("normalized_descriptor", ""))[:40]
+        tagged.append({
+            "role": role,
+            "amount_cents": int(t.get("signed_amount_cents", 0)),
+            "txn_date": str(t.get("txn_date", "")),
+            "txn_id": txn_id,
+            "entity_name": entity_name,
+        })
+
+    avg_monthly_inflow = int(metrics.get("average_monthly_inflow_cents") or 0)
+
+    # Fetch current enrichment state if any
+    enrichment_state = None
+    try:
+        latest_enrichments = repos["enrichments"].list_enrichments(deal_id)
+        if latest_enrichments:
+            latest_enrichments.sort(key=lambda e: e.get("created_at") or "", reverse=True)
+            enrichment_state = latest_enrichments[0]
+    except Exception:
+        pass
+
+    suggestions = generate_suggestions(tagged, enrichment_state, avg_monthly_inflow)
+    return {"suggestions": suggestions, "count": len(suggestions)}
+
+
+# ===================================================================
+# Audited Financial Statements
+# ===================================================================
+
+@router.post("/deals/{deal_id}/upload-financials")
+async def upload_audited_financials(
+    request: Request,
+    deal_id: str,
+    file: UploadFile = File(...),
+):
+    """
+    Upload an audited financial statements PDF for a deal.
+
+    Sends the file to parity-ingestion for extraction, then stores the
+    structured data in pds_audited_financials.  Idempotent: re-uploading
+    the same financial year overwrites the previous record.
+    """
+    from .db.supabase_repositories import AuditedFinancialsRepo
+    from .parsing.audited_financials_client import (
+        extract_audited_financials_via_ingestion,
+        AuditedFinancialsExtractionError,
+    )
+
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    filename = file.filename or "financials.pdf"
+    if not filename.lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=415,
+            detail="Only PDF files are accepted for audited financials upload.",
+        )
+
+    file_bytes = await file.read()
+
+    try:
+        data = extract_audited_financials_via_ingestion(file_bytes, filename)
+    except AuditedFinancialsExtractionError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    # Attach deal FK and optional document FK (no pds_documents row created here)
+    row = {
+        "deal_id": deal_id,
+        **{
+            k: v
+            for k, v in data.items()
+            # Exclude non-column keys and convert Decimal to float for JSON
+            if k not in ("sha256_hash",)
+        },
+        "extraction_confidence": int(data.get("extraction_confidence") or 0),
+        "sha256_hash": data.get("sha256_hash"),
+    }
+
+    af_repo = AuditedFinancialsRepo()
+    saved = af_repo.upsert(row)
+
+    _conf = int(data.get("extraction_confidence") or 0)
+    logger.info(
+        "[API] Saved audited financials deal_id=%s FY=%s confidence=%d%%",
+        deal_id,
+        data.get("financial_year"),
+        _conf,
+    )
+
+    return {
+        "id": saved.get("id"),
+        "deal_id": deal_id,
+        "company_name": data.get("company_name"),
+        "financial_year": data.get("financial_year"),
+        "extraction_confidence": int(data.get("extraction_confidence") or 0),
+        "turnover_cents": data.get("turnover_cents"),
+        "profit_after_tax_cents": data.get("profit_after_tax_cents"),
+        "total_assets_cents": data.get("total_assets_cents"),
+        "cash_and_equivalents_cents": data.get("cash_and_equivalents_cents"),
+    }
+
+
+@router.get("/deals/{deal_id}/audited-financials")
+def get_audited_financials(request: Request, deal_id: str):
+    """
+    Retrieve all audited financials records for a deal, ordered by financial_year desc.
+    """
+    from .db.supabase_repositories import AuditedFinancialsRepo
+
+    repos = _repos(request)
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    af_repo = AuditedFinancialsRepo()
+    records = af_repo.get_by_deal_id(deal_id)
+    records.sort(key=lambda r: r.get("financial_year") or 0, reverse=True)
+    return {"deal_id": deal_id, "records": records}
+
+
+_VALID_SECTION_KEYS = frozenset({
+    "annual_revenue", "loan_drawdowns", "kra_summary",
+    "expense_frequency", "owner_distributions",
+    "cash_threshold", "overdraft", "large_transactions",
+})
+
+
+@router.post("/deals/{deal_id}/review/add-to-snapshot")
+def add_section_to_snapshot(request: Request, deal_id: str, body: dict = Body(...)):
+    """
+    Adds a Parity Review suggestion to the enrichment record.
+    Body: { "section_key": "annual_revenue", "data": {...} }
+
+    Determinism: sections stored sorted by key. Enriched hash recomputed on each addition.
+    """
+    import hashlib
+    import json as _json
+
+    section_key = body.get("section_key")
+    data = body.get("data")
+
+    if section_key not in _VALID_SECTION_KEYS:
+        raise HTTPException(status_code=400, detail=f"Unknown section_key: {section_key}")
+
+    repos = _repos(request)
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    if not snapshot:
+        _error("NOT_FOUND", "No snapshot found. Run export first.")
+
+    base_snapshot_hash = snapshot.get("sha256_hash") or ""
+
+    # Fetch or create draft enrichment
+    try:
+        enrichments = repos["enrichments"].list_enrichments(deal_id)
+        draft = next((e for e in enrichments if not e.get("is_final")), None)
+    except Exception:
+        draft = None
+
+    if draft is None:
+        draft = {
+            "id": str(uuid.uuid4()),
+            "deal_id": deal_id,
+            "base_snapshot_id": snapshot.get("id"),
+            "added_sections": [],
+            "sections_data": {},
+            "is_final": False,
+        }
+
+    added_sections = list(draft.get("added_sections") or [])
+    sections_data = dict(draft.get("sections_data") or {})
+
+    if section_key not in added_sections:
+        added_sections.append(section_key)
+    sections_data[section_key] = data
+
+    # Recompute enriched_hash deterministically
+    payload_for_hash = {
+        "base_snapshot_hash": base_snapshot_hash,
+        "sections": {k: sections_data[k] for k in sorted(sections_data.keys())},
+    }
+    raw = _json.dumps(payload_for_hash, sort_keys=True, separators=(",", ":"))
+    enriched_hash = hashlib.sha256(raw.encode()).hexdigest()
+
+    draft["added_sections"] = sorted(added_sections)
+    draft["sections_data"] = sections_data
+    draft["enriched_hash"] = enriched_hash
+
+    try:
+        if draft.get("id") and enrichments:
+            repos["enrichments"].update_enrichment(draft["id"], draft)
+        else:
+            repos["enrichments"].insert_enrichment(draft)
+    except Exception as exc:
+        logger.warning("[add-to-snapshot] enrichment persist failed: %s", exc)
+
+    return {
+        "enrichment_id": draft.get("id"),
+        "section_key": section_key,
+        "added_sections": draft["added_sections"],
+        "enriched_hash": enriched_hash,
+    }
