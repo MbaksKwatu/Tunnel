@@ -197,7 +197,7 @@ def _repos(request: Optional[Request] = None) -> Dict[str, Any]:
         EntitiesRepo, TxnEntityMapRepo, OverridesRepo,
         AnalysisRunsRepo, SnapshotsRepo,
         EnrichmentsRepo, ClassificationOverridesRepo, CustomFlagsRepo,
-        AccountCoverageRepo, OverrideLogRepo,
+        AccountCoverageRepo, OverrideLogRepo, IntelligenceLogRepo,
     )
     return {
         "deals": DealsRepo(),
@@ -208,6 +208,7 @@ def _repos(request: Optional[Request] = None) -> Dict[str, Any]:
         "txn_map": TxnEntityMapRepo(),
         "overrides": OverridesRepo(),
         "override_log": OverrideLogRepo(),
+        "intelligence_log": IntelligenceLogRepo(),
         "runs": AnalysisRunsRepo(),
         "snapshots": SnapshotsRepo(),
         "enrichments": EnrichmentsRepo(),
@@ -1363,6 +1364,164 @@ def ask_parity(request: Request, deal_id: str, body: dict = Body(...)):
     if isinstance(result, dict):
         return {"answer": result.get("answer"), "intent": intent, "data": result.get("data"), "add_to_snapshot": result.get("add_to_snapshot", False)}
     return {"answer": result, "intent": intent}
+
+
+# ===================================================================
+# Parity Review — Intelligence Query Interface
+# ===================================================================
+
+def _intelligence_demo_response(query: str, query_type: str) -> Dict[str, Any]:
+    """Return structured demo responses keyed on query content + type."""
+    q = query.lower()
+
+    if query_type == "computation":
+        if any(k in q for k in ("inflow", "revenue", "income")):
+            return {
+                "response_text": "Annual inflow total: <strong>KES 3,748,800</strong> — integer sum of 12 monthly inflow totals, no rounding. 12-month mean: <strong>KES 312,400/month</strong>.",
+                "basis_sources": ["monthly_cashflow·12mo", "integer arithmetic", "SHA256 f3a2b6c9..."],
+                "computation_steps": ["Summing monthly inflows", "Computing 12-month mean", "Applying integer division"],
+            }
+        if any(k in q for k in ("dsr", "debt service", "coverage")):
+            return {
+                "response_text": "DSR: <strong>0.38</strong> (38%) — monthly debt service KES 118,800 ÷ monthly net inflow KES 312,400. Below 0.50 threshold — <span style='color:#4ADE80'>serviceable</span>.",
+                "basis_sources": ["loan_repayment·monthly", "monthly_cashflow", "DSR threshold:0.50", "SHA256 a1b2c3d4..."],
+                "computation_steps": ["Averaging monthly loan repayments", "Averaging monthly net inflow", "Computing ratio"],
+            }
+        if any(k in q for k in ("outflow", "expense", "spending")):
+            return {
+                "response_text": "Total outflows: <strong>KES 2,891,200</strong> across 12 months. Largest category: supplier_payment at <strong>KES 1,244,000</strong> (43%).",
+                "basis_sources": ["monthly_cashflow·12mo", "entity breakdown", "integer arithmetic", "SHA256 c9d8e7f6..."],
+                "computation_steps": ["Summing all debit categories", "Ranking by total", "Computing percentage share"],
+            }
+        return {
+            "response_text": f"Computing over ledger for: '<em>{query}</em>'. Result: all integer arithmetic applied to classified transaction record.",
+            "basis_sources": ["transaction ledger", "integer arithmetic", "SHA256 placeholder..."],
+            "computation_steps": ["Parsing query", "Fetching classified record", "Applying arithmetic"],
+        }
+
+    if query_type == "classification":
+        if any(k in q for k in ("meridian",)):
+            return {
+                "response_text": "Meridian Capital Ltd (KES 650,000 · 01-Aug-2025) resolved to <strong>fund_inflow</strong> by analyst AM. Entity registered in Parity as a Kenya-based investment fund.",
+                "basis_sources": ["override log·AM", "entity registry:Meridian Capital", "fund_inflow classification", "SHA256 f3a2b6c9..."],
+                "computation_steps": [],
+            }
+        if any(k in q for k in ("needs_review", "flagged", "unresolved")):
+            return {
+                "response_text": "0 transactions currently flagged as <strong>needs_review</strong>. All transactions have been classified or overridden.",
+                "basis_sources": ["pds_txn_entity_map", "override_log", "SHA256 00000000..."],
+                "computation_steps": [],
+            }
+        return {
+            "response_text": f"Classification query: '<em>{query}</em>'. Transaction roles resolved from classifier ontology and analyst overrides.",
+            "basis_sources": ["classifier ontology", "override log", "entity registry", "SHA256 placeholder..."],
+            "computation_steps": [],
+        }
+
+    if query_type == "pattern":
+        if any(k in q for k in ("negative", "net negative", "deficit")):
+            return {
+                "response_text": "Two net-negative months: <span style='color:#F87171'>August 2025 at −KES 447,800</span> (inflow KES 694,100 · outflow KES 1,141,900) driven by capital_transfer of KES 220,000 and supplier spike.",
+                "basis_sources": ["monthly_cashflow·2025-08·2025-09", "capital_transfer:KES 220K", "supplier spike", "SHA256 f3a2b6c9..."],
+                "computation_steps": [],
+            }
+        if any(k in q for k in ("concentration", "single", "dominant")):
+            return {
+                "response_text": "Top entity: <strong>Musa Distributors</strong> at 34% of total outflow (KES 983,000 of KES 2,891,200). Single-entity concentration above 30% threshold — <span style='color:#FBBF24'>review warranted</span>.",
+                "basis_sources": ["entity breakdown·outflow", "concentration threshold:30%", "SHA256 d4e5f6a7..."],
+                "computation_steps": [],
+            }
+        if any(k in q for k in ("trend", "growth", "decline", "month")):
+            return {
+                "response_text": "Inflow trend: +12% MoM average over the trailing 6 months. Peak month: <strong>March 2025 at KES 418,000</strong>. Trough: <strong>June 2025 at KES 247,000</strong>.",
+                "basis_sources": ["monthly_cashflow·6mo", "MoM delta", "SHA256 b8c9d0e1..."],
+                "computation_steps": [],
+            }
+        return {
+            "response_text": f"Pattern analysis for: '<em>{query}</em>'. Scanning classified transaction record for statistical anomalies and structural patterns.",
+            "basis_sources": ["monthly_cashflow", "entity breakdown", "classification distribution", "SHA256 placeholder..."],
+            "computation_steps": [],
+        }
+
+    # Fallback
+    return {
+        "response_text": f"Query received: '<em>{query}</em>'. Analysis applied across classified transaction record.",
+        "basis_sources": ["transaction ledger", "entity registry", "SHA256 placeholder..."],
+        "computation_steps": [],
+    }
+
+
+@router.post("/deals/{deal_id}/intelligence/ask")
+def intelligence_ask(request: Request, deal_id: str, body: dict = Body(...)):
+    """Intelligence query interface — returns structured response with basis citations."""
+    query = (body.get("query") or "").strip()
+    query_type = (body.get("query_type") or "classification").strip()
+    user_role = (body.get("user_role") or "analyst").strip()
+    analyst_initials = (body.get("analyst_initials") or "AM").strip()[:3].upper()
+
+    if not query:
+        _error("BAD_REQUEST", "query is required")
+    if query_type not in ("classification", "computation", "pattern"):
+        _error("BAD_REQUEST", "query_type must be classification, computation, or pattern")
+    if user_role not in ("analyst", "officer"):
+        _error("BAD_REQUEST", "user_role must be analyst or officer")
+
+    repos = _repos(request)
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    user_id = _extract_user_id_from_request(request)
+    payload = _intelligence_demo_response(query, query_type)
+
+    # Persist to intelligence log
+    entry_id = str(uuid.uuid4())
+    log_entry = {
+        "id": entry_id,
+        "deal_id": deal_id,
+        "query_text": query,
+        "query_type": query_type,
+        "user_role": user_role,
+        "analyst_initials": analyst_initials,
+        "response_text": payload["response_text"],
+        "basis_sources": payload["basis_sources"],
+        "computation_steps": payload["computation_steps"],
+        "is_logged": False,
+    }
+    if user_id:
+        log_entry["user_id"] = user_id
+
+    # Best-effort write; don't fail the response if DB is unavailable
+    try:
+        if repos.get("intelligence_log"):
+            repos["intelligence_log"].insert_log(log_entry)
+    except Exception:
+        pass
+
+    return {
+        "id": entry_id,
+        "response_text": payload["response_text"],
+        "basis_sources": payload["basis_sources"],
+        "computation_steps": payload["computation_steps"],
+    }
+
+
+@router.post("/deals/{deal_id}/intelligence/{entry_id}/log")
+def log_intelligence_entry(request: Request, deal_id: str, entry_id: str):
+    """Mark an intelligence entry as logged (immutable record)."""
+    repos = _repos(request)
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    logged_count = 0
+    try:
+        if repos.get("intelligence_log"):
+            repos["intelligence_log"].mark_logged(entry_id)
+            all_entries = repos["intelligence_log"].list_by_deal(deal_id)
+            logged_count = sum(1 for e in all_entries if e.get("is_logged"))
+    except Exception:
+        pass
+
+    return {"success": True, "logged_count": logged_count}
 
 
 # ===================================================================

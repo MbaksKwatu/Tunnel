@@ -458,3 +458,49 @@ export async function resolveTransaction(
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
+
+// ── Intelligence Query Interface ──────────────────────────────────────────────
+
+export type QueryType = 'classification' | 'computation' | 'pattern'
+export type UserRole = 'analyst' | 'officer'
+
+export interface IntelligenceAskResponse {
+  id: string
+  response_text: string
+  basis_sources: string[]
+  computation_steps: string[]
+}
+
+export async function intelligenceAsk(
+  dealId: string,
+  query: string,
+  queryType: QueryType,
+  userRole: UserRole,
+  analystInitials: string
+): Promise<IntelligenceAskResponse> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/intelligence/ask`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query,
+      query_type: queryType,
+      user_role: userRole,
+      analyst_initials: analystInitials,
+    }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function logIntelligenceEntry(
+  dealId: string,
+  entryId: string
+): Promise<{ success: boolean; logged_count: number }> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/intelligence/${entryId}/log`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}

@@ -354,6 +354,20 @@ class OverrideLogRepo(BaseRepo):
         return self.select_eq("deal_id", deal_id)
 
 
+class IntelligenceLogRepo(BaseRepo):
+    def __init__(self):
+        super().__init__("pds_intelligence_log")
+
+    def insert_log(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+        return self.insert(entry)
+
+    def mark_logged(self, entry_id: str) -> None:
+        self.client.table(self.table).update({"is_logged": True}).eq("id", entry_id).execute()
+
+    def list_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
+        return self.select_eq("deal_id", deal_id)
+
+
 class OverridesRepo(OverridesRepository, BaseRepo):
     def __init__(self):
         super().__init__("pds_overrides")
