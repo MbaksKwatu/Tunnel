@@ -141,6 +141,8 @@ function V1DealPageInner() {
   const [parserRequestSubmitting, setParserRequestSubmitting] = useState(false);
   const [parserRequestSubmitted, setParserRequestSubmitted] = useState(false);
   const checkedFailedDocs = useRef<Set<string>>(new Set());
+  // Tracks doc IDs confirmed as "unsupported format" — used to show inline CTA in FileRow
+  const [unknownFormatDocIds, setUnknownFormatDocIds] = useState<Set<string>>(new Set());
 
   const onDrop = useCallback((accepted: File[]) => {
     if (accepted.length) setFile(accepted[0]);
@@ -321,6 +323,7 @@ function V1DealPageInner() {
               (errMsg.includes('not recognised') || errMsg.includes('not recognized') || errMsg.includes('unsupported') || errMsg.includes('no valid transactions'));
             if (isUnknownParser) {
               setUnknownParserDoc({ docId: id, fileName, errorMessage: statusRes.error_message ?? statusRes.error ?? 'Bank format not recognised' });
+              setUnknownFormatDocIds((prev) => new Set([...prev, id]));
             }
           } catch {
             // silently skip — this is a best-effort enrichment
@@ -627,6 +630,7 @@ function V1DealPageInner() {
     if (!unknownParserDoc || !parserRequestForm.bankName.trim()) return;
     setParserRequestSubmitting(true);
     try {
+      // 1. Persist to Supabase (existing behaviour)
       const sbClient = supabase;
       if (sbClient) {
         await (sbClient as any).from('pds_parser_requests').insert({
@@ -641,6 +645,22 @@ function V1DealPageInner() {
           error_message: unknownParserDoc.errorMessage,
         });
       }
+
+      // 2. Send email notification (best-effort — don't block on failure)
+      fetch('/api/request-parser', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bank_name: parserRequestForm.bankName.trim(),
+          country: parserRequestForm.country,
+          account_type: parserRequestForm.accountType,
+          notes: parserRequestForm.notes.trim() || '',
+          deal_id: deal?.id ?? '',
+          document_id: unknownParserDoc.docId,
+          original_filename: unknownParserDoc.fileName,
+        }),
+      }).catch(() => {/* silently ignore email errors */});
+
       setParserRequestSubmitted(true);
     } catch {
       setParserRequestSubmitted(true); // still show confirmation even if insert fails
@@ -839,19 +859,43 @@ function V1DealPageInner() {
     );
   };
 
-  const FileRow = ({ item, accent }: { item: { id: string; fileName: string; status: QueuedStatement['status'] }; accent: string }) => {
-    const statusLabel = { ready: 'INDEXED', processing: 'PROCESSING', uploading: 'UPLOADING', failed: 'FAILED' }[item.status];
-    const statusColor = { ready: '#4ADE80', processing: '#818CF8', uploading: '#818CF8', failed: '#F87171' }[item.status];
-    const statusBg = { ready: 'rgba(74,222,128,0.08)', processing: 'rgba(129,140,248,0.12)', uploading: 'rgba(129,140,248,0.12)', failed: 'rgba(248,113,113,0.12)' }[item.status];
+  const FileRow = ({
+    item,
+    accent,
+    isUnknownFormat,
+    onRequestParser,
+  }: {
+    item: { id: string; fileName: string; status: QueuedStatement['status'] };
+    accent: string;
+    isUnknownFormat?: boolean;
+    onRequestParser?: () => void;
+  }) => {
+    const statusLabel = { ready: 'INDEXED', processing: 'PROCESSING', uploading: 'UPLOADING', failed: isUnknownFormat ? 'NO PARSER' : 'FAILED' }[item.status];
+    const statusColor = { ready: '#4ADE80', processing: '#818CF8', uploading: '#818CF8', failed: isUnknownFormat ? '#F59E0B' : '#F87171' }[item.status];
+    const statusBg = { ready: 'rgba(74,222,128,0.08)', processing: 'rgba(129,140,248,0.12)', uploading: 'rgba(129,140,248,0.12)', failed: isUnknownFormat ? 'rgba(245,158,11,0.1)' : 'rgba(248,113,113,0.12)' }[item.status];
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid #1A2235' }}>
-        <span style={{ width: 20, height: 20, borderRadius: 4, background: item.status === 'ready' ? 'rgba(74,222,128,0.15)' : '#1A2235', border: `1px solid ${item.status === 'ready' ? accent : '#2D3748'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          {item.status === 'ready' && <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 5.5l2.5 2.5L9 3" stroke={accent} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-          {(item.status === 'processing' || item.status === 'uploading') && <span style={{ width: 8, height: 8, borderRadius: '50%', borderTop: `2px solid ${accent}`, borderRight: `2px solid transparent`, animation: 'spin 0.8s linear infinite', display: 'inline-block' }} />}
-          {item.status === 'failed' && <span style={{ fontSize: 10, color: '#F87171', fontWeight: 700 }}>!</span>}
-        </span>
-        <span style={{ flex: 1, fontSize: 13, color: '#CBD5E1', fontFamily: "'IBM Plex Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.fileName}</span>
-        <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: statusColor, background: statusBg, padding: '2px 7px', borderRadius: 3, flexShrink: 0 }}>{statusLabel}</span>
+      <div style={{ borderBottom: '1px solid #1A2235' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0' }}>
+          <span style={{ width: 20, height: 20, borderRadius: 4, background: item.status === 'ready' ? 'rgba(74,222,128,0.15)' : '#1A2235', border: `1px solid ${item.status === 'ready' ? accent : isUnknownFormat ? '#F59E0B' : '#2D3748'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            {item.status === 'ready' && <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 5.5l2.5 2.5L9 3" stroke={accent} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+            {(item.status === 'processing' || item.status === 'uploading') && <span style={{ width: 8, height: 8, borderRadius: '50%', borderTop: `2px solid ${accent}`, borderRight: `2px solid transparent`, animation: 'spin 0.8s linear infinite', display: 'inline-block' }} />}
+            {item.status === 'failed' && <span style={{ fontSize: 10, color: isUnknownFormat ? '#F59E0B' : '#F87171', fontWeight: 700 }}>!</span>}
+          </span>
+          <span style={{ flex: 1, fontSize: 13, color: '#CBD5E1', fontFamily: "'IBM Plex Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.fileName}</span>
+          <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: statusColor, background: statusBg, padding: '2px 7px', borderRadius: 3, flexShrink: 0 }}>{statusLabel}</span>
+        </div>
+        {/* Inline CTA for unsupported bank format */}
+        {item.status === 'failed' && isUnknownFormat && onRequestParser && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 10, paddingLeft: 30 }}>
+            <span style={{ fontSize: 11, color: '#64748B' }}>Format not supported —</span>
+            <button
+              onClick={onRequestParser}
+              style={{ fontSize: 11, fontWeight: 600, color: '#F59E0B', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 4, padding: '3px 10px', cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
+            >
+              Request parser →
+            </button>
+          </div>
+        )}
       </div>
     );
   };
@@ -907,6 +951,14 @@ function V1DealPageInner() {
               <span style={{ fontSize: 9, background: '#0D1220', color: '#2D3748', padding: '1px 4px', borderRadius: 2 }}>SOON</span>
             </div>
           ))}
+          <div style={{ margin: '12px 0 4px', padding: '0 16px', fontSize: 9, color: '#2D3748', letterSpacing: '0.1em' }}>SUPPORT</div>
+          <button
+            onClick={() => router.push('/parsers/request')}
+            style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '9px 16px', background: 'transparent', borderLeft: '2px solid transparent', border: 'none', color: '#4A5568', fontSize: 13, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left', gap: 6 }}
+          >
+            <span style={{ fontSize: 14, lineHeight: 1 }}>🔧</span>
+            Request Parser
+          </button>
         </nav>
         <div style={{ padding: '12px 16px', borderTop: '1px solid #1A2235' }}>
           {dealId && (
@@ -999,7 +1051,15 @@ function V1DealPageInner() {
                           </span>
                         )}
                       </div>
-                      {bankQueue.map((item) => <FileRow key={item.id} item={item} accent="#4ADE80" />)}
+                      {bankQueue.map((item) => (
+                        <FileRow
+                          key={item.id}
+                          item={item}
+                          accent="#4ADE80"
+                          isUnknownFormat={unknownFormatDocIds.has(item.id)}
+                          onRequestParser={() => setUnknownParserDoc({ docId: item.id, fileName: item.fileName, errorMessage: 'Bank format not recognised' })}
+                        />
+                      ))}
                       {bankQueue.length < MAX_STATEMENTS && (
                         <DropZone onFileDrop={handleBankDrop} label="Add bank statement" formats="KCB · EQUITY · NCBA · CO-OP · MPESA · PDF" />
                       )}
@@ -1015,7 +1075,7 @@ function V1DealPageInner() {
                           </span>
                         )}
                       </div>
-                      {auditedQueue.map((item) => <FileRow key={item.id} item={item} accent="#4ADE80" />)}
+                      {auditedQueue.map((item) => <FileRow key={item.id} item={item} accent="#4ADE80" isUnknownFormat={false} />)}
                       {auditedQueue.length < 1 && (
                         <DropZone onFileDrop={handleAuditedDrop} label="Add audited accounts" formats="PDF · DOCX · XLSX" />
                       )}

@@ -26,6 +26,7 @@
     "react-dom": "^18.2.0",
     "react-dropzone": "^14.2.3",
     "recharts": "^2.15.4",
+    "resend": "^6.12.3",
     "tailwind-merge": "^2.6.1",
     "uuid": "^9.0.1"
   },
