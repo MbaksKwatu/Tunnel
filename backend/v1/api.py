@@ -327,7 +327,7 @@ async def upload_document(
     summary="Upload multiple PDFs at once (batch upload)",
     description=(
         "Upload 2–3 PDFs; they are merged in upload order and processed as one document. "
-        "Limit: 4 batch uploads per deal (tracked via batch_number)."
+        "Limit: 20 batch uploads per deal (tracked via batch_number)."
     ),
 )
 async def upload_documents_batch(
@@ -357,13 +357,13 @@ async def upload_documents_batch(
     batch_count_fn = getattr(docs_repo, "get_batch_upload_count", None)
     batch_count = batch_count_fn(deal_id) if batch_count_fn else 0
 
-    if batch_count >= 4:
+    if batch_count >= 20:
         raise HTTPException(
             status_code=403,
             detail={
                 "error_code": "BATCH_LIMIT_REACHED",
                 "error_message": (
-                    "Batch upload limit reached. This deal has used all 4 batch uploads. "
+                    "Batch upload limit reached. This deal has used all 20 batch uploads. "
                     "Use single-file uploads or contact support."
                 ),
             },
@@ -439,7 +439,7 @@ async def upload_documents_batch(
         deal_currency=deal["currency"],
     )
 
-    batches_remaining = max(0, 4 - next_batch_number)
+    batches_remaining = max(0, 20 - next_batch_number)
 
     return {
         "document_id": document_id,
@@ -448,7 +448,7 @@ async def upload_documents_batch(
         "files_merged": len(files),
         "source_files": source_names,
         "status": "processing",
-        "message": f"Batch upload {next_batch_number}/4 submitted successfully",
+        "message": f"Batch upload {next_batch_number}/20 submitted successfully",
         "ingestion": {
             "document_id": document_id,
             "status": "processing",

@@ -1,5 +1,5 @@
 -- Migration 008: Batch Upload Tracking
--- Allows users to upload multiple files at once (3 files/batch, 4 batches/year)
+-- Allows users to upload multiple files at once (3 files/batch, 20 batches/year)
 
 -- Add batch tracking columns to pds_documents
 ALTER TABLE pds_documents
@@ -9,7 +9,7 @@ ADD COLUMN IF NOT EXISTS is_batch_upload BOOLEAN DEFAULT FALSE;
 
 -- Add comment
 COMMENT ON COLUMN pds_documents.batch_number IS
-  'Batch sequence number (1-4) for multi-file uploads within a deal';
+  'Batch sequence number (1-20) for multi-file uploads within a deal';
 COMMENT ON COLUMN pds_documents.source_files IS
   'Array of original file URLs that were merged into this document';
 COMMENT ON COLUMN pds_documents.is_batch_upload IS
@@ -39,4 +39,4 @@ END;
 $$;
 
 COMMENT ON FUNCTION get_deal_batch_count(uuid) IS
-  'Returns number of batch uploads used for a deal (max 4 allowed)';
+  'Returns number of batch uploads used for a deal (max 20 allowed)';

@@ -62,7 +62,7 @@ export interface Deal {
   accrual_revenue_cents?: number
   accrual_period_start?: string
   accrual_period_end?: string
-  /** Distinct batch uploads used (1–4); usually derived client-side from documents if not on deal row */
+  /** Distinct batch uploads used (1–20); usually derived client-side from documents if not on deal row */
   batch_upload_count?: number
 }
 
