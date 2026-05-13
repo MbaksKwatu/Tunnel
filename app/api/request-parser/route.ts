@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Resend } from 'resend';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
 const NOTIFY_EMAIL = 'kwatukham@gmail.com';
 
 /**
@@ -16,6 +15,7 @@ const NOTIFY_EMAIL = 'kwatukham@gmail.com';
  *   bank_name, contact_email, notes?, sample_file? (File)
  */
 export async function POST(request: NextRequest) {
+  const resend = new Resend(process.env.RESEND_API_KEY);
   try {
     const contentType = request.headers.get('content-type') ?? '';
     let bankName = '';
