@@ -1,86 +1,108 @@
+"""
+Musa Ventures partner API.
+
+Endpoints
+---------
+POST /api/musa/sessions
+    Create a session with document URLs.  Returns immediately with
+    status="processing"; background task handles download + ingestion.
+
+GET  /api/musa/sessions/{session_id}/status
+    Poll processing status.  Response shape is IDENTICAL to the POST
+    response and to the webhook payload (SessionResponse).
+
+GET  /api/musa/sessions/{session_id}/results
+    Convenience endpoint that returns the full analytics JSON when
+    status="complete".  Kept for direct inspection; the canonical
+    integration path is status polling or webhook.
+
+CRITICAL — SessionResponse is used in THREE places:
+  1. POST /sessions response
+  2. GET  /sessions/{id}/status response
+  3. Webhook payload (musa_file_processor._send_webhook)
+Any field change must be applied to all three.
+"""
+
 import json
 import logging
 import uuid
+import os
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
 from ..db.supabase_client import get_supabase
 from ..db.supabase_repositories import DealsRepo, SnapshotsRepo
 from ..core.snapshot_engine import decompress_canonical_json_if_needed
 from .auth import require_musa_api_key
+from .musa_file_processor import process_musa_session
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/musa", tags=["musa"])
 
 
+# ============================================================================
+# REQUEST/RESPONSE MODELS
+# ============================================================================
+
+class DocumentUpload(BaseModel):
+    url: str
+    file_type: Optional[str] = None  # "bank_statement", "mpesa", "audited_financials"
+    date_from: Optional[str] = None  # ISO date format YYYY-MM-DD
+    date_to: Optional[str] = None    # ISO date format YYYY-MM-DD
+
+
 class CreateSessionRequest(BaseModel):
-    venture_id: str
     venture_name: str
-    company_metadata: Optional[dict] = None
+    venture_country: str
+    document_urls: List[DocumentUpload]
 
 
-class CreateSessionResponse(BaseModel):
+class SessionResponse(BaseModel):
+    """
+    CRITICAL: This exact shape is used for:
+    1. POST /api/musa/sessions response
+    2. GET /api/musa/sessions/{id}/status response
+    3. Webhook payload sent to Musa
+
+    Do NOT modify this without updating all three uses.
+    """
     session_id: str
-    status: str
+    venture_name: str
+    venture_country: str
+    status: str  # "processing" | "complete" | "failed"
+    status_url: str
+    pdf_url: Optional[str] = None
+    error_message: Optional[str] = None
+    created_at: str  # ISO 8601 format
+    completed_at: Optional[str] = None  # ISO 8601 format
 
 
-@router.post("/sessions", response_model=CreateSessionResponse)
-def create_session(
-    body: CreateSessionRequest,
-    _: bool = Depends(require_musa_api_key),
-) -> CreateSessionResponse:
-    session_id = str(uuid.uuid4())
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
 
-    try:
-        deal = DealsRepo().create_deal({
-            "id": str(uuid.uuid4()),
-            "currency": "USD",
-            "name": body.venture_name,
-            "created_by": str(uuid.uuid4()),
-        })
-    except Exception:
-        logger.exception("Failed to create deal for Musa session %s", session_id)
-        raise HTTPException(status_code=500, detail="Failed to create deal")
-
-    deal_id = deal.get("id")
-
-    try:
-        supabase = get_supabase()
-        result = (
-            supabase.table("musa_sessions")
-            .insert({
-                "session_id": session_id,
-                "venture_id": body.venture_id,
-                "venture_name": body.venture_name,
-                "deal_id": deal_id,
-                "status": "processing",
-            })
-            .execute()
-        )
-        if not result.data:
-            raise RuntimeError("Insert returned no data")
-    except Exception as exc:
-        _msg = str(exc)
-        if "duplicate" in _msg.lower() or "unique" in _msg.lower():
-            raise HTTPException(status_code=409, detail="Session already exists")
-        logger.exception("Failed to insert musa_session %s", session_id)
-        raise HTTPException(status_code=500, detail="Failed to create session")
-
-    return CreateSessionResponse(session_id=session_id, status="processing")
+_COUNTRY_CURRENCY = {
+    "kenya": "KES",
+    "uganda": "UGX",
+    "tanzania": "TZS",
+    "rwanda": "RWF",
+    "nigeria": "NGN",
+    "ghana": "GHS",
+    "ethiopia": "ETB",
+    "south africa": "ZAR",
+}
 
 
-class SessionStatusResponse(BaseModel):
-    session_id: str
-    status: str
-    created_at: str
-    completed_at: Optional[str] = None
+def _currency_for_country(country: str) -> str:
+    return _COUNTRY_CURRENCY.get(country.lower().strip(), "KES")
 
 
 def _to_iso(value: Optional[str]) -> Optional[str]:
+    """Convert various datetime formats to ISO 8601 UTC"""
     if value is None:
         return None
     try:
@@ -90,16 +112,150 @@ def _to_iso(value: Optional[str]) -> Optional[str]:
         return value
 
 
-@router.get("/sessions/{session_id}/status", response_model=SessionStatusResponse)
-def get_session_status(
-    session_id: str,
+def _build_session_response(
+    session_data: dict,
+    deal_id: Optional[str] = None
+) -> SessionResponse:
+    """Build SessionResponse from database row"""
+    base_url = os.getenv("API_BASE_URL", "https://parity-ingestion.onrender.com")
+    session_id = session_data["session_id"]
+    status = session_data["status"]
+
+    # Build status URL
+    status_url = f"{base_url}/api/musa/sessions/{session_id}/status"
+
+    # Build PDF URL if complete
+    pdf_url = None
+    if status == "complete" and deal_id:
+        pdf_url = f"{base_url}/v1/deals/{deal_id}/snapshot/pdf"
+
+    return SessionResponse(
+        session_id=session_id,
+        venture_name=session_data["venture_name"],
+        venture_country=session_data.get("venture_country", ""),
+        status=status,
+        status_url=status_url,
+        pdf_url=pdf_url,
+        error_message=session_data.get("error_message"),
+        created_at=_to_iso(session_data.get("created_at")) or "",
+        completed_at=_to_iso(session_data.get("completed_at"))
+    )
+
+
+# ============================================================================
+# ENDPOINTS
+# ============================================================================
+
+@router.post("/sessions", response_model=SessionResponse)
+async def create_session(
+    body: CreateSessionRequest,
+    background_tasks: BackgroundTasks,
     _: bool = Depends(require_musa_api_key),
-) -> SessionStatusResponse:
+) -> SessionResponse:
+    """
+    Create a new Musa session with document URLs for processing.
+
+    Flow:
+    1. Create musa_sessions record (status=processing)
+    2. Create pds_deals record
+    3. Link session to deal
+    4. Trigger background file processing
+    5. Return session response immediately
+    """
+    session_id = str(uuid.uuid4())
+
+    # 1. Create deal
+    try:
+        deal = DealsRepo().create_deal({
+            "id": str(uuid.uuid4()),
+            "currency": _currency_for_country(body.venture_country),
+            "name": body.venture_name,
+            "created_by": "00000000-0000-0000-0000-000000000001",  # Musa system user
+        })
+    except Exception:
+        logger.exception("Failed to create deal for Musa session %s", session_id)
+        raise HTTPException(status_code=500, detail="Failed to create deal")
+
+    deal_id = deal.get("id")
+
+    # 2. Create musa_sessions record
+    created_at = datetime.now(timezone.utc).isoformat()
+
     try:
         supabase = get_supabase()
         result = (
             supabase.table("musa_sessions")
-            .select("session_id, status, created_at, completed_at")
+            .insert({
+                "session_id": session_id,
+                "venture_id": session_id,
+                "venture_name": body.venture_name,
+                "venture_country": body.venture_country,
+                "deal_id": deal_id,
+                "status": "processing",
+                "document_urls": [doc.model_dump() for doc in body.document_urls],
+                "created_at": created_at,
+            })
+            .execute()
+        )
+        if not result.data:
+            raise RuntimeError("Insert returned no data")
+
+        session_data = result.data[0]
+
+    except Exception as exc:
+        _msg = str(exc)
+        if "duplicate" in _msg.lower() or "unique" in _msg.lower():
+            raise HTTPException(status_code=409, detail="Session already exists")
+        logger.exception("Failed to insert musa_session %s", session_id)
+        raise HTTPException(status_code=500, detail="Failed to create session")
+
+    # 3. Build status URL
+    base_url = os.getenv("API_BASE_URL", "https://parity-ingestion.onrender.com")
+    status_url = f"{base_url}/api/musa/sessions/{session_id}/status"
+
+    # 4. Trigger background processing
+    background_tasks.add_task(
+        process_musa_session,
+        session_id=session_id,
+        deal_id=deal_id,
+        venture_name=body.venture_name,
+        venture_country=body.venture_country,
+        documents=[doc.model_dump() for doc in body.document_urls],
+        status_url=status_url,
+        created_at=created_at
+    )
+
+    # 5. Return response
+    return SessionResponse(
+        session_id=session_id,
+        venture_name=body.venture_name,
+        venture_country=body.venture_country,
+        status="processing",
+        status_url=status_url,
+        pdf_url=None,
+        error_message=None,
+        created_at=created_at,
+        completed_at=None
+    )
+
+
+@router.get("/sessions/{session_id}/status", response_model=SessionResponse)
+def get_session_status(
+    session_id: str,
+    _: bool = Depends(require_musa_api_key),
+) -> SessionResponse:
+    """
+    Get current status of a Musa session.
+
+    CRITICAL: Response shape MUST be identical to:
+    - POST /sessions response
+    - Webhook payload
+    """
+    try:
+        supabase = get_supabase()
+        result = (
+            supabase.table("musa_sessions")
+            .select("*")
             .eq("session_id", session_id)
             .execute()
         )
@@ -111,35 +267,25 @@ def get_session_status(
     if not rows:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    row = rows[0]
-    return SessionStatusResponse(
-        session_id=row["session_id"],
-        status=row["status"],
-        created_at=_to_iso(row.get("created_at")) or "",
-        completed_at=_to_iso(row.get("completed_at")),
-    )
+    session_data = rows[0]
+    return _build_session_response(session_data, session_data.get("deal_id"))
 
 
-class SessionResultsResponse(BaseModel):
-    session_id: str
-    venture_id: str
-    venture_name: str
-    status: str
-    results: dict
-    pdf_url: Optional[str] = None
-    completed_at: str
-
-
-@router.get("/sessions/{session_id}/results", response_model=SessionResultsResponse)
+@router.get("/sessions/{session_id}/results")
 def get_session_results(
     session_id: str,
     _: bool = Depends(require_musa_api_key),
-) -> SessionResultsResponse:
+):
+    """
+    Get full analytics results for a completed session.
+
+    Returns SessionResponse with pdf_url when complete.
+    """
     try:
         supabase = get_supabase()
         session_result = (
             supabase.table("musa_sessions")
-            .select("session_id, venture_id, venture_name, deal_id, status, completed_at")
+            .select("*")
             .eq("session_id", session_id)
             .execute()
         )
@@ -160,27 +306,5 @@ def get_session_results(
     if not deal_id:
         raise HTTPException(status_code=404, detail="Deal not found for session")
 
-    deal = DealsRepo().get_deal(deal_id)
-    if not deal:
-        raise HTTPException(status_code=404, detail="Deal not found")
-
-    snapshot = SnapshotsRepo().get_latest_snapshot(deal_id)
-    if not snapshot:
-        raise HTTPException(status_code=404, detail="No snapshot exists for this session")
-
-    raw_cj = snapshot.get("canonical_json") or "{}"
-    try:
-        analytics = json.loads(decompress_canonical_json_if_needed(raw_cj))
-    except (ValueError, TypeError):
-        logger.exception("Failed to decode canonical_json for deal %s", deal_id)
-        raise HTTPException(status_code=500, detail="Failed to decode analytics data")
-
-    return SessionResultsResponse(
-        session_id=session["session_id"],
-        venture_id=session["venture_id"],
-        venture_name=session["venture_name"],
-        status=session["status"],
-        results=analytics,
-        pdf_url=None,
-        completed_at=_to_iso(session.get("completed_at")) or "",
-    )
+    # Return the SessionResponse
+    return _build_session_response(session, deal_id)
