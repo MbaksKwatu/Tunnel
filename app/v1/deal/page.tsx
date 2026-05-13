@@ -7,6 +7,9 @@ import { supabase } from '@/lib/supabase';
 import {
   createDeal,
   uploadDocument,
+  uploadAuditedFinancials,
+  getAuditedFinancials,
+  patchAuditedFinancials,
   getDocumentStatus,
   exportSnapshot,
   getDocumentTransactions,
@@ -26,6 +29,7 @@ import type {
   TxnEntityMapping,
   ExportResponse,
   DocumentListItem,
+  AuditedFinancialsRecord,
 } from '@/lib/v1-api';
 // generateParityPdf is loaded dynamically at click time so Next.js never
 // evaluates jsPDF's Node.js build during server compilation.
@@ -127,6 +131,11 @@ function V1DealPageInner() {
   const [reviewAnswer, setReviewAnswer] = useState('');
   const [reviewLoading, setReviewLoading] = useState(false);
   const [dealDocuments, setDealDocuments] = useState<DocumentListItem[]>([]);
+  const [auditedFinancialsList, setAuditedFinancialsList] = useState<AuditedFinancialsRecord[]>([]);
+  const [auditedConfirmForm, setAuditedConfirmForm] = useState<AuditedFinancialsRecord | null>(null);
+  const [auditedUploading, setAuditedUploading] = useState(false);
+  const [auditedUploadError, setAuditedUploadError] = useState('');
+  const [auditedSaving, setAuditedSaving] = useState(false);
   const [statementQueue, setStatementQueue] = useState<QueuedStatement[]>([]);
   const [activeTab, setActiveTab] = useState<'documents' | 'analysis' | 'review' | 'snapshot'>('documents');
   const docTypeByDocId = useRef<Map<string, 'bank' | 'audited'>>(new Map());
@@ -175,10 +184,22 @@ function V1DealPageInner() {
     [deal]
   );
 
+  const loadAuditedFinancials = useCallback(async (dealIdOverride?: string) => {
+    const id = dealIdOverride ?? deal?.id;
+    if (!id) return;
+    try {
+      const { records } = await getAuditedFinancials(id);
+      setAuditedFinancialsList(records);
+    } catch {
+      // non-fatal
+    }
+  }, [deal]);
+
   useEffect(() => {
     if (!deal?.id) return;
     void refreshBatchUploadCount();
-  }, [deal?.id, refreshBatchUploadCount]);
+    void loadAuditedFinancials();
+  }, [deal?.id, refreshBatchUploadCount, loadAuditedFinancials]);
 
   useEffect(() => {
     setStatementQueue((prev) => {
@@ -247,20 +268,33 @@ function V1DealPageInner() {
 
   const handleAuditedDrop = useCallback(async (nextFile: File) => {
     if (!deal) return;
-    const tempId = crypto.randomUUID();
-    docTypeByDocId.current.set(tempId, 'audited');
-    setStatementQueue((prev) => [...prev, { id: tempId, fileName: nextFile.name, status: 'uploading' }]);
+    setAuditedUploading(true);
+    setAuditedUploadError('');
     try {
-      const result = await uploadDocument(deal.id, nextFile);
-      const docId = result.ingestion.document_id;
-      docTypeByDocId.current.delete(tempId);
-      docTypeByDocId.current.set(docId, 'audited');
-      setStatementQueue((prev) => prev.map((item) => item.id === tempId ? { ...item, id: docId, status: 'processing' } : item));
-      void refreshBatchUploadCount(deal.id);
-    } catch {
-      setStatementQueue((prev) => prev.map((item) => item.id === tempId ? { ...item, status: 'failed' } : item));
+      const result = await uploadAuditedFinancials(deal.id, nextFile);
+      // Pre-populate the confirmation form with extracted fields
+      setAuditedConfirmForm({
+        deal_id: deal.id,
+        financial_year: result.financial_year,
+        financial_year_start: result.financial_year_start,
+        financial_year_end: result.financial_year_end,
+        company_name: result.company_name ?? '',
+        turnover_cents: result.turnover_cents ?? null,
+        profit_after_tax_cents: result.profit_after_tax_cents ?? null,
+        total_assets_cents: result.total_assets_cents ?? null,
+        cash_and_equivalents_cents: result.cash_and_equivalents_cents ?? null,
+        extraction_confidence: result.extraction_confidence,
+      });
+      void loadAuditedFinancials(deal.id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Upload failed';
+      setAuditedUploadError(msg);
+      // Still open the form for manual entry
+      setAuditedConfirmForm({ deal_id: deal.id });
+    } finally {
+      setAuditedUploading(false);
     }
-  }, [deal, refreshBatchUploadCount]);
+  }, [deal, loadAuditedFinancials]);
 
   // One listDocuments poll at a time (sequential), not overlapping setInterval + async —
   // slow responses were stacking many pending /documents requests and starving the worker.
@@ -1069,18 +1103,158 @@ function V1DealPageInner() {
                     <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: 20, borderTop: '2px solid #4ADE80' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
                         <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>AUDITED ACCOUNTS</span>
-                        {auditedQueue.length > 0 && (
+                        {auditedFinancialsList.length > 0 && (
                           <span style={{ fontSize: 11, color: '#4ADE80', fontFamily: "'IBM Plex Mono', monospace" }}>
-                            {auditedReady} / {auditedQueue.length} ready
+                            {auditedFinancialsList.length} FY record{auditedFinancialsList.length > 1 ? 's' : ''}
                           </span>
                         )}
                       </div>
-                      {auditedQueue.map((item) => <FileRow key={item.id} item={item} accent="#4ADE80" isUnknownFormat={false} />)}
-                      {auditedQueue.length < 1 && (
-                        <DropZone onFileDrop={handleAuditedDrop} label="Add audited accounts" formats="PDF · DOCX · XLSX" />
+
+                      {/* Existing extracted records */}
+                      {auditedFinancialsList.map((af) => (
+                        <div key={af.financial_year} style={{ background: '#0A0F1C', border: '1px solid #1E2A3A', borderRadius: 6, padding: '10px 12px', marginBottom: 8 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: '#E2E8F0', fontFamily: "'IBM Plex Mono', monospace" }}>
+                              FY {af.financial_year ?? '—'}
+                            </span>
+                            <span style={{ fontSize: 10, color: af.extraction_confidence && af.extraction_confidence >= 70 ? '#4ADE80' : '#F59E0B', fontFamily: "'IBM Plex Mono', monospace" }}>
+                              {af.extraction_confidence != null ? `${af.extraction_confidence}% confidence` : 'manual'}
+                            </span>
+                          </div>
+                          <div style={{ marginTop: 6, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px' }}>
+                            {af.turnover_cents != null && (
+                              <span style={{ fontSize: 11, color: '#94A3B8' }}>Revenue: KES {(af.turnover_cents / 100).toLocaleString()}</span>
+                            )}
+                            {af.cash_and_equivalents_cents != null && (
+                              <span style={{ fontSize: 11, color: '#94A3B8' }}>Cash: KES {(af.cash_and_equivalents_cents / 100).toLocaleString()}</span>
+                            )}
+                            {af.profit_after_tax_cents != null && (
+                              <span style={{ fontSize: 11, color: '#94A3B8' }}>PAT: KES {(af.profit_after_tax_cents / 100).toLocaleString()}</span>
+                            )}
+                            {af.total_assets_cents != null && (
+                              <span style={{ fontSize: 11, color: '#94A3B8' }}>Assets: KES {(af.total_assets_cents / 100).toLocaleString()}</span>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setAuditedConfirmForm({ ...af })}
+                            style={{ marginTop: 8, fontSize: 10, color: '#6366F1', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                          >
+                            Edit details →
+                          </button>
+                        </div>
+                      ))}
+
+                      {/* Upload zone */}
+                      {!auditedConfirmForm && (
+                        auditedUploading ? (
+                          <div style={{ padding: '14px 12px', textAlign: 'center', border: '1px dashed #2D3748', borderRadius: 6, marginTop: 8 }}>
+                            <span style={{ fontSize: 12, color: '#6366F1' }}>Extracting financial data…</span>
+                          </div>
+                        ) : (
+                          <DropZone
+                            onFileDrop={handleAuditedDrop}
+                            label={auditedFinancialsList.length > 0 ? 'Add another year' : 'Add audited accounts'}
+                            formats="PDF · Auto-extracts revenue, cash & FY dates"
+                          />
+                        )
                       )}
-                      {auditedQueue.length > 0 && auditedQueue.length < 3 && (
-                        <DropZone onFileDrop={handleAuditedDrop} label="Add another year" formats="PDF · DOCX · XLSX" />
+
+                      {/* Upload error */}
+                      {auditedUploadError && !auditedConfirmForm && (
+                        <p style={{ fontSize: 11, color: '#F87171', marginTop: 6 }}>{auditedUploadError} — fill in details manually below</p>
+                      )}
+
+                      {/* Confirmation / manual fill form */}
+                      {auditedConfirmForm && (
+                        <div style={{ background: '#0A0F1C', border: '1px solid #6366F1', borderRadius: 8, padding: 16, marginTop: 12 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#A5B4FC', marginBottom: 12, letterSpacing: '0.08em' }}>
+                            {auditedConfirmForm.extraction_confidence != null
+                              ? `CONFIRM EXTRACTED DETAILS — ${auditedConfirmForm.extraction_confidence}% confidence`
+                              : 'ENTER FINANCIAL DETAILS'}
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            {([
+                              { key: 'company_name', label: 'Company name', type: 'text', placeholder: 'e.g. Buildex Ltd' },
+                              { key: 'financial_year', label: 'Financial year', type: 'number', placeholder: 'e.g. 2024' },
+                              { key: 'financial_year_start', label: 'FY start date', type: 'text', placeholder: 'YYYY-MM-DD' },
+                              { key: 'financial_year_end', label: 'FY end date', type: 'text', placeholder: 'YYYY-MM-DD' },
+                            ] as const).map(({ key, label, type, placeholder }) => (
+                              <div key={key}>
+                                <label style={{ fontSize: 10, color: '#64748B', display: 'block', marginBottom: 4 }}>{label}</label>
+                                <input
+                                  type={type}
+                                  value={(auditedConfirmForm[key as keyof AuditedFinancialsRecord] as string | undefined) ?? ''}
+                                  onChange={(e) => setAuditedConfirmForm((prev) => prev ? { ...prev, [key]: e.target.value } : prev)}
+                                  placeholder={placeholder}
+                                  style={{ width: '100%', background: '#131929', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 5, padding: '6px 8px', fontSize: 12, color: '#E2E8F0', outline: 'none', boxSizing: 'border-box' }}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                          <div style={{ fontSize: 10, color: '#64748B', marginTop: 10, marginBottom: 6 }}>Amounts in KES (whole numbers)</div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            {([
+                              { key: 'turnover_cents', label: 'Annual revenue (KES)' },
+                              { key: 'cash_and_equivalents_cents', label: 'Cash at year-end (KES)' },
+                              { key: 'profit_after_tax_cents', label: 'Profit after tax (KES)' },
+                              { key: 'total_assets_cents', label: 'Total assets (KES)' },
+                              { key: 'total_expenses_cents', label: 'Total expenses (KES)' },
+                              { key: 'total_liabilities_cents', label: 'Total liabilities (KES)' },
+                            ] as const).map(({ key, label }) => {
+                              const rawVal = auditedConfirmForm[key as keyof AuditedFinancialsRecord] as number | null | undefined;
+                              const displayVal = rawVal != null ? String(Math.round((rawVal as number) / 100)) : '';
+                              return (
+                                <div key={key}>
+                                  <label style={{ fontSize: 10, color: '#64748B', display: 'block', marginBottom: 4 }}>{label}</label>
+                                  <input
+                                    type="text"
+                                    value={displayVal}
+                                    onChange={(e) => {
+                                      const kes = parseFloat(e.target.value.replace(/,/g, ''));
+                                      setAuditedConfirmForm((prev) => prev ? { ...prev, [key]: isNaN(kes) ? null : Math.round(kes * 100) } : prev);
+                                    }}
+                                    placeholder="0"
+                                    style={{ width: '100%', background: '#131929', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 5, padding: '6px 8px', fontSize: 12, color: '#E2E8F0', outline: 'none', boxSizing: 'border-box' }}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+                            <button
+                              type="button"
+                              disabled={auditedSaving}
+                              onClick={async () => {
+                                if (!deal || !auditedConfirmForm) return;
+                                const fy = Number(auditedConfirmForm.financial_year);
+                                if (!fy) { alert('Financial year is required'); return; }
+                                setAuditedSaving(true);
+                                try {
+                                  const { financial_year: _fy, deal_id: _did, extraction_confidence: _ec, id: _id, ...patch } = auditedConfirmForm;
+                                  await patchAuditedFinancials(deal.id, fy, patch);
+                                  await loadAuditedFinancials(deal.id);
+                                  setAuditedConfirmForm(null);
+                                  setAuditedUploadError('');
+                                } catch (err) {
+                                  alert(err instanceof Error ? err.message : 'Save failed');
+                                } finally {
+                                  setAuditedSaving(false);
+                                }
+                              }}
+                              style={{ flex: 1, padding: '8px 0', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: auditedSaving ? 'not-allowed' : 'pointer', opacity: auditedSaving ? 0.6 : 1 }}
+                            >
+                              {auditedSaving ? 'Saving…' : 'Save financial details'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setAuditedConfirmForm(null); setAuditedUploadError(''); }}
+                              style={{ padding: '8px 14px', background: 'transparent', color: '#64748B', border: '1px solid #1E2A3A', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
                       )}
                     </div>
                   </div>

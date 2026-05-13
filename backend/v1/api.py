@@ -1756,6 +1756,39 @@ def get_audited_financials(request: Request, deal_id: str):
     return {"deal_id": deal_id, "records": records}
 
 
+_PATCHABLE_AF_FIELDS = frozenset({
+    "company_name", "financial_year", "financial_year_start", "financial_year_end",
+    "turnover_cents", "profit_after_tax_cents", "total_assets_cents",
+    "cash_and_equivalents_cents", "total_expenses_cents", "total_liabilities_cents",
+})
+
+
+@router.patch("/deals/{deal_id}/audited-financials/{financial_year}")
+def patch_audited_financials(request: Request, deal_id: str, financial_year: int, body: dict = Body(...)):
+    """
+    Manually update / fill in audited financials fields for a given fiscal year.
+    Accepts a partial dict of the patchable fields. Creates the record if it doesn't exist.
+    """
+    from .db.supabase_repositories import AuditedFinancialsRepo
+
+    repos = _repos(request)
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    patch = {k: v for k, v in body.items() if k in _PATCHABLE_AF_FIELDS}
+    if not patch:
+        _error("BAD_REQUEST", f"No patchable fields provided. Allowed: {sorted(_PATCHABLE_AF_FIELDS)}")
+
+    af_repo = AuditedFinancialsRepo()
+    row = {
+        "deal_id": deal_id,
+        "financial_year": financial_year,
+        **patch,
+    }
+    saved = af_repo.upsert(row)
+    return saved
+
+
 _VALID_SECTION_KEYS = frozenset({
     "annual_revenue", "loan_drawdowns", "kra_summary",
     "expense_frequency", "owner_distributions",

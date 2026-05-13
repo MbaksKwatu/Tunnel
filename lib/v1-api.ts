@@ -251,6 +251,58 @@ export async function uploadDocumentsBatch(
   }
 }
 
+export interface AuditedFinancialsRecord {
+  id?: string
+  deal_id: string
+  financial_year?: number
+  financial_year_start?: string
+  financial_year_end?: string
+  company_name?: string
+  turnover_cents?: number | null
+  profit_after_tax_cents?: number | null
+  total_assets_cents?: number | null
+  cash_and_equivalents_cents?: number | null
+  total_expenses_cents?: number | null
+  total_liabilities_cents?: number | null
+  extraction_confidence?: number
+}
+
+export async function uploadAuditedFinancials(
+  dealId: string,
+  file: File
+): Promise<AuditedFinancialsRecord> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetchApiFormData(`${BASE}/deals/${dealId}/upload-financials`, {
+    method: 'POST',
+    body: form,
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function getAuditedFinancials(
+  dealId: string
+): Promise<{ deal_id: string; records: AuditedFinancialsRecord[] }> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/audited-financials`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function patchAuditedFinancials(
+  dealId: string,
+  financialYear: number,
+  fields: Partial<AuditedFinancialsRecord>
+): Promise<AuditedFinancialsRecord> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/audited-financials/${financialYear}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
 export async function addOverride(
   dealId: string,
   entityId: string,
