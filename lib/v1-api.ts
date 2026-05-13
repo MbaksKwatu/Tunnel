@@ -258,6 +258,7 @@ export interface AuditedFinancialsRecord {
   financial_year_start?: string
   financial_year_end?: string
   company_name?: string
+  declaration_type?: 'audited' | 'management'
   turnover_cents?: number | null
   profit_after_tax_cents?: number | null
   total_assets_cents?: number | null
@@ -269,10 +270,12 @@ export interface AuditedFinancialsRecord {
 
 export async function uploadAuditedFinancials(
   dealId: string,
-  file: File
+  file: File,
+  declarationType: 'audited' | 'management' = 'audited'
 ): Promise<AuditedFinancialsRecord> {
   const form = new FormData()
   form.append('file', file)
+  form.append('declaration_type', declarationType)
   const res = await fetchApiFormData(`${BASE}/deals/${dealId}/upload-financials`, {
     method: 'POST',
     body: form,

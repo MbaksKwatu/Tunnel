@@ -1664,18 +1664,25 @@ def get_review_suggestions(request: Request, deal_id: str):
 # Audited Financial Statements
 # ===================================================================
 
+_ACCEPTED_FINANCIALS_EXTENSIONS = {".pdf", ".csv", ".xlsx", ".xls"}
+
+
 @router.post("/deals/{deal_id}/upload-financials")
 async def upload_audited_financials(
     request: Request,
     deal_id: str,
     file: UploadFile = File(...),
+    declaration_type: str = Form("audited"),
 ):
     """
-    Upload an audited financial statements PDF for a deal.
+    Upload an audited or management financial statements file for a deal.
 
-    Sends the file to parity-ingestion for extraction, then stores the
-    structured data in pds_audited_financials.  Idempotent: re-uploading
-    the same financial year overwrites the previous record.
+    Accepts PDF (native or scanned), CSV, and Excel formats.  Sends the file
+    to parity-ingestion for extraction, then stores the structured data in
+    pds_audited_financials.  Idempotent: re-uploading the same financial year
+    overwrites the previous record.
+
+    ``declaration_type`` must be ``'audited'`` (default) or ``'management'``.
     """
     from .db.supabase_repositories import AuditedFinancialsRepo
     from .parsing.audited_financials_client import (
@@ -1683,16 +1690,23 @@ async def upload_audited_financials(
         AuditedFinancialsExtractionError,
     )
 
+    if declaration_type not in ("audited", "management"):
+        raise HTTPException(
+            status_code=400,
+            detail="declaration_type must be 'audited' or 'management'",
+        )
+
     repos = _repos(request)
     deal = repos["deals"].get_deal(deal_id)
     if not deal:
         _error("NOT_FOUND", f"Deal {deal_id} not found")
 
     filename = file.filename or "financials.pdf"
-    if not filename.lower().endswith(".pdf"):
+    ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext not in _ACCEPTED_FINANCIALS_EXTENSIONS:
         raise HTTPException(
             status_code=415,
-            detail="Only PDF files are accepted for audited financials upload.",
+            detail=f"Unsupported format '{ext}'. Accepted: PDF, CSV, XLSX, XLS.",
         )
 
     file_bytes = await file.read()
@@ -1702,14 +1716,14 @@ async def upload_audited_financials(
     except AuditedFinancialsExtractionError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    # Attach deal FK and optional document FK (no pds_documents row created here)
+    # Attach deal FK and declaration_type; exclude non-column keys
     row = {
         "deal_id": deal_id,
+        "declaration_type": declaration_type,
         **{
             k: v
             for k, v in data.items()
-            # Exclude non-column keys and convert Decimal to float for JSON
-            if k not in ("sha256_hash",)
+            if k not in ("sha256_hash", "extraction_method")
         },
         "extraction_confidence": int(data.get("extraction_confidence") or 0),
         "sha256_hash": data.get("sha256_hash"),
@@ -1720,10 +1734,11 @@ async def upload_audited_financials(
 
     _conf = int(data.get("extraction_confidence") or 0)
     logger.info(
-        "[API] Saved audited financials deal_id=%s FY=%s confidence=%d%%",
+        "[API] Saved audited financials deal_id=%s FY=%s confidence=%d%% type=%s",
         deal_id,
         data.get("financial_year"),
         _conf,
+        declaration_type,
     )
 
     return {
@@ -1731,7 +1746,10 @@ async def upload_audited_financials(
         "deal_id": deal_id,
         "company_name": data.get("company_name"),
         "financial_year": data.get("financial_year"),
+        "financial_year_start": data.get("financial_year_start"),
+        "financial_year_end": data.get("financial_year_end"),
         "extraction_confidence": int(data.get("extraction_confidence") or 0),
+        "declaration_type": declaration_type,
         "turnover_cents": data.get("turnover_cents"),
         "profit_after_tax_cents": data.get("profit_after_tax_cents"),
         "total_assets_cents": data.get("total_assets_cents"),
@@ -1758,6 +1776,7 @@ def get_audited_financials(request: Request, deal_id: str):
 
 _PATCHABLE_AF_FIELDS = frozenset({
     "company_name", "financial_year", "financial_year_start", "financial_year_end",
+    "declaration_type",
     "turnover_cents", "profit_after_tax_cents", "total_assets_cents",
     "cash_and_equivalents_cents", "total_expenses_cents", "total_liabilities_cents",
 })

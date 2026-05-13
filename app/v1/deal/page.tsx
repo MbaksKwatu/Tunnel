@@ -137,6 +137,7 @@ function V1DealPageInner() {
   const [auditedUploading, setAuditedUploading] = useState(false);
   const [auditedUploadError, setAuditedUploadError] = useState('');
   const [auditedSaving, setAuditedSaving] = useState(false);
+  const [declarationType, setDeclarationType] = useState<'audited' | 'management'>('audited');
   const [statementQueue, setStatementQueue] = useState<QueuedStatement[]>([]);
   const [activeTab, setActiveTab] = useState<'documents' | 'analysis' | 'review' | 'snapshot'>('documents');
   const docTypeByDocId = useRef<Map<string, 'bank' | 'audited'>>(new Map());
@@ -272,7 +273,7 @@ function V1DealPageInner() {
     setAuditedUploading(true);
     setAuditedUploadError('');
     try {
-      const result = await uploadAuditedFinancials(deal.id, nextFile);
+      const result = await uploadAuditedFinancials(deal.id, nextFile, declarationType);
       // Pre-populate the confirmation form with extracted fields
       setAuditedConfirmForm({
         deal_id: deal.id,
@@ -280,6 +281,7 @@ function V1DealPageInner() {
         financial_year_start: result.financial_year_start,
         financial_year_end: result.financial_year_end,
         company_name: result.company_name ?? '',
+        declaration_type: declarationType,
         turnover_cents: result.turnover_cents ?? null,
         profit_after_tax_cents: result.profit_after_tax_cents ?? null,
         total_assets_cents: result.total_assets_cents ?? null,
@@ -291,11 +293,11 @@ function V1DealPageInner() {
       const msg = err instanceof Error ? err.message : 'Upload failed';
       setAuditedUploadError(msg);
       // Still open the form for manual entry
-      setAuditedConfirmForm({ deal_id: deal.id });
+      setAuditedConfirmForm({ deal_id: deal.id, declaration_type: declarationType });
     } finally {
       setAuditedUploading(false);
     }
-  }, [deal, loadAuditedFinancials]);
+  }, [deal, declarationType, loadAuditedFinancials]);
 
   // One listDocuments poll at a time (sequential), not overlapping setInterval + async —
   // slow responses were stacking many pending /documents requests and starving the worker.
@@ -1131,10 +1133,10 @@ function V1DealPageInner() {
                       )}
                     </div>
 
-                    {/* Audited Accounts */}
+                    {/* Audited / Management Accounts */}
                     <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: 20, borderTop: '2px solid #4ADE80' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>AUDITED ACCOUNTS</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>FINANCIAL ACCOUNTS</span>
                         {auditedFinancialsList.length > 0 && (
                           <span style={{ fontSize: 11, color: '#4ADE80', fontFamily: "'IBM Plex Mono', monospace" }}>
                             {auditedFinancialsList.length} FY record{auditedFinancialsList.length > 1 ? 's' : ''}
@@ -1142,13 +1144,54 @@ function V1DealPageInner() {
                         )}
                       </div>
 
+                      {/* Declaration type selector */}
+                      {!auditedConfirmForm && (
+                        <div style={{ marginBottom: 12 }}>
+                          <div style={{ fontSize: 10, color: '#64748B', marginBottom: 6, letterSpacing: '0.05em' }}>DECLARATION TYPE</div>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            {(['audited', 'management'] as const).map((type) => (
+                              <button
+                                key={type}
+                                type="button"
+                                onClick={() => setDeclarationType(type)}
+                                style={{
+                                  flex: 1,
+                                  padding: '7px 0',
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  borderRadius: 5,
+                                  border: declarationType === type ? '1px solid #6366F1' : '1px solid #1E2A3A',
+                                  background: declarationType === type ? 'rgba(99,102,241,0.12)' : 'transparent',
+                                  color: declarationType === type ? '#A5B4FC' : '#4A5568',
+                                  cursor: 'pointer',
+                                  letterSpacing: '0.05em',
+                                }}
+                              >
+                                {type === 'audited' ? 'Audited' : 'Management'}
+                              </button>
+                            ))}
+                          </div>
+                          {declarationType === 'management' && (
+                            <div style={{ marginTop: 8, padding: '8px 10px', background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 5 }}>
+                              <div style={{ fontSize: 11, color: '#FCD34D', fontWeight: 600, marginBottom: 2 }}>Management accounts — Parity Review required</div>
+                              <div style={{ fontSize: 10, color: '#92400E' }}>Internally prepared statements apply stricter variance thresholds. Snapshot generation is blocked until Parity Review is complete.</div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {/* Existing extracted records */}
                       {auditedFinancialsList.map((af) => (
                         <div key={af.financial_year} style={{ background: '#0A0F1C', border: '1px solid #1E2A3A', borderRadius: 6, padding: '10px 12px', marginBottom: 8 }}>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <span style={{ fontSize: 12, fontWeight: 600, color: '#E2E8F0', fontFamily: "'IBM Plex Mono', monospace" }}>
-                              FY {af.financial_year ?? '—'}
-                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: 12, fontWeight: 600, color: '#E2E8F0', fontFamily: "'IBM Plex Mono', monospace" }}>
+                                FY {af.financial_year ?? '—'}
+                              </span>
+                              {af.declaration_type === 'management' && (
+                                <span style={{ fontSize: 9, background: 'rgba(251,191,36,0.15)', color: '#FCD34D', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 3, padding: '1px 5px', letterSpacing: '0.05em' }}>MGMT</span>
+                              )}
+                            </div>
                             <span style={{ fontSize: 10, color: af.extraction_confidence && af.extraction_confidence >= 70 ? '#4ADE80' : '#F59E0B', fontFamily: "'IBM Plex Mono', monospace" }}>
                               {af.extraction_confidence != null ? `${af.extraction_confidence}% confidence` : 'manual'}
                             </span>
@@ -1181,13 +1224,15 @@ function V1DealPageInner() {
                       {!auditedConfirmForm && (
                         auditedUploading ? (
                           <div style={{ padding: '14px 12px', textAlign: 'center', border: '1px dashed #2D3748', borderRadius: 6, marginTop: 8 }}>
-                            <span style={{ fontSize: 12, color: '#6366F1' }}>Extracting financial data…</span>
+                            <span style={{ fontSize: 12, color: '#6366F1' }}>
+                              {declarationType === 'management' ? 'Processing management accounts…' : 'Extracting financial data…'}
+                            </span>
                           </div>
                         ) : (
                           <DropZone
                             onFileDrop={handleAuditedDrop}
-                            label={auditedFinancialsList.length > 0 ? 'Add another year' : 'Add audited accounts'}
-                            formats="PDF · Auto-extracts revenue, cash & FY dates"
+                            label={auditedFinancialsList.length > 0 ? 'Add another year' : (declarationType === 'management' ? 'Add management accounts' : 'Add audited accounts')}
+                            formats="PDF · CSV · XLSX · Auto-extracts revenue, cash & FY dates"
                           />
                         )
                       )}
@@ -1200,10 +1245,15 @@ function V1DealPageInner() {
                       {/* Confirmation / manual fill form */}
                       {auditedConfirmForm && (
                         <div style={{ background: '#0A0F1C', border: '1px solid #6366F1', borderRadius: 8, padding: 16, marginTop: 12 }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: '#A5B4FC', marginBottom: 12, letterSpacing: '0.08em' }}>
-                            {auditedConfirmForm.extraction_confidence != null
-                              ? `CONFIRM EXTRACTED DETAILS — ${auditedConfirmForm.extraction_confidence}% confidence`
-                              : 'ENTER FINANCIAL DETAILS'}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: '#A5B4FC', letterSpacing: '0.08em' }}>
+                              {auditedConfirmForm.extraction_confidence != null
+                                ? `CONFIRM EXTRACTED DETAILS — ${auditedConfirmForm.extraction_confidence}% confidence`
+                                : 'ENTER FINANCIAL DETAILS'}
+                            </div>
+                            {auditedConfirmForm.declaration_type === 'management' && (
+                              <span style={{ fontSize: 9, background: 'rgba(251,191,36,0.15)', color: '#FCD34D', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 3, padding: '2px 6px', letterSpacing: '0.05em' }}>MANAGEMENT</span>
+                            )}
                           </div>
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                             {([

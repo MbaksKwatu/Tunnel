@@ -1,13 +1,14 @@
 """
-Client for the /v1/ingest/audited-financials endpoint on parity-ingestion.
+Client for the /v1/ingest/audited-financials endpoints on parity-ingestion.
 
-Sends an audited-financials PDF to parity-ingestion and returns a dict
-ready for insertion into pds_audited_financials.
+Sends an audited-financials file (PDF, CSV, or Excel) to parity-ingestion
+and returns a dict ready for insertion into pds_audited_financials.
 """
 from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any, Dict
 
 import httpx
@@ -16,35 +17,28 @@ logger = logging.getLogger(__name__)
 
 PARITY_INGESTION_URL = os.getenv("PARITY_INGESTION_URL", "").rstrip("/")
 
+_TABULAR_EXTENSIONS = {".csv", ".xlsx", ".xls"}
+_MIME_MAP = {
+    ".pdf":  "application/pdf",
+    ".csv":  "text/csv",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xls":  "application/vnd.ms-excel",
+}
+
 
 class AuditedFinancialsExtractionError(Exception):
     """Raised when parity-ingestion fails to extract audited financials."""
 
 
-def extract_audited_financials_via_ingestion(
-    file_bytes: bytes,
-    file_name: str,
-) -> Dict[str, Any]:
-    """
-    POST a PDF to parity-ingestion /v1/ingest/audited-financials.
-
-    Returns the full extraction dict (all IS / BS / CF / notes fields).
-    Raises AuditedFinancialsExtractionError on HTTP errors or timeout.
-    """
-    if not PARITY_INGESTION_URL:
-        raise AuditedFinancialsExtractionError(
-            "PARITY_INGESTION_URL is not configured"
-        )
-
-    url = f"{PARITY_INGESTION_URL}/v1/ingest/audited-financials"
-    files = {"file": (file_name, file_bytes, "application/pdf")}
-
+def _post_to_ingestion(url: str, file_bytes: bytes, file_name: str, mime: str) -> Dict[str, Any]:
+    """POST a file to a parity-ingestion endpoint; return parsed JSON."""
+    files = {"file": (file_name, file_bytes, mime)}
     try:
         with httpx.Client(timeout=httpx.Timeout(300.0)) as client:
             resp = client.post(url, files=files)
     except httpx.TimeoutException as exc:
         raise AuditedFinancialsExtractionError(
-            f"Timeout calling parity-ingestion audited-financials: {exc}"
+            f"Timeout calling parity-ingestion: {exc}"
         ) from exc
     except httpx.HTTPError as exc:
         raise AuditedFinancialsExtractionError(
@@ -60,11 +54,42 @@ def extract_audited_financials_via_ingestion(
             f"parity-ingestion returned {resp.status_code}: {detail}"
         )
 
-    data = resp.json()
+    return resp.json()
+
+
+def extract_audited_financials_via_ingestion(
+    file_bytes: bytes,
+    file_name: str,
+) -> Dict[str, Any]:
+    """
+    POST an audited financials file to parity-ingestion.
+
+    - PDF:        → /v1/ingest/audited-financials  (coordinate or OCR path)
+    - CSV/Excel:  → /v1/ingest/audited-financials/tabular
+
+    Returns the full extraction dict (all IS / BS / CF fields).
+    Raises AuditedFinancialsExtractionError on HTTP errors or timeout.
+    """
+    if not PARITY_INGESTION_URL:
+        raise AuditedFinancialsExtractionError(
+            "PARITY_INGESTION_URL is not configured"
+        )
+
+    ext = Path(file_name).suffix.lower()
+    mime = _MIME_MAP.get(ext, "application/octet-stream")
+
+    if ext in _TABULAR_EXTENSIONS:
+        url = f"{PARITY_INGESTION_URL}/v1/ingest/audited-financials/tabular"
+    else:
+        url = f"{PARITY_INGESTION_URL}/v1/ingest/audited-financials"
+
+    data = _post_to_ingestion(url, file_bytes, file_name, mime)
+
     logger.info(
-        "[AUDITED CLIENT] Extracted %s FY%s — confidence=%s",
+        "[AUDITED CLIENT] Extracted %s FY%s — confidence=%s method=%s",
         data.get("company_name"),
         data.get("financial_year"),
         data.get("extraction_confidence"),
+        data.get("extraction_method"),
     )
     return data
