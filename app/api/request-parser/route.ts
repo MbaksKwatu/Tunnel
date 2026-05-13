@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Resend } from 'resend';
 
-const NOTIFY_EMAIL = 'kwatukham@gmail.com';
+const NOTIFY_EMAIL = 'mbakayaweever@gmail.com';
 
 /**
  * POST /api/request-parser
