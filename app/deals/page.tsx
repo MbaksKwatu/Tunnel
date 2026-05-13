@@ -62,7 +62,7 @@ export default function DashboardPage() {
         {email && (
           <div style={{ margin: '10px 16px', background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 4, padding: '4px 8px', fontSize: 10, color: '#4A5568', display: 'flex', gap: 6, alignItems: 'center' }}>
             <span style={{ fontWeight: 700, color: '#64748B' }}>{initials}</span>
-            <span>ANALYST</span>
+            <span>PARITY DEMO</span>
           </div>
         )}
         <nav style={{ flex: 1, padding: '8px 0' }}>
@@ -107,7 +107,7 @@ export default function DashboardPage() {
               onClick={() => router.push('/deals/new')}
               style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
             >+ New deal</button>
-            <div style={{ fontSize: 12, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace" }}>{initials} · ANALYST</div>
+            <div style={{ fontSize: 12, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace" }}>{initials} · PARITY DEMO</div>
           </div>
         </div>
 
