@@ -9,7 +9,11 @@ import os
 from datetime import datetime, timezone
 
 SCHEMA_VERSION = "1.0.2"
-CONFIG_VERSION = "1.0.2"
+CONFIG_VERSION = "1.0.3"
+
+# Upload limits
+MAX_PDF_FILES = 20          # max files per single batch upload operation
+MAX_BATCH_UPLOADS = 20      # max distinct batch upload operations per deal
 
 GIT_COMMIT = os.getenv("GIT_COMMIT") or None
 BUILD_TIMESTAMP = os.getenv("BUILD_TIMESTAMP") or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

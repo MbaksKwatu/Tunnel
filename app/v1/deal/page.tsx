@@ -19,6 +19,7 @@ import {
   askParity,
   exportTransactionsCsv,
   getNeedsReview,
+  deleteDocument,
 } from '@/lib/v1-api';
 import { BatchUpload } from '@/components/BatchUpload';
 import type {
@@ -898,15 +899,34 @@ function V1DealPageInner() {
     accent,
     isUnknownFormat,
     onRequestParser,
+    canRemove,
+    onRemove,
   }: {
     item: { id: string; fileName: string; status: QueuedStatement['status'] };
     accent: string;
     isUnknownFormat?: boolean;
     onRequestParser?: () => void;
+    canRemove?: boolean;
+    onRemove?: () => void;
   }) => {
+    const [removing, setRemoving] = useState(false);
     const statusLabel = { ready: 'INDEXED', processing: 'PROCESSING', uploading: 'UPLOADING', failed: isUnknownFormat ? 'NO PARSER' : 'FAILED' }[item.status];
     const statusColor = { ready: '#4ADE80', processing: '#818CF8', uploading: '#818CF8', failed: isUnknownFormat ? '#F59E0B' : '#F87171' }[item.status];
     const statusBg = { ready: 'rgba(74,222,128,0.08)', processing: 'rgba(129,140,248,0.12)', uploading: 'rgba(129,140,248,0.12)', failed: isUnknownFormat ? 'rgba(245,158,11,0.1)' : 'rgba(248,113,113,0.12)' }[item.status];
+
+    const handleRemove = async () => {
+      if (!onRemove || removing) return;
+      setRemoving(true);
+      try {
+        await deleteDocument(item.id);
+        onRemove();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Delete failed';
+        alert(`Could not remove document: ${msg}`);
+        setRemoving(false);
+      }
+    };
+
     return (
       <div style={{ borderBottom: '1px solid #1A2235' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0' }}>
@@ -917,6 +937,16 @@ function V1DealPageInner() {
           </span>
           <span style={{ flex: 1, fontSize: 13, color: '#CBD5E1', fontFamily: "'IBM Plex Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.fileName}</span>
           <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: statusColor, background: statusBg, padding: '2px 7px', borderRadius: 3, flexShrink: 0 }}>{statusLabel}</span>
+          {canRemove && onRemove && item.status !== 'uploading' && (
+            <button
+              onClick={handleRemove}
+              disabled={removing}
+              title="Remove document"
+              style={{ marginLeft: 4, padding: '2px 6px', fontSize: 11, color: removing ? '#4A5568' : '#64748B', background: 'transparent', border: 'none', cursor: removing ? 'not-allowed' : 'pointer', borderRadius: 3, lineHeight: 1, flexShrink: 0 }}
+            >
+              {removing ? '…' : '✕'}
+            </button>
+          )}
         </div>
         {/* Inline CTA for unsupported bank format */}
         {item.status === 'failed' && isUnknownFormat && onRequestParser && (
@@ -1092,6 +1122,8 @@ function V1DealPageInner() {
                           accent="#4ADE80"
                           isUnknownFormat={unknownFormatDocIds.has(item.id)}
                           onRequestParser={() => setUnknownParserDoc({ docId: item.id, fileName: item.fileName, errorMessage: 'Bank format not recognised' })}
+                          canRemove={analysisState === 'idle'}
+                          onRemove={() => setStatementQueue((prev) => prev.filter((q) => q.id !== item.id))}
                         />
                       ))}
                       {bankQueue.length < MAX_STATEMENTS && (

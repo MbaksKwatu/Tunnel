@@ -22,7 +22,7 @@ from .utils.pdf_merge import validate_pdf_count
 logger = logging.getLogger(__name__)
 from datetime import datetime, timezone
 
-from .config import SCHEMA_VERSION, CONFIG_VERSION, GIT_COMMIT, BUILD_TIMESTAMP, DETERMINISTIC_MODE
+from .config import SCHEMA_VERSION, CONFIG_VERSION, GIT_COMMIT, BUILD_TIMESTAMP, DETERMINISTIC_MODE, MAX_PDF_FILES, MAX_BATCH_UPLOADS
 from .ingestion.service import IngestionService
 from .parsing.errors import CurrencyMismatchError, InvalidSchemaError
 from .core.pipeline import run_pipeline
@@ -378,7 +378,7 @@ async def upload_documents_batch(
         _error("NOT_FOUND", f"Deal {deal_id} not found")
 
     try:
-        validate_pdf_count(len(files), max_files=3)
+        validate_pdf_count(len(files), max_files=MAX_PDF_FILES)
     except ValueError as exc:
         _error("BAD_REQUEST", str(exc))
 
@@ -389,13 +389,13 @@ async def upload_documents_batch(
     batch_count_fn = getattr(docs_repo, "get_batch_upload_count", None)
     batch_count = batch_count_fn(deal_id) if batch_count_fn else 0
 
-    if batch_count >= 4:
+    if batch_count >= MAX_BATCH_UPLOADS:
         raise HTTPException(
             status_code=403,
             detail={
                 "error_code": "BATCH_LIMIT_REACHED",
                 "error_message": (
-                    "Batch upload limit reached. This deal has used all 4 batch uploads. "
+                    f"Batch upload limit reached. This deal has used all {MAX_BATCH_UPLOADS} batch uploads. "
                     "Use single-file uploads or contact support."
                 ),
             },
@@ -1794,6 +1794,89 @@ _VALID_SECTION_KEYS = frozenset({
     "expense_frequency", "owner_distributions",
     "cash_threshold", "overdraft", "large_transactions",
 })
+
+
+@router.get("/deals/{deal_id}/reconciliation")
+def get_reconciliation(request: Request, deal_id: str):
+    """
+    Run the full fiscal-year reconciliation for a deal.
+
+    Compares bank activity against the uploaded audited financials across
+    four dimensions: cash position, revenue, expenses, and loan activity.
+    Also returns account coverage advisory.
+
+    Requires:
+    - At least one completed document (bank statement) for the deal.
+    - At least one uploaded audited financials record.
+
+    Returns a reconciliation block including tier (HIGH_CONFIDENCE /
+    MEDIUM_CONFIDENCE / LOW_CONFIDENCE) and per-dimension detail.
+    """
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    try:
+        from .analysis.snapshot_generator import generate_reconciliation_section
+        reconciliation = generate_reconciliation_section(deal_id)
+    except ValueError as exc:
+        # No audited financials uploaded yet
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("[RECONCILIATION] deal=%s error=%s", deal_id, exc)
+        raise HTTPException(status_code=500, detail=f"Reconciliation failed: {exc}") from exc
+
+    return {"deal_id": deal_id, "reconciliation": reconciliation}
+
+
+@router.delete("/documents/{document_id}")
+def delete_document(request: Request, document_id: str):
+    """
+    Delete a document and its raw transactions.
+
+    Only permitted when the deal has no completed analysis run yet
+    (i.e. status != 'done' / no snapshot exists with a final hash).
+    This prevents deleting data that has already been included in a
+    sealed snapshot.
+    """
+    repos = _repos(request)
+
+    # Fetch document to confirm it exists and get the deal_id
+    from .db.supabase_repositories import DocumentsRepo
+    docs_repo = DocumentsRepo()
+    doc = docs_repo.get_document(document_id)
+    if not doc:
+        _error("NOT_FOUND", f"Document {document_id} not found")
+
+    deal_id = doc.get("deal_id")
+
+    # Guard: block deletion if a sealed snapshot exists for this deal
+    try:
+        latest_snap = repos["snapshots"].get_latest_snapshot(deal_id)
+    except Exception:
+        latest_snap = None
+
+    if latest_snap and latest_snap.get("sha256_hash"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Cannot delete document — a sealed snapshot already exists for this deal. "
+                "Documents that have been included in a snapshot cannot be removed."
+            ),
+        )
+
+    # Delete raw transactions first (FK constraint)
+    try:
+        repos["raw"].delete_eq("document_id", document_id)
+    except Exception as exc:
+        logger.warning("[DELETE_DOC] transactions delete failed doc=%s: %s", document_id, exc)
+
+    # Delete the document row
+    docs_repo.delete_eq("id", document_id)
+
+    logger.info("[DELETE_DOC] document=%s deal=%s deleted", document_id, deal_id)
+    return {"deleted": True, "document_id": document_id, "deal_id": deal_id}
 
 
 @router.post("/deals/{deal_id}/review/add-to-snapshot")

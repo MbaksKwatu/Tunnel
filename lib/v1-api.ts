@@ -617,3 +617,26 @@ export async function getNeedsReview(dealId: string): Promise<{ transactions: Ne
   if (!res.ok) return { transactions: [], total: 0 }
   return res.json()
 }
+
+export interface ReconciliationResult {
+  deal_id: string
+  reconciliation: Record<string, unknown>
+}
+
+export async function getReconciliation(dealId: string): Promise<ReconciliationResult> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/reconciliation`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Reconciliation failed' }))
+    throw new Error(err.detail ?? 'Reconciliation failed')
+  }
+  return res.json()
+}
+
+export async function deleteDocument(documentId: string): Promise<{ deleted: boolean; document_id: string; deal_id: string }> {
+  const res = await fetchApi(`${BASE}/documents/${documentId}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Delete failed' }))
+    throw new Error(err.detail ?? 'Delete failed')
+  }
+  return res.json()
+}
