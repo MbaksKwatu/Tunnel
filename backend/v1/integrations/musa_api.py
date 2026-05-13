@@ -299,12 +299,11 @@ def get_session_results(
 
     session = rows[0]
 
-    if session["status"] != "complete":
-        raise HTTPException(status_code=400, detail="Session not complete yet")
+    # Allow both "complete" and "failed" - both are finished processing
+    if session["status"] == "processing":
+        raise HTTPException(status_code=400, detail="Session still processing")
 
     deal_id = session.get("deal_id")
-    if not deal_id:
-        raise HTTPException(status_code=404, detail="Deal not found for session")
 
-    # Return the SessionResponse
+    # Return the SessionResponse (works for both complete and failed)
     return _build_session_response(session, deal_id)

@@ -361,7 +361,18 @@ async def process_musa_session(
     except Exception as exc:
         logger.exception("[MUSA] Session failed session=%s: %s", session_id, exc)
         completed_at = datetime.now(timezone.utc).isoformat()
-        error_message = str(exc)
+
+        # Map common errors to friendly messages
+        error_str = str(exc).lower()
+        if "name or service not known" in error_str or "failed to resolve" in error_str:
+            error_message = "Failed to download document: URL unreachable or invalid"
+        elif "timeout" in error_str or "timed out" in error_str:
+            error_message = "Failed to download document: Request timed out"
+        elif "http" in error_str and ("40" in error_str or "50" in error_str):
+            error_message = f"Failed to download document: Server returned error ({exc})"
+        else:
+            # For unexpected errors, still include the original for debugging
+            error_message = f"Processing failed: {exc}"
 
         try:
             supabase.table("musa_sessions").update(
