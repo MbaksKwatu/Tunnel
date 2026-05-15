@@ -175,7 +175,6 @@ def _run_export(deal_id: str, created_by: str) -> dict:
             "override_penalty_bp": run["override_penalty_bp"],
         },
         overrides_applied=overrides,
-        audited_financials=None,
     )
 
     return export_snapshot(
