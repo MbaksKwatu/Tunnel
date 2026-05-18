@@ -67,29 +67,57 @@ def extract_audited_financials_via_ingestion(
     - PDF:        → /v1/ingest/audited-financials  (coordinate or OCR path)
     - CSV/Excel:  → /v1/ingest/audited-financials/tabular
 
+    Falls back to inline pdfplumber extraction when parity-ingestion is
+    unavailable or returns an error for PDF files.
+
     Returns the full extraction dict (all IS / BS / CF fields).
-    Raises AuditedFinancialsExtractionError on HTTP errors or timeout.
+    Raises AuditedFinancialsExtractionError on failure.
     """
-    if not PARITY_INGESTION_URL:
+    ext = Path(file_name).suffix.lower()
+
+    if PARITY_INGESTION_URL:
+        mime = _MIME_MAP.get(ext, "application/octet-stream")
+        if ext in _TABULAR_EXTENSIONS:
+            url = f"{PARITY_INGESTION_URL}/v1/ingest/audited-financials/tabular"
+        else:
+            url = f"{PARITY_INGESTION_URL}/v1/ingest/audited-financials"
+
+        try:
+            data = _post_to_ingestion(url, file_bytes, file_name, mime)
+            logger.info(
+                "[AUDITED CLIENT] Extracted %s FY%s — confidence=%s method=%s",
+                data.get("company_name"),
+                data.get("financial_year"),
+                data.get("extraction_confidence"),
+                data.get("extraction_method"),
+            )
+            return data
+        except AuditedFinancialsExtractionError as exc:
+            if ext in _TABULAR_EXTENSIONS:
+                # No inline fallback for CSV/Excel — re-raise
+                raise
+            logger.warning(
+                "[AUDITED CLIENT] parity-ingestion failed (%s) — trying inline extraction", exc
+            )
+
+    # Inline fallback: run pdfplumber extractor directly on this worker.
+    # Only works for PDF files; no OCR (scanned PDFs fall through to manual entry).
+    if ext != ".pdf":
         raise AuditedFinancialsExtractionError(
-            "PARITY_INGESTION_URL is not configured"
+            "PARITY_INGESTION_URL is not configured and inline extraction only supports PDF"
         )
 
-    ext = Path(file_name).suffix.lower()
-    mime = _MIME_MAP.get(ext, "application/octet-stream")
-
-    if ext in _TABULAR_EXTENSIONS:
-        url = f"{PARITY_INGESTION_URL}/v1/ingest/audited-financials/tabular"
-    else:
-        url = f"{PARITY_INGESTION_URL}/v1/ingest/audited-financials"
-
-    data = _post_to_ingestion(url, file_bytes, file_name, mime)
-
-    logger.info(
-        "[AUDITED CLIENT] Extracted %s FY%s — confidence=%s method=%s",
-        data.get("company_name"),
-        data.get("financial_year"),
-        data.get("extraction_confidence"),
-        data.get("extraction_method"),
-    )
-    return data
+    try:
+        from .audited_financials_inline import extract_audited_financials_inline
+        data = extract_audited_financials_inline(file_bytes, file_name)
+        logger.info(
+            "[AUDITED INLINE] Extracted %s FY%s — confidence=%s",
+            data.get("company_name"),
+            data.get("financial_year"),
+            data.get("extraction_confidence"),
+        )
+        return data
+    except Exception as exc:
+        raise AuditedFinancialsExtractionError(
+            f"Inline extraction failed: {exc}"
+        ) from exc

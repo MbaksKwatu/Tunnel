@@ -1124,7 +1124,7 @@ function V1DealPageInner() {
                           accent="#4ADE80"
                           isUnknownFormat={unknownFormatDocIds.has(item.id)}
                           onRequestParser={() => setUnknownParserDoc({ docId: item.id, fileName: item.fileName, errorMessage: 'Bank format not recognised' })}
-                          canRemove={analysisState === 'idle'}
+                          canRemove={analysisState === 'idle' || item.status === 'failed'}
                           onRemove={() => setStatementQueue((prev) => prev.filter((q) => q.id !== item.id))}
                         />
                       ))}
