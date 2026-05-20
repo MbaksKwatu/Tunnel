@@ -499,6 +499,17 @@ def list_documents(request: Request, deal_id: str):
     return {"documents": [_document_row_for_list_response(d) for d in docs]}
 
 
+@router.delete("/deals/{deal_id}/documents/{document_id}")
+def delete_document(request: Request, deal_id: str, document_id: str):
+    repos = _repos(request)
+    doc = repos["documents"].get_document(document_id)
+    if not doc or doc.get("deal_id") != deal_id:
+        _error("NOT_FOUND", f"Document {document_id} not found in deal {deal_id}")
+    repos["raw"].delete_eq("document_id", document_id)
+    repos["documents"].delete_document(document_id)
+    return {"success": True, "document_id": document_id}
+
+
 @router.get("/documents/{document_id}/status")
 def get_document_status(request: Request, document_id: str):
     repos = _repos(request)

@@ -207,6 +207,16 @@ export async function listDocuments(
   return res.json()
 }
 
+export async function deleteDocument(dealId: string, documentId: string): Promise<void> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/documents/${documentId}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const text = await res.text()
+    let msg = `Could not remove document: ${res.status}`
+    try { msg = JSON.parse(text)?.detail?.error_message || msg } catch { /* ignore */ }
+    throw new Error(msg)
+  }
+}
+
 export interface BatchUploadResponse {
   document_id: string
   batch_number: number

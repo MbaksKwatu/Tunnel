@@ -166,6 +166,9 @@ class DocumentsRepo(DocumentsRepository, BaseRepo):
             return None
         return max((r.get("created_at") or "") for r in rows)
 
+    def delete_document(self, document_id: str) -> None:
+        self.delete_eq("id", document_id)
+
 
 BATCH_SIZE = 1000
 

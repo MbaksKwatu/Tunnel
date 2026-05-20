@@ -13,6 +13,7 @@ import {
   addOverride,
   listOverrides,
   listDocuments,
+  deleteDocument,
   askParity,
   exportTransactionsCsv,
   getNeedsReview,
@@ -443,6 +444,16 @@ function V1DealPageInner() {
     }
   };
 
+  const handleDeleteDocument = async (docId: string) => {
+    if (!deal) return;
+    try {
+      await deleteDocument(deal.id, docId);
+      setStatementQueue((prev) => prev.filter((item) => item.id !== docId));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not remove document');
+    }
+  };
+
   const handleAddOverride = async () => {
     if (!deal || !overrideEntityId || !overrideRole) return;
     setOverrideSaving(true);
@@ -864,11 +875,13 @@ function V1DealPageInner() {
     accent,
     isUnknownFormat,
     onRequestParser,
+    onDelete,
   }: {
     item: { id: string; fileName: string; status: QueuedStatement['status'] };
     accent: string;
     isUnknownFormat?: boolean;
     onRequestParser?: () => void;
+    onDelete?: () => void;
   }) => {
     const statusLabel = { ready: 'INDEXED', processing: 'PROCESSING', uploading: 'UPLOADING', failed: isUnknownFormat ? 'NO PARSER' : 'FAILED' }[item.status];
     const statusColor = { ready: '#4ADE80', processing: '#818CF8', uploading: '#818CF8', failed: isUnknownFormat ? '#F59E0B' : '#F87171' }[item.status];
@@ -883,6 +896,15 @@ function V1DealPageInner() {
           </span>
           <span style={{ flex: 1, fontSize: 13, color: '#CBD5E1', fontFamily: "'IBM Plex Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.fileName}</span>
           <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: statusColor, background: statusBg, padding: '2px 7px', borderRadius: 3, flexShrink: 0 }}>{statusLabel}</span>
+          {onDelete && item.status !== 'uploading' && (
+            <button
+              onClick={onDelete}
+              title="Remove document"
+              style={{ background: 'transparent', border: 'none', color: '#374151', fontSize: 16, lineHeight: 1, cursor: 'pointer', padding: '0 0 0 4px', flexShrink: 0 }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#F87171'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#374151'; }}
+            >×</button>
+          )}
         </div>
         {/* Inline CTA for unsupported bank format */}
         {item.status === 'failed' && isUnknownFormat && onRequestParser && (
@@ -1058,6 +1080,7 @@ function V1DealPageInner() {
                           accent="#4ADE80"
                           isUnknownFormat={unknownFormatDocIds.has(item.id)}
                           onRequestParser={() => setUnknownParserDoc({ docId: item.id, fileName: item.fileName, errorMessage: 'Bank format not recognised' })}
+                          onDelete={() => handleDeleteDocument(item.id)}
                         />
                       ))}
                       {bankQueue.length < MAX_STATEMENTS && (
@@ -1075,7 +1098,7 @@ function V1DealPageInner() {
                           </span>
                         )}
                       </div>
-                      {auditedQueue.map((item) => <FileRow key={item.id} item={item} accent="#4ADE80" isUnknownFormat={false} />)}
+                      {auditedQueue.map((item) => <FileRow key={item.id} item={item} accent="#4ADE80" isUnknownFormat={false} onDelete={() => handleDeleteDocument(item.id)} />)}
                       {auditedQueue.length < 1 && (
                         <DropZone onFileDrop={handleAuditedDrop} label="Add audited accounts" formats="PDF · DOCX · XLSX" />
                       )}
