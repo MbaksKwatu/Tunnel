@@ -144,6 +144,7 @@ function V1DealPageInner() {
   type ChatMessage = { role: 'analyst' | 'parity'; text: string; time: string }
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [needsReviewItems, setNeedsReviewItems] = useState<Array<Record<string, unknown>>>([]);
+  const [parityInputInteracted, setParityInputInteracted] = useState(false);
 
   // Unknown-parser request modal state
   interface ParserRequestDoc { docId: string; fileName: string; errorMessage: string }
@@ -672,6 +673,12 @@ function V1DealPageInner() {
       getNeedsReview(deal.id).then((res) => setNeedsReviewItems(res.transactions as unknown as Array<Record<string, unknown>>)).catch(() => {});
     }
   }, [analysisState, deal?.id]);
+
+  useEffect(() => {
+    if (!deal?.id) return;
+    const key = `parity-interacted-${deal.id}`;
+    if (localStorage.getItem(key) === 'true') setParityInputInteracted(true);
+  }, [deal?.id]);
 
   const handleParserRequestSubmit = async () => {
     if (!unknownParserDoc || !parserRequestForm.bankName.trim()) return;
@@ -1761,7 +1768,12 @@ function V1DealPageInner() {
                   )}
 
                   {/* Input */}
-                  <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: 14 }}>
+                  <div
+                    className={!parityInputInteracted ? 'parity-input-attention' : undefined}
+                    onClick={() => { if (!parityInputInteracted) { setParityInputInteracted(true); if (deal?.id) localStorage.setItem(`parity-interacted-${deal.id}`, 'true'); } }}
+                    onFocus={() => { if (!parityInputInteracted) { setParityInputInteracted(true); if (deal?.id) localStorage.setItem(`parity-interacted-${deal.id}`, 'true'); } }}
+                    style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: 14 }}
+                  >
                     <textarea
                       value={reviewQuestion}
                       onChange={(e) => setReviewQuestion(e.target.value)}
