@@ -1998,3 +1998,62 @@ def add_section_to_snapshot(request: Request, deal_id: str, body: dict = Body(..
         "added_sections": draft["added_sections"],
         "enriched_hash": enriched_hash,
     }
+
+
+# ===================================================================
+# Parity Review AI — Claude Sonnet 4.6 Chat Interface
+# ===================================================================
+
+@router.post("/deals/{deal_id}/parity-review/chat")
+def parity_review_chat(request: Request, deal_id: str, body: dict = Body(...)):
+    """
+    Parity Review AI chat endpoint.
+
+    Body:
+        message (str): Analyst's question.
+        conversation_history (list, optional): Prior [{role, content}] turns.
+        personality (str, optional): "sme_debt_fund" (default). Future: mfi, dfi, bank.
+
+    Returns:
+        response (str): AI answer.
+        conversation_history (list): Updated history for stateless clients.
+        tools_called (list[str]): Names of tools the AI invoked.
+        usage (dict): token counts.
+    """
+    from .parity_review.context import parse_snapshot
+    from .parity_review.chat import run_chat
+
+    message = (body.get("message") or "").strip()
+    if not message:
+        _error("BAD_REQUEST", "message is required")
+
+    conversation_history = body.get("conversation_history") or []
+
+    repos = _repos(request)
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    if not snapshot:
+        _error("NOT_FOUND", "No snapshot found for this deal. Run export first.")
+
+    try:
+        deal_data = parse_snapshot(snapshot)
+    except Exception as exc:
+        logger.exception("[parity-review] parse_snapshot failed deal=%s", deal_id)
+        raise HTTPException(status_code=500, detail=f"Failed to parse snapshot: {exc}")
+
+    try:
+        result = run_chat(
+            message=message,
+            deal_data=deal_data,
+            conversation_history=conversation_history,
+        )
+    except RuntimeError as exc:
+        # ANTHROPIC_API_KEY missing
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        logger.exception("[parity-review] run_chat failed deal=%s", deal_id)
+        raise HTTPException(status_code=500, detail=f"AI chat error: {exc}")
+
+    return result
