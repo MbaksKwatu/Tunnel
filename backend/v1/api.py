@@ -510,6 +510,18 @@ def delete_document(request: Request, deal_id: str, document_id: str):
     return {"success": True, "document_id": document_id}
 
 
+@router.delete("/documents/{document_id}")
+def delete_document_by_id(request: Request, document_id: str):
+    """Route alias used by gbfund-pilot frontend (no deal_id in path)."""
+    repos = _repos(request)
+    doc = repos["documents"].get_document(document_id)
+    if not doc:
+        _error("NOT_FOUND", f"Document {document_id} not found")
+    repos["raw"].delete_eq("document_id", document_id)
+    repos["documents"].delete_document(document_id)
+    return {"deleted": True, "document_id": document_id, "deal_id": doc.get("deal_id")}
+
+
 @router.get("/documents/{document_id}/status")
 def get_document_status(request: Request, document_id: str):
     repos = _repos(request)
