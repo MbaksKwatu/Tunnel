@@ -359,7 +359,7 @@ async def upload_document(
     summary="Upload multiple PDFs at once (batch upload)",
     description=(
         "Upload 2–3 PDFs; they are merged in upload order and processed as one document. "
-        "Limit: 4 batch uploads per deal (tracked via batch_number)."
+        "Limit: 20 batch uploads per deal (tracked via batch_number)."
     ),
 )
 async def upload_documents_batch(
@@ -471,7 +471,7 @@ async def upload_documents_batch(
         deal_currency=deal["currency"],
     )
 
-    batches_remaining = max(0, 4 - next_batch_number)
+    batches_remaining = max(0, 20 - next_batch_number)
 
     return {
         "document_id": document_id,
@@ -480,7 +480,7 @@ async def upload_documents_batch(
         "files_merged": len(files),
         "source_files": source_names,
         "status": "processing",
-        "message": f"Batch upload {next_batch_number}/4 submitted successfully",
+        "message": f"Batch upload {next_batch_number}/20 submitted successfully",
         "ingestion": {
             "document_id": document_id,
             "status": "processing",
@@ -497,6 +497,29 @@ def list_documents(request: Request, deal_id: str):
         _error("NOT_FOUND", f"Deal {deal_id} not found")
     docs = repos["documents"].list_by_deal(deal_id)
     return {"documents": [_document_row_for_list_response(d) for d in docs]}
+
+
+@router.delete("/deals/{deal_id}/documents/{document_id}")
+def delete_document(request: Request, deal_id: str, document_id: str):
+    repos = _repos(request)
+    doc = repos["documents"].get_document(document_id)
+    if not doc or doc.get("deal_id") != deal_id:
+        _error("NOT_FOUND", f"Document {document_id} not found in deal {deal_id}")
+    repos["raw"].delete_eq("document_id", document_id)
+    repos["documents"].delete_document(document_id)
+    return {"success": True, "document_id": document_id}
+
+
+@router.delete("/documents/{document_id}")
+def delete_document_by_id(request: Request, document_id: str):
+    """Route alias used by gbfund-pilot frontend (no deal_id in path)."""
+    repos = _repos(request)
+    doc = repos["documents"].get_document(document_id)
+    if not doc:
+        _error("NOT_FOUND", f"Document {document_id} not found")
+    repos["raw"].delete_eq("document_id", document_id)
+    repos["documents"].delete_document(document_id)
+    return {"deleted": True, "document_id": document_id, "deal_id": doc.get("deal_id")}
 
 
 @router.get("/documents/{document_id}/status")

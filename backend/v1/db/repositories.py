@@ -56,6 +56,10 @@ class DocumentsRepository:
         """Max created_at of documents for deal, or None if none."""
         raise NotImplementedError
 
+    def delete_document(self, document_id: str) -> None:
+        """Delete a document row by id, regardless of status."""
+        raise NotImplementedError
+
 
 class RawTransactionsRepository:
     def insert_batch(self, rows: Iterable[Dict[str, Any]]) -> None:

@@ -16,6 +16,7 @@ import {
   addOverride,
   listOverrides,
   listDocuments,
+  deleteDocument,
   askParity,
   exportTransactionsCsv,
   getNeedsReview,
@@ -477,6 +478,16 @@ function V1DealPageInner() {
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : 'Analysis failed');
       setAnalysisState('error');
+    }
+  };
+
+  const handleDeleteDocument = async (docId: string) => {
+    if (!deal) return;
+    try {
+      await deleteDocument(deal.id, docId);
+      setStatementQueue((prev) => prev.filter((item) => item.id !== docId));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not remove document');
     }
   };
 

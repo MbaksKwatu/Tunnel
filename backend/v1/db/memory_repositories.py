@@ -96,6 +96,9 @@ class MemoryDocumentsRepo(DocumentsRepository):
             return None
         return max((r.get("created_at") or "") for r in rows)
 
+    def delete_document(self, document_id: str) -> None:
+        self._store = [d for d in self._store if d["id"] != document_id]
+
 
 class MemoryRawTxRepo(RawTransactionsRepository):
     def __init__(self):
