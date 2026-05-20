@@ -136,6 +136,7 @@ def build_pds_payload(
     metrics: Dict[str, Any],
     confidence: Dict[str, Any],
     overrides_applied: List[Dict[str, Any]],
+    audited_financials: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     sorted_txns = sorted(
         raw_transactions,
@@ -231,6 +232,8 @@ def build_pds_payload(
         "reconciliation_summary": reconciliation_summary,
         "overrides_applied": sorted(overrides_applied, key=lambda o: o.get("entity_id") or ""),
     }
+    if audited_financials is not None:
+        payload["audited_financials"] = audited_financials
     return payload
 
 
