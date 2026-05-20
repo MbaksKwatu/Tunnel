@@ -321,15 +321,13 @@ def _keyword_classify(descriptor: str, amount_cents: int) -> Optional[Tuple[str,
             else:
                 return ("mpesa_inflow", f"keyword_match:{kw}:mobile_transfer_keywords_inbound")
 
-    # 14. PesaLink
+    # 14. PesaLink — channel only; direction determines role, no amount threshold
     for kw in _PESALINK_INFLOW_KEYWORDS:
         if kw in d:
             if amt > 0:
                 return ("pesalink_inflow", f"keyword_match:{kw}:pesalink_keywords")
-            elif amt <= -_LARGE_POSITIVE_THRESHOLD_CENTS:
-                return ("needs_review", f"keyword_match:{kw}:pesalink_large_outbound")
             else:
-                return ("bill_payment", f"keyword_match:{kw}:pesalink_keywords_outbound")
+                return ("pesalink_outflow", f"keyword_match:{kw}:pesalink_keywords_outbound")
 
     # 15. Revenue operational
     for kw in _REVENUE_OP_KEYWORDS:
