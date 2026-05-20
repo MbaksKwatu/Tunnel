@@ -20,7 +20,6 @@ import {
   askParity,
   exportTransactionsCsv,
   getNeedsReview,
-  deleteDocument,
 } from '@/lib/v1-api';
 import { BatchUpload } from '@/components/BatchUpload';
 import type {
@@ -484,7 +483,7 @@ function V1DealPageInner() {
   const handleDeleteDocument = async (docId: string) => {
     if (!deal) return;
     try {
-      await deleteDocument(deal.id, docId);
+      await deleteDocument(docId);
       setStatementQueue((prev) => prev.filter((item) => item.id !== docId));
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Could not remove document');
