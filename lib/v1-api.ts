@@ -345,6 +345,33 @@ export async function askParity(
   return res.json()
 }
 
+export interface ParityReviewChatResponse {
+  response: string
+  conversation_history: Array<{ role: string; content: unknown }>
+  tools_called: string[]
+  is_proactive?: boolean
+  usage: {
+    input_tokens: number
+    output_tokens: number
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?: number
+  }
+}
+
+export async function askParityReview(
+  dealId: string,
+  message: string,
+  conversationHistory: Array<{ role: string; content: unknown }> = []
+): Promise<ParityReviewChatResponse> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/parity-review/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, conversation_history: conversationHistory }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
 export async function exportTransactionsCsv(dealId: string): Promise<Response> {
   return fetchApi(`${BASE}/deals/${dealId}/export/transactions`)
 }

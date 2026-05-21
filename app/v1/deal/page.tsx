@@ -18,6 +18,7 @@ import {
   listDocuments,
   deleteDocument,
   askParity,
+  askParityReview,
   exportTransactionsCsv,
   getNeedsReview,
 } from '@/lib/v1-api';
@@ -35,6 +36,18 @@ import type {
 // generateParityPdf is loaded dynamically at click time so Next.js never
 // evaluates jsPDF's Node.js build during server compilation.
 type GeneratePdfFn = typeof import('@/lib/generate-parity-pdf').generateParityPdf;
+
+function simpleMarkdownToHtml(md: string): string {
+  return md
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/^## (.+)$/gm, '<h3 style="font-size:13px;font-weight:700;margin:12px 0 4px;color:#A5B4FC">$1</h3>')
+    .replace(/^---$/gm, '<hr style="border:none;border-top:1px solid #1E2A3A;margin:8px 0"/>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong style="color:#E2E8F0">$1</strong>')
+    .replace(/^• (.+)$/gm, '<div style="padding-left:12px;margin:2px 0">• $1</div>')
+    .replace(/^- (.+)$/gm, '<div style="padding-left:12px;margin:2px 0">• $1</div>')
+    .replace(/\n{2,}/g, '<br/>')
+    .replace(/\n/g, '\n');
+}
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'KES', 'NGN'];
 const MAX_STATEMENTS = 20;
@@ -143,6 +156,8 @@ function V1DealPageInner() {
   const docTypeByDocId = useRef<Map<string, 'bank' | 'audited'>>(new Map());
   type ChatMessage = { role: 'analyst' | 'parity'; text: string; time: string }
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [conversationHistory, setConversationHistory] = useState<Array<{ role: string; content: unknown }>>([]);
+  const [proactiveTriggered, setProactiveTriggered] = useState(false);
   const [needsReviewItems, setNeedsReviewItems] = useState<Array<Record<string, unknown>>>([]);
   const [parityInputInteracted, setParityInputInteracted] = useState(false);
 
@@ -646,19 +661,22 @@ function V1DealPageInner() {
     }
   };
 
-  const handleAsk = async () => {
-    if (!deal || !reviewQuestion.trim()) return;
-    const question = reviewQuestion.trim();
+  const handleAsk = async (overrideMessage?: string) => {
+    const message = overrideMessage || reviewQuestion.trim();
+    if (!deal || !message) return;
     const now = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    setChatHistory((prev) => [...prev, { role: 'analyst', text: question, time: now }]);
-    setReviewQuestion('');
+    if (!overrideMessage) {
+      setChatHistory((prev) => [...prev, { role: 'analyst', text: message, time: now }]);
+      setReviewQuestion('');
+    }
     setReviewLoading(true);
     setReviewAnswer('');
     try {
-      const { answer } = await askParity(deal.id, question);
+      const result = await askParityReview(deal.id, message, conversationHistory);
       const answerTime = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      setChatHistory((prev) => [...prev, { role: 'parity', text: answer, time: answerTime }]);
-      setReviewAnswer(answer);
+      setChatHistory((prev) => [...prev, { role: 'parity', text: result.response, time: answerTime }]);
+      setConversationHistory(result.conversation_history);
+      setReviewAnswer(result.response);
     } catch (e) {
       const errText = e instanceof Error ? e.message : 'Request failed';
       setChatHistory((prev) => [...prev, { role: 'parity', text: errText, time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }]);
@@ -679,6 +697,14 @@ function V1DealPageInner() {
     const key = `parity-interacted-${deal.id}`;
     if (localStorage.getItem(key) === 'true') setParityInputInteracted(true);
   }, [deal?.id]);
+
+  // Auto-trigger proactive analysis when review tab opens and corpus is ready
+  useEffect(() => {
+    if (activeTab === 'review' && analysisState === 'done' && deal?.id && !proactiveTriggered && chatHistory.length === 0) {
+      setProactiveTriggered(true);
+      handleAsk('start');
+    }
+  }, [activeTab, analysisState, deal?.id, proactiveTriggered, chatHistory.length]);
 
   const handleParserRequestSubmit = async () => {
     if (!unknownParserDoc || !parserRequestForm.bankName.trim()) return;
@@ -1708,7 +1734,7 @@ function V1DealPageInner() {
                       </div>
                     </div>
                   )}
-                  {corpusReady && chatHistory.length === 0 && (
+                  {corpusReady && chatHistory.length === 0 && !reviewLoading && (
                     <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: '14px 18px', marginBottom: 16 }}>
                       <div style={{ fontSize: 11, fontWeight: 700, color: '#374151', letterSpacing: '0.08em', marginBottom: 6 }}>CORPUS LOADED</div>
                       <div style={{ fontSize: 12, color: '#4A5568', lineHeight: 1.6 }}>
@@ -1735,7 +1761,11 @@ function V1DealPageInner() {
                             borderRadius: msg.role === 'analyst' ? '8px 8px 2px 8px' : '8px 8px 8px 2px',
                             padding: '10px 14px',
                           }}>
-                            <p style={{ fontSize: 13, color: msg.role === 'analyst' ? '#A5B4FC' : '#CBD5E1', lineHeight: 1.6, whiteSpace: 'pre-line', margin: 0 }}>{msg.text}</p>
+                            {msg.role === 'parity' ? (
+                              <div style={{ fontSize: 13, color: '#CBD5E1', lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: simpleMarkdownToHtml(msg.text) }} />
+                            ) : (
+                              <p style={{ fontSize: 13, color: '#A5B4FC', lineHeight: 1.6, whiteSpace: 'pre-line', margin: 0 }}>{msg.text}</p>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -1751,7 +1781,7 @@ function V1DealPageInner() {
                   )}
 
                   {/* Suggestion chips */}
-                  {corpusReady && chatHistory.length === 0 && (
+                  {corpusReady && chatHistory.length <= 1 && !reviewLoading && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
                       {SUGGESTION_CHIPS.map((chip) => (
                         <button
