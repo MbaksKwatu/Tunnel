@@ -18,11 +18,15 @@ import {
   listDocuments,
   deleteDocument,
   askParity,
-  askParityReview,
+  // askParityReview moved to ParityReviewChat component
   exportTransactionsCsv,
   getNeedsReview,
+  listDeals,
 } from '@/lib/v1-api';
+import type { DealListItem } from '@/lib/v1-api';
 import { BatchUpload } from '@/components/BatchUpload';
+import ParityReviewChat from '@/components/ParityReviewChat';
+import ReviewQueue from '@/components/ReviewQueue';
 import type {
   Deal,
   AnalysisRun,
@@ -36,18 +40,6 @@ import type {
 // generateParityPdf is loaded dynamically at click time so Next.js never
 // evaluates jsPDF's Node.js build during server compilation.
 type GeneratePdfFn = typeof import('@/lib/generate-parity-pdf').generateParityPdf;
-
-function simpleMarkdownToHtml(md: string): string {
-  return md
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/^## (.+)$/gm, '<h3 style="font-size:13px;font-weight:700;margin:12px 0 4px;color:#A5B4FC">$1</h3>')
-    .replace(/^---$/gm, '<hr style="border:none;border-top:1px solid #1E2A3A;margin:8px 0"/>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong style="color:#E2E8F0">$1</strong>')
-    .replace(/^• (.+)$/gm, '<div style="padding-left:12px;margin:2px 0">• $1</div>')
-    .replace(/^- (.+)$/gm, '<div style="padding-left:12px;margin:2px 0">• $1</div>')
-    .replace(/\n{2,}/g, '<br/>')
-    .replace(/\n/g, '\n');
-}
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'KES', 'NGN'];
 const MAX_STATEMENTS = 20;
@@ -103,7 +95,10 @@ function V1DealPageInner() {
   useEffect(() => {
     if (!supabase) { router.replace('/login'); return; }
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) router.replace('/login');
+      if (!session) { router.replace('/login'); return; }
+      const email = session.user.email ?? '';
+      if (email) setUserInitials(email.slice(0, 2).toUpperCase());
+      listDeals(session.user.id).then(r => setSidebarDeals(r.deals)).catch(() => {});
     });
   }, [router]);
 
@@ -141,9 +136,7 @@ function V1DealPageInner() {
   const [monthlyCashflow, setMonthlyCashflow] = useState<Array<Record<string, unknown>>>([]);
   const [creditScoringInputs, setCreditScoringInputs] = useState<Record<string, unknown> | null>(null);
   const [monthlyEntityBreakdown, setMonthlyEntityBreakdown] = useState<Array<Record<string, unknown>>>([]);
-  const [reviewQuestion, setReviewQuestion] = useState('');
-  const [reviewAnswer, setReviewAnswer] = useState('');
-  const [reviewLoading, setReviewLoading] = useState(false);
+  // Chat state moved to ParityReviewChat component for performance
   const [dealDocuments, setDealDocuments] = useState<DocumentListItem[]>([]);
   const [auditedFinancialsList, setAuditedFinancialsList] = useState<AuditedFinancialsRecord[]>([]);
   const [auditedConfirmForm, setAuditedConfirmForm] = useState<AuditedFinancialsRecord | null>(null);
@@ -152,14 +145,11 @@ function V1DealPageInner() {
   const [auditedSaving, setAuditedSaving] = useState(false);
   const [declarationType, setDeclarationType] = useState<'audited' | 'management'>('audited');
   const [statementQueue, setStatementQueue] = useState<QueuedStatement[]>([]);
-  const [activeTab, setActiveTab] = useState<'documents' | 'analysis' | 'review' | 'snapshot'>('documents');
+  const [activeTab, setActiveTab] = useState<'documents' | 'analysis' | 'review' | 'queue' | 'snapshot'>('documents');
   const docTypeByDocId = useRef<Map<string, 'bank' | 'audited'>>(new Map());
-  type ChatMessage = { role: 'analyst' | 'parity'; text: string; time: string }
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-  const [conversationHistory, setConversationHistory] = useState<Array<{ role: string; content: unknown }>>([]);
-  const [proactiveTriggered, setProactiveTriggered] = useState(false);
+  // ChatMessage type, chatHistory, conversationHistory, proactiveTriggered — moved to ParityReviewChat
   const [needsReviewItems, setNeedsReviewItems] = useState<Array<Record<string, unknown>>>([]);
-  const [parityInputInteracted, setParityInputInteracted] = useState(false);
+  // parityInputInteracted — moved to ParityReviewChat
 
   // Unknown-parser request modal state
   interface ParserRequestDoc { docId: string; fileName: string; errorMessage: string }
@@ -170,6 +160,17 @@ function V1DealPageInner() {
   const checkedFailedDocs = useRef<Set<string>>(new Set());
   // Tracks doc IDs confirmed as "unsupported format" — used to show inline CTA in FileRow
   const [unknownFormatDocIds, setUnknownFormatDocIds] = useState<Set<string>>(new Set());
+  const [sidebarDeals, setSidebarDeals] = useState<DealListItem[]>([]);
+  const [sidebarDealsExpanded, setSidebarDealsExpanded] = useState(false);
+  const [userInitials, setUserInitials] = useState('AN');
+
+  // Drill-down modal for clickable analysis tables
+  const [drillModal, setDrillModal] = useState<{
+    title: string;
+    color: string;
+    rows: Array<Record<string, unknown>>;
+    type: 'entity' | 'txn';
+  } | null>(null);
 
   const onDrop = useCallback((accepted: File[]) => {
     if (accepted.length) setFile(accepted[0]);
@@ -661,29 +662,7 @@ function V1DealPageInner() {
     }
   };
 
-  const handleAsk = async (overrideMessage?: string) => {
-    const message = overrideMessage || reviewQuestion.trim();
-    if (!deal || !message) return;
-    const now = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    if (!overrideMessage) {
-      setChatHistory((prev) => [...prev, { role: 'analyst', text: message, time: now }]);
-      setReviewQuestion('');
-    }
-    setReviewLoading(true);
-    setReviewAnswer('');
-    try {
-      const result = await askParityReview(deal.id, message, conversationHistory);
-      const answerTime = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      setChatHistory((prev) => [...prev, { role: 'parity', text: result.response, time: answerTime }]);
-      setConversationHistory(result.conversation_history);
-      setReviewAnswer(result.response);
-    } catch (e) {
-      const errText = e instanceof Error ? e.message : 'Request failed';
-      setChatHistory((prev) => [...prev, { role: 'parity', text: errText, time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }]);
-    } finally {
-      setReviewLoading(false);
-    }
-  };
+  // handleAsk — moved to ParityReviewChat component
 
   // Load needs-review items when analysis completes
   useEffect(() => {
@@ -692,19 +671,7 @@ function V1DealPageInner() {
     }
   }, [analysisState, deal?.id]);
 
-  useEffect(() => {
-    if (!deal?.id) return;
-    const key = `parity-interacted-${deal.id}`;
-    if (localStorage.getItem(key) === 'true') setParityInputInteracted(true);
-  }, [deal?.id]);
-
-  // Auto-trigger proactive analysis when review tab opens and corpus is ready
-  useEffect(() => {
-    if (activeTab === 'review' && analysisState === 'done' && deal?.id && !proactiveTriggered && chatHistory.length === 0) {
-      setProactiveTriggered(true);
-      handleAsk('start');
-    }
-  }, [activeTab, analysisState, deal?.id, proactiveTriggered, chatHistory.length]);
+  // parityInputInteracted, proactive analysis trigger — moved to ParityReviewChat
 
   const handleParserRequestSubmit = async () => {
     if (!unknownParserDoc || !parserRequestForm.bankName.trim()) return;
@@ -924,8 +891,8 @@ function V1DealPageInner() {
     ];
   })();
 
-  const TABS = ['documents', 'analysis', 'review', 'snapshot'] as const;
-  const TAB_LABELS: Record<string, string> = { documents: 'Documents', analysis: 'Analysis', review: 'Parity Review', snapshot: 'Snapshot' };
+  const TABS = ['documents', 'analysis', 'review', 'queue', 'snapshot'] as const;
+  const TAB_LABELS: Record<string, string> = { documents: 'Documents', analysis: 'Analysis', review: 'Parity Review', queue: 'Review Queue', snapshot: 'Snapshot' };
 
   const StatusDot = ({ status }: { status: StageStatus }) => {
     const colors: Record<StageStatus, string> = { done: '#4ADE80', active: '#818CF8', queued: '#374151', failed: '#F87171' };
@@ -1038,19 +1005,61 @@ function V1DealPageInner() {
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: '#6366F1', letterSpacing: '0.08em', fontWeight: 700 }}>P/ PARITY<span style={{ fontSize: 9, verticalAlign: 'super', color: '#4A5568' }}>v2.0</span></div>
           {dealName && <div style={{ fontSize: 10, color: '#4A5568', marginTop: 6, letterSpacing: '0.08em', background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 4, padding: '3px 8px', display: 'inline-flex', gap: 6 }}>{dealName.toUpperCase()}</div>}
         </div>
-        <nav style={{ flex: 1, padding: '12px 0' }}>
+        <nav style={{ flex: 1, padding: '12px 0', overflowY: 'auto' }}>
+          {/* Deals list section */}
+          <button
+            onClick={() => setSidebarDealsExpanded(!sidebarDealsExpanded)}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '6px 16px 8px', background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
+          >
+            <span style={{ fontSize: 9, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>DEALS</span>
+            <span style={{ fontSize: 9, color: '#374151', fontFamily: "'IBM Plex Mono', monospace" }}>{sidebarDeals.length > 0 ? sidebarDeals.length : ''} {sidebarDealsExpanded ? '▾' : '▸'}</span>
+          </button>
+          {sidebarDealsExpanded && (
+            <div style={{ marginBottom: 8 }}>
+              {sidebarDeals.length === 0 && (
+                <div style={{ padding: '6px 16px', fontSize: 11, color: '#2D3748' }}>No deals yet</div>
+              )}
+              {sidebarDeals.map((d) => {
+                const isActive = deal?.id === d.id;
+                const name = (d.company_name || d.name || 'Untitled') as string;
+                return (
+                  <button
+                    key={d.id}
+                    onClick={() => router.push(`/v1/deal?deal_id=${d.id}`)}
+                    style={{ display: 'block', width: '100%', padding: '6px 16px 6px 18px', background: isActive ? 'rgba(99,102,241,0.08)' : 'transparent', borderLeft: isActive ? '2px solid #6366F1' : '2px solid transparent', border: 'none', color: isActive ? '#A5B4FC' : '#4A5568', fontSize: 11, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  >
+                    {name}
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => router.push('/deals/new')}
+                style={{ display: 'block', width: '100%', padding: '6px 16px', background: 'transparent', border: 'none', color: '#6366F1', fontSize: 11, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left' }}
+              >
+                + New deal
+              </button>
+            </div>
+          )}
+
+          {/* Divider */}
+          {deal && <div style={{ margin: '4px 16px 8px', borderTop: '1px solid #1A2235' }} />}
+
           {[
             { label: 'Documents', tab: 'documents' as const },
             { label: 'Analysis', tab: 'analysis' as const },
             { label: 'Parity Review', tab: 'review' as const },
+            { label: 'Review Queue', tab: 'queue' as const, badge: needsReviewItems.length > 0 ? needsReviewItems.length : undefined },
             { label: 'Snapshot', tab: 'snapshot' as const },
           ].map((item) => (
             <button
               key={item.tab}
               onClick={() => setActiveTab(item.tab)}
-              style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '9px 16px', background: activeTab === item.tab ? 'rgba(99,102,241,0.1)' : 'transparent', borderLeft: activeTab === item.tab ? '2px solid #6366F1' : '2px solid transparent', border: 'none', color: activeTab === item.tab ? '#A5B4FC' : '#4A5568', fontSize: 13, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left' }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '9px 16px', background: activeTab === item.tab ? 'rgba(99,102,241,0.1)' : 'transparent', borderLeft: activeTab === item.tab ? '2px solid #6366F1' : '2px solid transparent', border: 'none', color: activeTab === item.tab ? '#A5B4FC' : '#4A5568', fontSize: 13, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left' }}
             >
-              {item.label}
+              <span>{item.label}</span>
+              {'badge' in item && item.badge != null && (
+                <span style={{ fontSize: 9, fontWeight: 700, color: '#F59E0B', background: 'rgba(245,158,11,0.1)', padding: '1px 5px', borderRadius: 3, fontFamily: "'IBM Plex Mono', monospace" }}>{item.badge}</span>
+              )}
             </button>
           ))}
           <div style={{ margin: '12px 0 4px', padding: '0 16px', fontSize: 9, color: '#2D3748', letterSpacing: '0.1em' }}>DEAL TOOLS</div>
@@ -1571,7 +1580,13 @@ function V1DealPageInner() {
                                 {['ENTITY', 'ROLE', 'AMOUNT', 'TXNS'].map((h) => <span key={h} style={{ fontSize: 10, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>{h}</span>)}
                               </div>
                               {entityBreakdown.slice(0, 10).map((r) => (
-                                <div key={r.entityId} style={{ display: 'grid', gridTemplateColumns: '1fr 100px 120px 50px', gap: 8, padding: '10px 0', borderBottom: '1px solid #1A2235', alignItems: 'center' }}>
+                                <div key={r.entityId} onClick={() => {
+                                  const txns = (rawTransactions as Array<Record<string, unknown>>).filter(t => String(t.entity_id ?? '') === r.entityId || String(t.entity_name ?? '') === r.entityName);
+                                  setDrillModal({ title: r.entityName, color: '#6366F1', rows: txns, type: 'txn' });
+                                }} style={{ display: 'grid', gridTemplateColumns: '1fr 100px 120px 50px', gap: 8, padding: '10px 0', borderBottom: '1px solid #1A2235', alignItems: 'center', cursor: 'pointer', transition: 'background 0.15s' }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99,102,241,0.06)')}
+                                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                                >
                                   <span style={{ fontSize: 12, color: r.role === 'needs_review' ? '#F59E0B' : '#CBD5E1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: r.role === 'needs_review' ? 600 : 400 }}>{r.entityName}</span>
                                   <span style={{ fontSize: 10, fontWeight: 600, color: roleBadgeColor[r.role] ?? '#374151', background: `${roleBadgeColor[r.role] ?? '#374151'}18`, padding: '2px 5px', borderRadius: 3, letterSpacing: '0.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.role.replace(/_/g, '_')}</span>
                                   <span style={{ fontSize: 12, color: '#94A3B8', fontFamily: "'IBM Plex Mono', monospace" }}>{formatCents(r.totalAbsCents)}</span>
@@ -1589,7 +1604,7 @@ function V1DealPageInner() {
                               <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>ITEMS REQUIRING REVIEW</span>
                               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                                 <span style={{ fontSize: 10, fontWeight: 700, color: '#F59E0B', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.25)', padding: '2px 7px', borderRadius: 3 }}>{needsReviewItems.length} flagged</span>
-                                <button onClick={() => setActiveTab('review')} style={{ fontSize: 10, color: '#6366F1', background: 'transparent', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 3, padding: '2px 8px', cursor: 'pointer' }}>Review →</button>
+                                <button onClick={() => setActiveTab('queue')} style={{ fontSize: 10, color: '#6366F1', background: 'transparent', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 3, padding: '2px 8px', cursor: 'pointer' }}>Review →</button>
                               </div>
                             </div>
                             <div style={{ padding: '8px 0' }}>
@@ -1629,13 +1644,32 @@ function V1DealPageInner() {
                             const total = rows.reduce((s, r) => s + r.totalAbsCents, 0);
                             return (
                               <div key={section.label} style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden' }}>
-                                <div style={{ padding: '12px 16px', borderBottom: '1px solid #1A2235', borderLeft: `3px solid ${section.color}` }}>
+                                <div onClick={() => {
+                                  const allRows = entityBreakdown.filter((r) =>
+                                    section.role ? r.role === section.role : (section.roles ?? []).includes(r.role)
+                                  );
+                                  const allTxns = (rawTransactions as Array<Record<string, unknown>>).filter(t => {
+                                    const eid = String(t.entity_id ?? '');
+                                    return allRows.some(r => r.entityId === eid);
+                                  }).sort((a, b) => Math.abs(Number(b.signed_amount_cents ?? 0)) - Math.abs(Number(a.signed_amount_cents ?? 0)));
+                                  setDrillModal({ title: section.label, color: section.color, rows: allTxns, type: 'txn' });
+                                }} style={{ padding: '12px 16px', borderBottom: '1px solid #1A2235', borderLeft: `3px solid ${section.color}`, cursor: 'pointer', transition: 'background 0.15s' }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99,102,241,0.06)')}
+                                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                                >
                                   <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>{section.label}</span>
+                                  <span style={{ fontSize: 9, color: '#374151', marginLeft: 8 }}>click to view all</span>
                                 </div>
                                 <div style={{ padding: '4px 0' }}>
                                   {rows.length === 0 && <div style={{ padding: '12px 16px', fontSize: 12, color: '#374151' }}>None detected</div>}
                                   {rows.map((r) => (
-                                    <div key={r.entityId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 16px', borderBottom: '1px solid #1A2235' }}>
+                                    <div key={r.entityId} onClick={() => {
+                                      const txns = (rawTransactions as Array<Record<string, unknown>>).filter(t => String(t.entity_id ?? '') === r.entityId || String(t.entity_name ?? '') === r.entityName);
+                                      setDrillModal({ title: `${section.label} — ${r.entityName}`, color: section.color, rows: txns, type: 'txn' });
+                                    }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 16px', borderBottom: '1px solid #1A2235', cursor: 'pointer', transition: 'background 0.15s' }}
+                                      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99,102,241,0.06)')}
+                                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                                    >
                                       <div style={{ flex: 1, minWidth: 0 }}>
                                         <div style={{ fontSize: 12, color: '#CBD5E1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.entityName}</div>
                                         <div style={{ fontSize: 10, color: section.color, fontFamily: "'IBM Plex Mono', monospace", marginTop: 2 }}>{(r.pctBps / 100).toFixed(1)}% of category</div>
@@ -1669,8 +1703,17 @@ function V1DealPageInner() {
                               .slice(0, 8);
                             return (
                               <div key={section.label} style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden' }}>
-                                <div style={{ padding: '12px 16px', borderBottom: '1px solid #1A2235', borderLeft: `3px solid ${section.color}` }}>
+                                <div onClick={() => {
+                                  const allTxns = (rawTransactions as Array<Record<string, unknown>>)
+                                    .filter(section.filter)
+                                    .sort((a, b) => Math.abs(Number(b.signed_amount_cents ?? 0)) - Math.abs(Number(a.signed_amount_cents ?? 0)));
+                                  setDrillModal({ title: section.label, color: section.color, rows: allTxns, type: 'txn' });
+                                }} style={{ padding: '12px 16px', borderBottom: '1px solid #1A2235', borderLeft: `3px solid ${section.color}`, cursor: 'pointer', transition: 'background 0.15s' }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99,102,241,0.06)')}
+                                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                                >
                                   <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>{section.label}</span>
+                                  <span style={{ fontSize: 9, color: '#374151', marginLeft: 8 }}>click to view all</span>
                                 </div>
                                 <div style={{ padding: '4px 0' }}>
                                   {txns.map((t, i) => (
@@ -1703,127 +1746,16 @@ function V1DealPageInner() {
             const reconDelta = creditScoringInputs ? (creditScoringInputs.average_net_monthly_cents as number ?? 0) : 0;
             const confidence = snapshot?.confidence_score ?? (exportData?.analysis_run as any)?.confidence_score ?? null;
             const corpusReady = analysisState === 'done';
-            const SUGGESTION_CHIPS = [
-              'What is the average monthly net cashflow?',
-              'Which entities represent the highest concentration risk?',
-              'Are there any irregular payroll patterns?',
-              'What is the peak debt service coverage ratio?',
-            ];
             return (
               <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
-                {/* Left: Chat area */}
+                {/* Left: Chat area — isolated component to avoid full-page re-renders on keystroke */}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  {/* Header */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                    <span style={{ fontSize: 15, fontWeight: 700, color: '#CBD5E1', letterSpacing: '0.02em' }}>Ask Parity</span>
-                    <span style={{
-                      fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', padding: '2px 8px', borderRadius: 3,
-                      background: corpusReady ? 'rgba(74,222,128,0.12)' : 'rgba(99,102,241,0.12)',
-                      color: corpusReady ? '#4ADE80' : '#818CF8',
-                      border: `1px solid ${corpusReady ? 'rgba(74,222,128,0.25)' : 'rgba(99,102,241,0.25)'}`,
-                    }}>
-                      {corpusReady ? 'READY' : 'PENDING'}
-                    </span>
-                  </div>
-
-                  {/* Corpus description card */}
-                  {!corpusReady && (
-                    <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: '14px 18px', marginBottom: 16 }}>
-                      <div style={{ fontSize: 12, color: '#4A5568', lineHeight: 1.6 }}>
-                        Parity Intelligence is available once analysis completes. Run analysis from the Documents tab to activate.
-                      </div>
-                    </div>
-                  )}
-                  {corpusReady && chatHistory.length === 0 && !reviewLoading && (
-                    <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: '14px 18px', marginBottom: 16 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: '#374151', letterSpacing: '0.08em', marginBottom: 6 }}>CORPUS LOADED</div>
-                      <div style={{ fontSize: 12, color: '#4A5568', lineHeight: 1.6 }}>
-                        {txnTotal > 0 ? `${txnTotal} transactions` : 'Transactions'} across {statementQueue.filter(s => s.status === 'ready').length || 1} statement{statementQueue.filter(s => s.status === 'ready').length !== 1 ? 's' : ''} indexed. Ask any question about this borrower's financial history.
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Chat history */}
-                  {chatHistory.length > 0 && (
-                    <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                      {chatHistory.map((msg, i) => (
-                        <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: msg.role === 'analyst' ? 'flex-end' : 'flex-start' }}>
-                          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                            <span style={{ fontSize: 9, fontWeight: 700, color: msg.role === 'analyst' ? '#6366F1' : '#4ADE80', letterSpacing: '0.1em', fontFamily: "'IBM Plex Mono', monospace" }}>
-                              {msg.role === 'analyst' ? 'ANALYST' : 'PARITY'}
-                            </span>
-                            <span style={{ fontSize: 9, color: '#2D3748', fontFamily: "'IBM Plex Mono', monospace" }}>{msg.time}</span>
-                          </div>
-                          <div style={{
-                            maxWidth: '85%',
-                            background: msg.role === 'analyst' ? 'rgba(99,102,241,0.1)' : '#0D1220',
-                            border: `1px solid ${msg.role === 'analyst' ? 'rgba(99,102,241,0.2)' : '#1E2A3A'}`,
-                            borderRadius: msg.role === 'analyst' ? '8px 8px 2px 8px' : '8px 8px 8px 2px',
-                            padding: '10px 14px',
-                          }}>
-                            {msg.role === 'parity' ? (
-                              <div style={{ fontSize: 13, color: '#CBD5E1', lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: simpleMarkdownToHtml(msg.text) }} />
-                            ) : (
-                              <p style={{ fontSize: 13, color: '#A5B4FC', lineHeight: 1.6, whiteSpace: 'pre-line', margin: 0 }}>{msg.text}</p>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                      {reviewLoading && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
-                          <span style={{ fontSize: 9, fontWeight: 700, color: '#4ADE80', letterSpacing: '0.1em', fontFamily: "'IBM Plex Mono', monospace" }}>PARITY</span>
-                          <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: '8px 8px 8px 2px', padding: '10px 14px' }}>
-                            <span style={{ fontSize: 13, color: '#374151' }}>Computing…</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Suggestion chips */}
-                  {corpusReady && chatHistory.length <= 1 && !reviewLoading && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
-                      {SUGGESTION_CHIPS.map((chip) => (
-                        <button
-                          key={chip}
-                          onClick={() => { setReviewQuestion(chip); }}
-                          style={{ padding: '5px 12px', background: 'transparent', border: '1px solid #1E2A3A', borderRadius: 20, fontSize: 11, color: '#4A5568', cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif", transition: 'all 0.15s' }}
-                          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '#6366F1'; (e.currentTarget as HTMLElement).style.color = '#A5B4FC'; }}
-                          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '#1E2A3A'; (e.currentTarget as HTMLElement).style.color = '#4A5568'; }}
-                        >
-                          {chip}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Input */}
-                  <div
-                    className={!parityInputInteracted ? 'parity-input-attention' : undefined}
-                    onClick={() => { if (!parityInputInteracted) { setParityInputInteracted(true); if (deal?.id) localStorage.setItem(`parity-interacted-${deal.id}`, 'true'); } }}
-                    onFocus={() => { if (!parityInputInteracted) { setParityInputInteracted(true); if (deal?.id) localStorage.setItem(`parity-interacted-${deal.id}`, 'true'); } }}
-                    style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: 14 }}
-                  >
-                    <textarea
-                      value={reviewQuestion}
-                      onChange={(e) => setReviewQuestion(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void handleAsk(); }}
-                      placeholder={corpusReady ? "Ask anything about this borrower's financials…" : 'Run analysis first to enable Parity Review…'}
-                      disabled={!corpusReady || reviewLoading}
-                      rows={2}
-                      style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', padding: 0, fontSize: 13, color: '#CBD5E1', resize: 'none', fontFamily: "'IBM Plex Sans', sans-serif", boxSizing: 'border-box', opacity: !corpusReady ? 0.4 : 1 }}
-                    />
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10, gap: 8, alignItems: 'center' }}>
-                      <span style={{ fontSize: 10, color: '#2D3748', fontFamily: "'IBM Plex Mono', monospace" }}>⌘↵ to send</span>
-                      <button
-                        onClick={() => void handleAsk()}
-                        disabled={!corpusReady || reviewLoading || !reviewQuestion.trim()}
-                        style={{ padding: '7px 16px', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 600, cursor: !corpusReady || reviewLoading || !reviewQuestion.trim() ? 'not-allowed' : 'pointer', opacity: !corpusReady || reviewLoading || !reviewQuestion.trim() ? 0.4 : 1 }}
-                      >
-                        {reviewLoading ? 'Computing…' : 'Ask →'}
-                      </button>
-                    </div>
-                  </div>
+                  <ParityReviewChat
+                    dealId={deal!.id}
+                    corpusReady={corpusReady}
+                    txnTotal={txnTotal}
+                    statementCount={statementQueue.filter(s => s.status === 'ready').length}
+                  />
                 </div>
 
                 {/* Right: Corpus state sidebar */}
@@ -1847,12 +1779,12 @@ function V1DealPageInner() {
 
                   {/* Override queue */}
                   <button
-                    onClick={() => setActiveTab('analysis')}
+                    onClick={() => setActiveTab('queue')}
                     style={{ width: '100%', padding: '9px 12px', background: 'transparent', border: '1px solid #1E2A3A', borderRadius: 6, color: '#64748B', fontSize: 12, cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif", textAlign: 'left', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                     onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '#6366F1'; (e.currentTarget as HTMLElement).style.color = '#A5B4FC'; }}
                     onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '#1E2A3A'; (e.currentTarget as HTMLElement).style.color = '#64748B'; }}
                   >
-                    <span>Override queue</span>
+                    <span>Review queue</span>
                     <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: needsReviewItems.length > 0 ? '#F59E0B' : '#374151' }}>({needsReviewItems.length}) →</span>
                   </button>
 
@@ -1868,6 +1800,22 @@ function V1DealPageInner() {
               </div>
             );
           })()}
+
+          {/* ── REVIEW QUEUE TAB ── Override / Reclassify */}
+          {activeTab === 'queue' && deal && (
+            <div style={{ maxWidth: 820 }}>
+              <ReviewQueue
+                dealId={deal.id}
+                analystInitials={userInitials}
+                onQueueUpdate={(remaining) => {
+                  setNeedsReviewItems(prev => {
+                    if (prev.length === remaining) return prev;
+                    return prev.slice(0, remaining);
+                  });
+                }}
+              />
+            </div>
+          )}
 
           {/* ── SNAPSHOT TAB ── */}
           {activeTab === 'snapshot' && (
@@ -2028,6 +1976,47 @@ function V1DealPageInner() {
                 >
                   Done
                 </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Transaction Drill-Down Modal ── */}
+      {drillModal && (
+        <div onClick={() => setDrillModal(null)} style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(8,12,24,0.85)', backdropFilter: 'blur(4px)' }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 10, width: 680, maxWidth: '92vw', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 24px', borderBottom: '1px solid #1A2235', borderLeft: `3px solid ${drillModal.color}`, flexShrink: 0 }}>
+              <div>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#CBD5E1' }}>{drillModal.title}</span>
+                <span style={{ fontSize: 11, color: '#374151', marginLeft: 10, fontFamily: "'IBM Plex Mono', monospace" }}>{drillModal.rows.length} transaction{drillModal.rows.length !== 1 ? 's' : ''}</span>
+              </div>
+              <button onClick={() => setDrillModal(null)} style={{ background: 'transparent', border: 'none', color: '#374151', fontSize: 18, cursor: 'pointer', padding: '0 0 0 12px', lineHeight: 1 }}>×</button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr 120px', gap: 8, padding: '10px 24px', borderBottom: '1px solid #1A2235', flexShrink: 0 }}>
+              {['DATE', 'DESCRIPTION', 'AMOUNT'].map((h) => <span key={h} style={{ fontSize: 9, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>{h}</span>)}
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {drillModal.rows.length === 0 && (
+                <div style={{ padding: '32px 24px', textAlign: 'center', color: '#374151', fontSize: 12 }}>No transactions found for this entity.</div>
+              )}
+              {drillModal.rows.map((t, i) => {
+                const amt = Number(t.signed_amount_cents ?? 0);
+                return (
+                  <div key={i} style={{ display: 'grid', gridTemplateColumns: '100px 1fr 120px', gap: 8, padding: '9px 24px', borderBottom: '1px solid #1A2235', alignItems: 'center' }}>
+                    <span style={{ fontSize: 11, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace" }}>{(t.txn_date ?? '') as string}</span>
+                    <span style={{ fontSize: 12, color: '#CBD5E1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(t.description || t.narrative || '—') as string}</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: amt >= 0 ? '#4ADE80' : '#F87171', fontFamily: "'IBM Plex Mono', monospace", textAlign: 'right' }}>{formatCents(Math.abs(amt))}</span>
+                  </div>
+                );
+              })}
+            </div>
+            {drillModal.rows.length > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 24px', borderTop: '1px solid #1A2235', flexShrink: 0 }}>
+                <span style={{ fontSize: 11, color: '#374151' }}>Total</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: drillModal.color, fontFamily: "'IBM Plex Mono', monospace" }}>
+                  {formatCents(drillModal.rows.reduce((s, t) => s + Math.abs(Number(t.signed_amount_cents ?? 0)), 0))}
+                </span>
               </div>
             )}
           </div>
