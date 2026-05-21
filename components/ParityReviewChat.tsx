@@ -9,10 +9,12 @@ function mdToHtml(md: string): string {
   return md
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/^## (.+)$/gm, '<h3 style="font-size:13px;font-weight:700;margin:12px 0 4px;color:#A5B4FC">$1</h3>')
+    .replace(/^### (.+)$/gm, '<h4 style="font-size:12px;font-weight:700;margin:10px 0 3px;color:#94A3B8">$1</h4>')
     .replace(/^---$/gm, '<hr style="border:none;border-top:1px solid #1E2A3A;margin:8px 0"/>')
     .replace(/\*\*(.+?)\*\*/g, '<strong style="color:#E2E8F0">$1</strong>')
-    .replace(/^• (.+)$/gm, '<div style="padding-left:12px;margin:2px 0">• $1</div>')
-    .replace(/^- (.+)$/gm, '<div style="padding-left:12px;margin:2px 0">• $1</div>')
+    .replace(/^• (.+)$/gm, '<div style="padding-left:12px;margin:2px 0">· $1</div>')
+    .replace(/^- (.+)$/gm, '<div style="padding-left:12px;margin:2px 0">· $1</div>')
+    .replace(/[📊💡🏦📈📉⚠️✅❌🔍💰📋🏢📌🔎💼📁📂🗂️📄📃📑🔔🔕]/gu, '')
     .replace(/\n{2,}/g, '<br/>')
 }
 
@@ -44,6 +46,7 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([])
   const [conversationHistory, setConversationHistory] = useState<Array<{ role: string; content: unknown }>>([])
   const [proactiveTriggered, setProactiveTriggered] = useState(false)
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Auto-scroll on new messages
@@ -86,13 +89,34 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); doAsk() }
   }
 
+  const copyToClipboard = (text: string, idx: number) => {
+    // Strip HTML/markdown for clean paste
+    const clean = text
+      .replace(/\*\*/g, '')
+      .replace(/^## /gm, '')
+      .replace(/^### /gm, '')
+      .replace(/^---$/gm, '---')
+      .replace(/[📊💡🏦📈📉⚠️✅❌🔍💰📋🏢📌🔎💼📁📂🗂️📄📃📑🔔🔕]/gu, '')
+      .trim()
+    navigator.clipboard.writeText(clean)
+    setCopiedIdx(idx)
+    setTimeout(() => setCopiedIdx(null), 2000)
+  }
+
   return (
     <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+      <style>{`
+        @keyframes parityDot {
+          0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
+          40% { opacity: 1; transform: scale(1); }
+        }
+      `}</style>
+
       {/* Left: Chat area */}
       <div style={{ flex: 1, minWidth: 0 }}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-          <span style={{ fontSize: 15, fontWeight: 700, color: '#CBD5E1', letterSpacing: '0.02em' }}>Ask Parity</span>
+          <span style={{ fontSize: 15, fontWeight: 700, color: '#CBD5E1', letterSpacing: '0.02em' }}>Parity Review</span>
           <span style={{
             fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', padding: '2px 8px', borderRadius: 3,
             background: corpusReady ? 'rgba(74,222,128,0.12)' : 'rgba(99,102,241,0.12)',
@@ -133,16 +157,31 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
                     <span style={{ fontSize: 9, color: '#2D3748', fontFamily: "'IBM Plex Mono', monospace" }}>{msg.time}</span>
                   </div>
                   <div style={{
-                    maxWidth: '85%',
+                    maxWidth: '85%', position: 'relative',
                     background: msg.role === 'analyst' ? 'rgba(99,102,241,0.1)' : '#0D1220',
                     border: `1px solid ${msg.role === 'analyst' ? 'rgba(99,102,241,0.2)' : '#1E2A3A'}`,
                     borderRadius: msg.role === 'analyst' ? '8px 8px 2px 8px' : '8px 8px 8px 2px',
                     padding: '10px 14px',
                   }}>
                     {msg.role === 'parity' ? (
-                      <div style={{ fontSize: 13, color: '#CBD5E1', lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: mdToHtml(msg.text) }} />
+                      <>
+                        <div style={{ fontSize: 13, color: '#CBD5E1', lineHeight: 1.6, userSelect: 'text' }} dangerouslySetInnerHTML={{ __html: mdToHtml(msg.text) }} />
+                        <button
+                          onClick={(e) => { e.stopPropagation(); copyToClipboard(msg.text, i) }}
+                          style={{
+                            position: 'absolute', top: 6, right: 6, padding: '3px 8px',
+                            background: copiedIdx === i ? 'rgba(74,222,128,0.15)' : 'rgba(99,102,241,0.08)',
+                            border: `1px solid ${copiedIdx === i ? 'rgba(74,222,128,0.3)' : '#1E2A3A'}`,
+                            borderRadius: 3, fontSize: 9, fontWeight: 600, cursor: 'pointer',
+                            color: copiedIdx === i ? '#4ADE80' : '#4A5568',
+                            fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.06em',
+                          }}
+                        >
+                          {copiedIdx === i ? 'COPIED' : 'COPY'}
+                        </button>
+                      </>
                     ) : (
-                      <p style={{ fontSize: 13, color: '#A5B4FC', lineHeight: 1.6, whiteSpace: 'pre-line', margin: 0 }}>{msg.text}</p>
+                      <p style={{ fontSize: 13, color: '#A5B4FC', lineHeight: 1.6, whiteSpace: 'pre-line', margin: 0, userSelect: 'text' }}>{msg.text}</p>
                     )}
                   </div>
                 </div>
@@ -150,8 +189,11 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
               {loading && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
                   <span style={{ fontSize: 9, fontWeight: 700, color: '#4ADE80', letterSpacing: '0.1em', fontFamily: "'IBM Plex Mono', monospace" }}>PARITY</span>
-                  <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: '8px 8px 8px 2px', padding: '10px 14px' }}>
-                    <span style={{ fontSize: 13, color: '#374151' }}>Computing…</span>
+                  <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: '8px 8px 8px 2px', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    {[0, 1, 2].map(n => (
+                      <span key={n} style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ADE80', display: 'inline-block', animation: `parityDot 1.4s ${n * 0.2}s infinite ease-in-out` }} />
+                    ))}
+                    <span style={{ fontSize: 11, color: '#374151', marginLeft: 8, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.06em' }}>COMPUTING</span>
                   </div>
                 </div>
               )}
@@ -160,8 +202,11 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
           {chatHistory.length === 0 && loading && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
               <span style={{ fontSize: 9, fontWeight: 700, color: '#4ADE80', letterSpacing: '0.1em', fontFamily: "'IBM Plex Mono', monospace" }}>PARITY</span>
-              <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: '8px 8px 8px 2px', padding: '10px 14px' }}>
-                <span style={{ fontSize: 13, color: '#374151' }}>Analyzing snapshot…</span>
+              <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: '8px 8px 8px 2px', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                {[0, 1, 2].map(n => (
+                  <span key={n} style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ADE80', display: 'inline-block', animation: `parityDot 1.4s ${n * 0.2}s infinite ease-in-out` }} />
+                ))}
+                <span style={{ fontSize: 11, color: '#374151', marginLeft: 8, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.06em' }}>ANALYZING SNAPSHOT</span>
               </div>
             </div>
           )}
@@ -190,19 +235,19 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={corpusReady ? "Ask anything about this borrower's financials…" : 'Run analysis first to enable Parity Review…'}
+            placeholder={corpusReady ? "Ask anything about this borrower's financials..." : 'Run analysis first to enable Parity Review...'}
             disabled={!corpusReady || loading}
             rows={2}
             style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', padding: 0, fontSize: 13, color: '#CBD5E1', resize: 'none', fontFamily: "'IBM Plex Sans', sans-serif", boxSizing: 'border-box', opacity: !corpusReady ? 0.4 : 1 }}
           />
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10, gap: 8, alignItems: 'center' }}>
-            <span style={{ fontSize: 10, color: '#2D3748', fontFamily: "'IBM Plex Mono', monospace" }}>⌘↵ to send</span>
+            <span style={{ fontSize: 10, color: '#2D3748', fontFamily: "'IBM Plex Mono', monospace" }}>ctrl+enter to send</span>
             <button
               onClick={() => void doAsk()}
               disabled={!corpusReady || loading || !question.trim()}
-              style={{ padding: '7px 16px', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 600, cursor: !corpusReady || loading || !question.trim() ? 'not-allowed' : 'pointer', opacity: !corpusReady || loading || !question.trim() ? 0.4 : 1 }}
+              style={{ padding: '7px 16px', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 600, cursor: !corpusReady || loading || !question.trim() ? 'not-allowed' : 'pointer', opacity: !corpusReady || loading || !question.trim() ? 0.4 : 1, fontFamily: "'IBM Plex Sans', sans-serif" }}
             >
-              {loading ? 'Computing…' : 'Ask →'}
+              {loading ? 'Computing...' : 'Send'}
             </button>
           </div>
         </div>

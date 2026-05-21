@@ -81,7 +81,7 @@ export default function DashboardPage() {
           <div style={{ padding: '9px 16px', color: '#2D3748', fontSize: 13 }}>Benchmarks</div>
           <div style={{ padding: '12px 16px 6px', fontSize: 9, color: '#2D3748', letterSpacing: '0.12em', fontWeight: 600, marginTop: 4 }}>SWITCH MODE</div>
           <div style={{ padding: '9px 16px', color: '#374151', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span>⇌</span> Credit officer view
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11 }}>&lt;&gt;</span> Credit officer view
           </div>
         </nav>
         <div style={{ padding: '12px 16px', borderTop: '1px solid #1A2235' }}>

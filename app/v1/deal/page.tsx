@@ -161,8 +161,28 @@ function V1DealPageInner() {
   // Tracks doc IDs confirmed as "unsupported format" — used to show inline CTA in FileRow
   const [unknownFormatDocIds, setUnknownFormatDocIds] = useState<Set<string>>(new Set());
   const [sidebarDeals, setSidebarDeals] = useState<DealListItem[]>([]);
-  const [sidebarDealsExpanded, setSidebarDealsExpanded] = useState(false);
+  const [pinnedDealIds, setPinnedDealIds] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set();
+    try { return new Set(JSON.parse(localStorage.getItem('parity_pinned_deals') ?? '[]')); } catch { return new Set(); }
+  });
+  const [showDealList, setShowDealList] = useState(false);
   const [userInitials, setUserInitials] = useState('AN');
+
+  const togglePinDeal = useCallback((dealId: string) => {
+    setPinnedDealIds(prev => {
+      const next = new Set(prev);
+      if (next.has(dealId)) next.delete(dealId); else next.add(dealId);
+      localStorage.setItem('parity_pinned_deals', JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+
+  // Auto-pin current deal
+  useEffect(() => {
+    if (deal?.id && !pinnedDealIds.has(deal.id)) {
+      togglePinDeal(deal.id);
+    }
+  }, [deal?.id]);
 
   // Drill-down modal for clickable analysis tables
   const [drillModal, setDrillModal] = useState<{
@@ -1006,38 +1026,65 @@ function V1DealPageInner() {
           {dealName && <div style={{ fontSize: 10, color: '#4A5568', marginTop: 6, letterSpacing: '0.08em', background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 4, padding: '3px 8px', display: 'inline-flex', gap: 6 }}>{dealName.toUpperCase()}</div>}
         </div>
         <nav style={{ flex: 1, padding: '12px 0', overflowY: 'auto' }}>
-          {/* Deals list section */}
+          {/* Pinned deals + Deals browser */}
           <button
-            onClick={() => setSidebarDealsExpanded(!sidebarDealsExpanded)}
+            onClick={() => setShowDealList(!showDealList)}
             style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '6px 16px 8px', background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
           >
-            <span style={{ fontSize: 9, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>DEALS</span>
-            <span style={{ fontSize: 9, color: '#374151', fontFamily: "'IBM Plex Mono', monospace" }}>{sidebarDeals.length > 0 ? sidebarDeals.length : ''} {sidebarDealsExpanded ? '▾' : '▸'}</span>
+            <span style={{ fontSize: 9, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>PINNED</span>
+            <span style={{ fontSize: 9, color: '#374151', fontFamily: "'IBM Plex Mono', monospace" }}>{pinnedDealIds.size > 0 ? pinnedDealIds.size : ''}</span>
           </button>
-          {sidebarDealsExpanded && (
-            <div style={{ marginBottom: 8 }}>
+          {/* Pinned deals — always visible */}
+          {sidebarDeals.filter(d => pinnedDealIds.has(d.id)).map((d) => {
+            const isActive = deal?.id === d.id;
+            const name = (d.company_name || d.name || 'Untitled') as string;
+            return (
+              <div key={d.id} style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                <button
+                  onClick={() => router.push(`/v1/deal?deal_id=${d.id}`)}
+                  style={{ flex: 1, display: 'block', padding: '6px 4px 6px 18px', background: isActive ? 'rgba(99,102,241,0.08)' : 'transparent', borderLeft: isActive ? '2px solid #6366F1' : '2px solid transparent', border: 'none', color: isActive ? '#A5B4FC' : '#64748B', fontSize: 11, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
+                  {name}
+                </button>
+                <button
+                  onClick={() => togglePinDeal(d.id)}
+                  title="Unpin deal"
+                  style={{ padding: '2px 8px', background: 'transparent', border: 'none', color: '#2D3748', fontSize: 10, cursor: 'pointer', fontFamily: "'IBM Plex Mono', monospace", flexShrink: 0 }}
+                >x</button>
+              </div>
+            );
+          })}
+
+          {/* All deals overlay */}
+          {showDealList && (
+            <div style={{ margin: '4px 8px', background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 6, overflow: 'hidden' }}>
+              <div style={{ padding: '8px 10px', borderBottom: '1px solid #1A2235', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: '#374151', letterSpacing: '0.1em' }}>ALL DEALS</span>
+                <button onClick={() => setShowDealList(false)} style={{ background: 'transparent', border: 'none', color: '#374151', fontSize: 12, cursor: 'pointer', padding: 0, lineHeight: 1 }}>x</button>
+              </div>
               {sidebarDeals.length === 0 && (
-                <div style={{ padding: '6px 16px', fontSize: 11, color: '#2D3748' }}>No deals yet</div>
+                <div style={{ padding: '10px', fontSize: 11, color: '#2D3748' }}>No deals yet</div>
               )}
               {sidebarDeals.map((d) => {
-                const isActive = deal?.id === d.id;
+                const isPinned = pinnedDealIds.has(d.id);
                 const name = (d.company_name || d.name || 'Untitled') as string;
                 return (
-                  <button
-                    key={d.id}
-                    onClick={() => router.push(`/v1/deal?deal_id=${d.id}`)}
-                    style={{ display: 'block', width: '100%', padding: '6px 16px 6px 18px', background: isActive ? 'rgba(99,102,241,0.08)' : 'transparent', borderLeft: isActive ? '2px solid #6366F1' : '2px solid transparent', border: 'none', color: isActive ? '#A5B4FC' : '#4A5568', fontSize: 11, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                  >
-                    {name}
-                  </button>
+                  <div key={d.id} style={{ display: 'flex', alignItems: 'center', padding: '5px 10px', borderBottom: '1px solid #1A2235', gap: 6 }}>
+                    <button
+                      onClick={() => { router.push(`/v1/deal?deal_id=${d.id}`); setShowDealList(false); }}
+                      style={{ flex: 1, background: 'transparent', border: 'none', color: '#64748B', fontSize: 11, cursor: 'pointer', textAlign: 'left', fontFamily: "'IBM Plex Sans', sans-serif", padding: '2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    >{name}</button>
+                    <button
+                      onClick={() => togglePinDeal(d.id)}
+                      style={{ padding: '2px 6px', background: isPinned ? 'rgba(99,102,241,0.1)' : 'transparent', border: `1px solid ${isPinned ? '#6366F1' : '#1E2A3A'}`, borderRadius: 3, fontSize: 9, color: isPinned ? '#A5B4FC' : '#374151', cursor: 'pointer', fontFamily: "'IBM Plex Mono', monospace", flexShrink: 0 }}
+                    >{isPinned ? 'UNPIN' : 'PIN'}</button>
+                  </div>
                 );
               })}
               <button
-                onClick={() => router.push('/deals/new')}
-                style={{ display: 'block', width: '100%', padding: '6px 16px', background: 'transparent', border: 'none', color: '#6366F1', fontSize: 11, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left' }}
-              >
-                + New deal
-              </button>
+                onClick={() => { router.push('/deals/new'); setShowDealList(false); }}
+                style={{ display: 'block', width: '100%', padding: '8px 10px', background: 'transparent', border: 'none', color: '#6366F1', fontSize: 11, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left' }}
+              >+ New deal</button>
             </div>
           )}
 
@@ -1074,7 +1121,7 @@ function V1DealPageInner() {
             onClick={() => router.push('/parsers/request')}
             style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '9px 16px', background: 'transparent', borderLeft: '2px solid transparent', border: 'none', color: '#4A5568', fontSize: 13, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left', gap: 6 }}
           >
-            <span style={{ fontSize: 14, lineHeight: 1 }}>🔧</span>
+            <span style={{ fontSize: 11, lineHeight: 1, fontFamily: "'IBM Plex Mono', monospace", color: '#374151' }}>//</span>
             Request Parser
           </button>
         </nav>
