@@ -21,7 +21,7 @@ from .tools.explain_flags import explain_flagged_item
 
 logger = logging.getLogger(__name__)
 
-MODEL = "claude-sonnet-4-6-20250514"
+MODEL = "claude-sonnet-4-6"
 MAX_TOKENS = 4096
 MAX_TOOL_ROUNDS = 5  # prevent infinite loops
 

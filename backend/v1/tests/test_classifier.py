@@ -399,3 +399,39 @@ class TestKRATaxPayment:
         role, _ = classify_with_reason(txn("kra tax refund overpayment", 5000000))
         assert role != "tax_payment"
 
+
+# ── BANK TO MOBILE & EAZZY-FUNDS ────────────────────────────────────────────
+
+def test_bank_to_mobile_debit_supplier():
+    role, reason = classify_with_reason(txn("bank to mobile 254712469888-mr nyoike re", -4500000))
+    assert role == "supplier"
+    assert "bank_to_mobile_outflow" in reason
+
+def test_bank_to_mobile_credit_supplier():
+    """Bank-to-mobile with positive amount (reversal/unusual) still classified as supplier."""
+    role, reason = classify_with_reason(txn("bank to mobile 254711348938-fuel payment", 5000000))
+    assert role == "supplier"
+    assert "bank_to_mobile_outflow" in reason
+
+def test_eazzy_funds_credit_revenue():
+    role, reason = classify_with_reason(txn("eazzy-funds trnsf frm 101600023751 s2858", 11200000))
+    assert role == "revenue_operational"
+    assert "eazzy_funds_inflow" in reason
+
+def test_eazzy_funds_debit_supplier():
+    role, reason = classify_with_reason(txn("eazzy-funds trnsf to 101600023751", -5000000))
+    assert role == "supplier"
+    assert "eazzy_funds_outflow" in reason
+
+def test_eazzy_funds_zero_amount_supplier():
+    """EAZZY-FUNDS with zero amount — keyword matches, non-positive falls to supplier."""
+    role, reason = classify_with_reason(txn("eazzy-funds trnsf frm 101714684333 borny", 0))
+    assert role == "supplier"
+    assert "eazzy_funds_outflow" in reason
+
+def test_payed_flixnet_revenue():
+    """PAYED with number prefix (not 'PAYED BY') still classified as revenue."""
+    role, reason = classify_with_reason(txn("payed 703193140089 by:flixnet/7891234", 500000))
+    assert role == "revenue_operational"
+    assert "payed_by_prefix" in reason
+
