@@ -32,9 +32,8 @@ app = FastAPI(
 _CORS_ORIGINS = os.getenv("CORS_ORIGINS", "").split(",")
 _EXPLICIT_ORIGINS = [
     "https://paritytunnel-w7d2.onrender.com",
-    # Primary Vercel deployment — explicit entry in addition to regex to ensure
-    # CORS headers are injected even on 5xx error responses.
-    "https://v0-fund-iq-1-0.vercel.app",
+    "https://parityplatform.vercel.app",
+    "https://parity-sme-staging.vercel.app",
     "https://parity-ingestion-gmkewhxbha-uc.a.run.app",
     "http://localhost:8000"
 ]
