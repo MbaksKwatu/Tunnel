@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
@@ -276,6 +276,18 @@ function AddFlagForm({ onAdd }: { onAdd: (f: CustomFlag) => void }) {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function ParityReviewPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-950 text-gray-100 flex items-center justify-center">
+        <p className="text-gray-400">Loading…</p>
+      </div>
+    }>
+      <ParityReviewContent />
+    </Suspense>
+  );
+}
+
+function ParityReviewContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const dealId = searchParams.get('dealId') ?? '';

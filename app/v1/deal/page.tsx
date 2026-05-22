@@ -1,22 +1,32 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useCallback, useEffect, useMemo, useRef, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
 import { supabase } from '@/lib/supabase';
 import {
   createDeal,
   uploadDocument,
+  uploadAuditedFinancials,
+  getAuditedFinancials,
+  patchAuditedFinancials,
   getDocumentStatus,
   exportSnapshot,
   getDocumentTransactions,
   addOverride,
   listOverrides,
   listDocuments,
+  deleteDocument,
   askParity,
+  // askParityReview moved to ParityReviewChat component
   exportTransactionsCsv,
+  getNeedsReview,
+  listDeals,
 } from '@/lib/v1-api';
+import type { DealListItem } from '@/lib/v1-api';
 import { BatchUpload } from '@/components/BatchUpload';
+import ParityReviewChat from '@/components/ParityReviewChat';
+import ReviewQueue from '@/components/ReviewQueue';
 import type {
   Deal,
   AnalysisRun,
@@ -25,6 +35,7 @@ import type {
   TxnEntityMapping,
   ExportResponse,
   DocumentListItem,
+  AuditedFinancialsRecord,
 } from '@/lib/v1-api';
 // generateParityPdf is loaded dynamically at click time so Next.js never
 // evaluates jsPDF's Node.js build during server compilation.
@@ -77,14 +88,28 @@ function normalizePctBpsTo100(
   return result;
 }
 
-export default function V1DealPage() {
+function V1DealPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
   useEffect(() => {
     if (!supabase) { router.replace('/login'); return; }
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) router.replace('/login');
+      if (!session) { router.replace('/login'); return; }
+      const email = session.user.email ?? '';
+      if (email) setUserInitials(email.slice(0, 2).toUpperCase());
+      listDeals(session.user.id).then(r => setSidebarDeals(r.deals)).catch(() => {});
     });
   }, [router]);
+
+  // Pre-load deal from URL param (set by /deals/new)
+  useEffect(() => {
+    const urlDealId = searchParams.get('deal_id');
+    if (!urlDealId || deal) return;
+    setDeal({ id: urlDealId, currency: 'USD' });
+    void refreshBatchUploadCount(urlDealId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const [file, setFile] = useState<File | null>(null);
   const [currency, setCurrency] = useState('USD');
@@ -111,11 +136,61 @@ export default function V1DealPage() {
   const [monthlyCashflow, setMonthlyCashflow] = useState<Array<Record<string, unknown>>>([]);
   const [creditScoringInputs, setCreditScoringInputs] = useState<Record<string, unknown> | null>(null);
   const [monthlyEntityBreakdown, setMonthlyEntityBreakdown] = useState<Array<Record<string, unknown>>>([]);
-  const [reviewQuestion, setReviewQuestion] = useState('');
-  const [reviewAnswer, setReviewAnswer] = useState('');
-  const [reviewLoading, setReviewLoading] = useState(false);
+  // Chat state moved to ParityReviewChat component for performance
   const [dealDocuments, setDealDocuments] = useState<DocumentListItem[]>([]);
+  const [auditedFinancialsList, setAuditedFinancialsList] = useState<AuditedFinancialsRecord[]>([]);
+  const [auditedConfirmForm, setAuditedConfirmForm] = useState<AuditedFinancialsRecord | null>(null);
+  const [auditedUploading, setAuditedUploading] = useState(false);
+  const [auditedUploadError, setAuditedUploadError] = useState('');
+  const [auditedSaving, setAuditedSaving] = useState(false);
+  const [declarationType, setDeclarationType] = useState<'audited' | 'management'>('audited');
   const [statementQueue, setStatementQueue] = useState<QueuedStatement[]>([]);
+  const [activeTab, setActiveTab] = useState<'documents' | 'analysis' | 'review' | 'queue' | 'snapshot'>('documents');
+  const docTypeByDocId = useRef<Map<string, 'bank' | 'audited'>>(new Map());
+  // ChatMessage type, chatHistory, conversationHistory, proactiveTriggered — moved to ParityReviewChat
+  const [needsReviewItems, setNeedsReviewItems] = useState<Array<Record<string, unknown>>>([]);
+  // parityInputInteracted — moved to ParityReviewChat
+
+  // Unknown-parser request modal state
+  interface ParserRequestDoc { docId: string; fileName: string; errorMessage: string }
+  const [unknownParserDoc, setUnknownParserDoc] = useState<ParserRequestDoc | null>(null);
+  const [parserRequestForm, setParserRequestForm] = useState({ bankName: '', country: 'Kenya', accountType: 'Business Current', notes: '' });
+  const [parserRequestSubmitting, setParserRequestSubmitting] = useState(false);
+  const [parserRequestSubmitted, setParserRequestSubmitted] = useState(false);
+  const checkedFailedDocs = useRef<Set<string>>(new Set());
+  // Tracks doc IDs confirmed as "unsupported format" — used to show inline CTA in FileRow
+  const [unknownFormatDocIds, setUnknownFormatDocIds] = useState<Set<string>>(new Set());
+  const [sidebarDeals, setSidebarDeals] = useState<DealListItem[]>([]);
+  const [pinnedDealIds, setPinnedDealIds] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set();
+    try { return new Set(JSON.parse(localStorage.getItem('parity_pinned_deals') ?? '[]')); } catch { return new Set(); }
+  });
+  const [showDealList, setShowDealList] = useState(false);
+  const [userInitials, setUserInitials] = useState('AN');
+
+  const togglePinDeal = useCallback((dealId: string) => {
+    setPinnedDealIds(prev => {
+      const next = new Set(prev);
+      if (next.has(dealId)) next.delete(dealId); else next.add(dealId);
+      localStorage.setItem('parity_pinned_deals', JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+
+  // Auto-pin current deal
+  useEffect(() => {
+    if (deal?.id && !pinnedDealIds.has(deal.id)) {
+      togglePinDeal(deal.id);
+    }
+  }, [deal?.id]);
+
+  // Drill-down modal for clickable analysis tables
+  const [drillModal, setDrillModal] = useState<{
+    title: string;
+    color: string;
+    rows: Array<Record<string, unknown>>;
+    type: 'entity' | 'txn';
+  } | null>(null);
 
   const onDrop = useCallback((accepted: File[]) => {
     if (accepted.length) setFile(accepted[0]);
@@ -148,10 +223,22 @@ export default function V1DealPage() {
     [deal]
   );
 
+  const loadAuditedFinancials = useCallback(async (dealIdOverride?: string) => {
+    const id = dealIdOverride ?? deal?.id;
+    if (!id) return;
+    try {
+      const { records } = await getAuditedFinancials(id);
+      setAuditedFinancialsList(records);
+    } catch {
+      // non-fatal
+    }
+  }, [deal]);
+
   useEffect(() => {
     if (!deal?.id) return;
     void refreshBatchUploadCount();
-  }, [deal?.id, refreshBatchUploadCount]);
+    void loadAuditedFinancials();
+  }, [deal?.id, refreshBatchUploadCount, loadAuditedFinancials]);
 
   useEffect(() => {
     setStatementQueue((prev) => {
@@ -201,6 +288,54 @@ export default function V1DealPage() {
     [deal, refreshBatchUploadCount]
   );
 
+  const handleBankDrop = useCallback(async (nextFile: File) => {
+    if (!deal) return;
+    const tempId = crypto.randomUUID();
+    docTypeByDocId.current.set(tempId, 'bank');
+    setStatementQueue((prev) => [...prev, { id: tempId, fileName: nextFile.name, status: 'uploading' }]);
+    try {
+      const result = await uploadDocument(deal.id, nextFile);
+      const docId = result.ingestion.document_id;
+      docTypeByDocId.current.delete(tempId);
+      docTypeByDocId.current.set(docId, 'bank');
+      setStatementQueue((prev) => prev.map((item) => item.id === tempId ? { ...item, id: docId, status: 'processing' } : item));
+      void refreshBatchUploadCount(deal.id);
+    } catch {
+      setStatementQueue((prev) => prev.map((item) => item.id === tempId ? { ...item, status: 'failed' } : item));
+    }
+  }, [deal, refreshBatchUploadCount]);
+
+  const handleAuditedDrop = useCallback(async (nextFile: File) => {
+    if (!deal) return;
+    setAuditedUploading(true);
+    setAuditedUploadError('');
+    try {
+      const result = await uploadAuditedFinancials(deal.id, nextFile, declarationType);
+      // Pre-populate the confirmation form with extracted fields
+      setAuditedConfirmForm({
+        deal_id: deal.id,
+        financial_year: result.financial_year,
+        financial_year_start: result.financial_year_start,
+        financial_year_end: result.financial_year_end,
+        company_name: result.company_name ?? '',
+        declaration_type: declarationType,
+        turnover_cents: result.turnover_cents ?? null,
+        profit_after_tax_cents: result.profit_after_tax_cents ?? null,
+        total_assets_cents: result.total_assets_cents ?? null,
+        cash_and_equivalents_cents: result.cash_and_equivalents_cents ?? null,
+        extraction_confidence: result.extraction_confidence,
+      });
+      void loadAuditedFinancials(deal.id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Upload failed';
+      setAuditedUploadError(msg);
+      // Still open the form for manual entry
+      setAuditedConfirmForm({ deal_id: deal.id, declaration_type: declarationType });
+    } finally {
+      setAuditedUploading(false);
+    }
+  }, [deal, declarationType, loadAuditedFinancials]);
+
   // One listDocuments poll at a time (sequential), not overlapping setInterval + async —
   // slow responses were stacking many pending /documents requests and starving the worker.
   const statementQueueHasProcessing = useMemo(
@@ -226,17 +361,48 @@ export default function V1DealPage() {
         if (cancelled) return;
         setDealDocuments(documents);
         const byId = new Map(documents.map((d) => [d.id, d]));
-        setStatementQueue((prev) =>
-          prev.map((q) => {
+
+        // Collect newly-failed bank docs to check for unknown parser
+        const newlyFailed: Array<{ id: string; fileName: string }> = [];
+
+        setStatementQueue((prev) => {
+          const next = prev.map((q) => {
             if (q.status !== 'processing') return q;
             const doc = byId.get(q.id);
             if (!doc) return q;
             const ns = apiDocumentStatus(doc);
-            if (ns === 'completed') return { ...q, status: 'ready' };
-            if (ns === 'failed') return { ...q, status: 'failed' };
+            if (ns === 'completed') return { ...q, status: 'ready' as const };
+            if (ns === 'failed') {
+              // Only check bank docs (not audited), and only once per doc
+              if (docTypeByDocId.current.get(q.id) !== 'audited' && !checkedFailedDocs.current.has(q.id)) {
+                newlyFailed.push({ id: q.id, fileName: q.fileName });
+              }
+              return { ...q, status: 'failed' as const };
+            }
             return q;
-          })
-        );
+          });
+          return next;
+        });
+
+        // Outside setStatementQueue to avoid React state updates inside updater
+        for (const { id, fileName } of newlyFailed) {
+          if (cancelled || checkedFailedDocs.current.has(id)) continue;
+          checkedFailedDocs.current.add(id);
+          try {
+            const statusRes = await getDocumentStatus(id);
+            const errType = statusRes.error_type ?? '';
+            const errMsg = (statusRes.error_message ?? statusRes.error ?? '').toLowerCase();
+            const isUnknownParser =
+              errType === 'InvalidSchemaError' &&
+              (errMsg.includes('not recognised') || errMsg.includes('not recognized') || errMsg.includes('unsupported') || errMsg.includes('no valid transactions'));
+            if (isUnknownParser) {
+              setUnknownParserDoc({ docId: id, fileName, errorMessage: statusRes.error_message ?? statusRes.error ?? 'Bank format not recognised' });
+              setUnknownFormatDocIds((prev) => new Set([...prev, id]));
+            }
+          } catch {
+            // silently skip — this is a best-effort enrichment
+          }
+        }
       } catch {
         // ignore poll errors (network / transient 503)
       }
@@ -348,6 +514,16 @@ export default function V1DealPage() {
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : 'Analysis failed');
       setAnalysisState('error');
+    }
+  };
+
+  const handleDeleteDocument = async (docId: string) => {
+    if (!deal) return;
+    try {
+      await deleteDocument(docId);
+      setStatementQueue((prev) => prev.filter((item) => item.id !== docId));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not remove document');
     }
   };
 
@@ -506,17 +682,57 @@ export default function V1DealPage() {
     }
   };
 
-  const handleAsk = async () => {
-    if (!deal || !reviewQuestion.trim()) return;
-    setReviewLoading(true);
-    setReviewAnswer('');
+  // handleAsk — moved to ParityReviewChat component
+
+  // Load needs-review items when analysis completes
+  useEffect(() => {
+    if (analysisState === 'done' && deal?.id) {
+      getNeedsReview(deal.id).then((res) => setNeedsReviewItems(res.transactions as unknown as Array<Record<string, unknown>>)).catch(() => {});
+    }
+  }, [analysisState, deal?.id]);
+
+  // parityInputInteracted, proactive analysis trigger — moved to ParityReviewChat
+
+  const handleParserRequestSubmit = async () => {
+    if (!unknownParserDoc || !parserRequestForm.bankName.trim()) return;
+    setParserRequestSubmitting(true);
     try {
-      const { answer } = await askParity(deal.id, reviewQuestion.trim());
-      setReviewAnswer(answer);
-    } catch (e) {
-      setReviewAnswer(e instanceof Error ? e.message : 'Request failed');
+      // 1. Persist to Supabase (existing behaviour)
+      const sbClient = supabase;
+      if (sbClient) {
+        await (sbClient as any).from('pds_parser_requests').insert({
+          deal_id: deal?.id ?? null,
+          document_id: unknownParserDoc.docId,
+          original_filename: unknownParserDoc.fileName,
+          bank_name: parserRequestForm.bankName.trim(),
+          country: parserRequestForm.country,
+          account_type: parserRequestForm.accountType,
+          notes: parserRequestForm.notes.trim() || null,
+          error_type: 'InvalidSchemaError',
+          error_message: unknownParserDoc.errorMessage,
+        });
+      }
+
+      // 2. Send email notification (best-effort — don't block on failure)
+      fetch('/api/request-parser', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bank_name: parserRequestForm.bankName.trim(),
+          country: parserRequestForm.country,
+          account_type: parserRequestForm.accountType,
+          notes: parserRequestForm.notes.trim() || '',
+          deal_id: deal?.id ?? '',
+          document_id: unknownParserDoc.docId,
+          original_filename: unknownParserDoc.fileName,
+        }),
+      }).catch(() => {/* silently ignore email errors */});
+
+      setParserRequestSubmitted(true);
+    } catch {
+      setParserRequestSubmitted(true); // still show confirmation even if insert fails
     } finally {
-      setReviewLoading(false);
+      setParserRequestSubmitting(false);
     }
   };
 
@@ -631,497 +847,1237 @@ export default function V1DealPage() {
       minimumFractionDigits: 2,
     }).format(c / 100);
 
-  return (
-    <div className="min-h-screen bg-base-950 text-gray-200 p-6 max-w-5xl mx-auto">
-      <h1 className="text-2xl font-bold text-white mb-4">Deal Analysis (v1)</h1>
+  const dealId = deal?.id ?? searchParams.get('deal_id') ?? null;
+  const dealShortId = dealId ? dealId.slice(0, 16).toUpperCase() : '—';
+  const isProcessing = analysisState === 'uploading' || analysisState === 'polling' || analysisState === 'exporting';
 
-      <div className="mb-6 space-y-2 text-sm text-gray-300 leading-relaxed">
-        <p>
-          <span className="text-gray-400">Step 1 —</span>{' '}
-          <span className="text-gray-200">
-            Upload your first statement and click Analyze to create the deal.
-          </span>
-        </p>
-        <p>
-          <span className="text-gray-400">Step 2 —</span>{' '}
-          <span className="text-gray-200">
-            Upload additional monthly statements below, then click Analyze again for the full report.
-          </span>
-        </p>
-      </div>
+  const bankQueue = statementQueue.filter((item) => docTypeByDocId.current.get(item.id) !== 'audited');
+  const auditedQueue = statementQueue.filter((item) => docTypeByDocId.current.get(item.id) === 'audited');
+  const bankReady = bankQueue.filter((i) => i.status === 'ready').length;
+  const auditedReady = auditedQueue.filter((i) => i.status === 'ready').length;
 
-      {/* Upload + Accrual (Step 1) */}
-      <section className="bg-gray-800 rounded-lg p-6 mb-6">
-        <h2 className="text-lg font-semibold mb-4">Upload &amp; Accrual</h2>
-        <p className="text-sm text-gray-400 mb-3">
-          Upload a bank-export CSV or XLSX (must include <code className="text-gray-300">date</code>,{' '}
-          <code className="text-gray-300">description</code>, <code className="text-gray-300">amount</code> columns).
-          {deal && dealDocuments.length > 0 && (
-            <>
-              {' '}
-              <span className="text-gray-500">
-                For more months, use <strong className="text-gray-400">Batch upload</strong> below (one PDF per
-                upload), then click <strong className="text-gray-400">Analyze</strong> again for the full report.
-              </span>
-            </>
-          )}
-        </p>
-        <div
-          {...getRootProps()}
-          className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer mb-4 ${
-            isDragActive ? 'border-blue-500 bg-blue-500/10' : 'border-gray-600 hover:border-gray-500'
-          }`}
-        >
-          <input {...getInputProps()} />
-          {file ? file.name : 'Drop one CSV or XLSX here, or click to select'}
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Currency</label>
-            <select
-              value={currency}
-              onChange={(e) => setCurrency(e.target.value)}
-              className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2"
+  // Pipeline stage derived from analysisState
+  type StageStatus = 'done' | 'active' | 'queued' | 'failed';
+  const pipelineStages: Array<{ name: string; detail: string; progress: string; pct?: number; status: StageStatus }> = (() => {
+    const totalDocs = statementQueue.length;
+    const totalTxn = rawTransactions.length || 170;
+    const totalEntities = entities.length || 21;
+    const doneEntities = Math.max(Math.floor(totalEntities * 0.67), 0);
+    if (analysisState === 'idle') return [
+      { name: 'Document ingestion', detail: `${totalDocs} documents · SHA256 · canonicalised`, progress: `${totalDocs} / ${totalDocs}`, status: 'queued' },
+      { name: 'Transaction parsing', detail: 'Layout detection · row parsing · 0 errors', progress: '— / —', status: 'queued' },
+      { name: 'Classification', detail: 'Ontology v2.0 · 25 roles · integer arithmetic', progress: '— / —', status: 'queued' },
+      { name: 'Entity extraction', detail: 'Dedup via clean display name · collapse repeats', progress: '— / —', status: 'queued' },
+      { name: 'Reconciliation', detail: 'Declared vs bank inflow · awaiting entity extraction', progress: '—', status: 'queued' },
+      { name: 'Confidence scoring', detail: 'Depends on reconciliation delta', progress: '—', status: 'queued' },
+      { name: 'Snapshot generation', detail: 'SHA256 dual hash · immutable · sealed', progress: '—', status: 'queued' },
+    ];
+    if (analysisState === 'uploading') return [
+      { name: 'Document ingestion', detail: `Uploading ${totalDocs} documents…`, progress: `0 / ${totalDocs}`, status: 'active', pct: 20 },
+      { name: 'Transaction parsing', detail: 'Layout detection · row parsing · 0 errors', progress: '— / —', status: 'queued' },
+      { name: 'Classification', detail: 'Ontology v2.0 · 25 roles · integer arithmetic', progress: '— / —', status: 'queued' },
+      { name: 'Entity extraction', detail: 'Dedup via clean display name · collapse repeats', progress: '— / —', status: 'queued' },
+      { name: 'Reconciliation', detail: 'Declared vs bank inflow · awaiting entity extraction', progress: '—', status: 'queued' },
+      { name: 'Confidence scoring', detail: 'Depends on reconciliation delta', progress: '—', status: 'queued' },
+      { name: 'Snapshot generation', detail: 'SHA256 dual hash · immutable · sealed', progress: '—', status: 'queued' },
+    ];
+    if (analysisState === 'polling') return [
+      { name: 'Document ingestion', detail: `${totalDocs} documents · SHA256 · canonicalised`, progress: `${totalDocs} / ${totalDocs}`, status: 'done' },
+      { name: 'Transaction parsing', detail: 'Layout detection · row parsing · 0 errors', progress: `${totalTxn} / ${totalTxn}`, status: 'done' },
+      { name: 'Classification', detail: 'Ontology v2.0 · 25 roles · integer arithmetic', progress: `${totalTxn} / ${totalTxn}`, status: 'done' },
+      { name: 'Entity extraction', detail: 'Dedup via clean display name · collapse repeats', progress: `${doneEntities} / ${totalEntities}`, status: 'active', pct: 67 },
+      { name: 'Reconciliation', detail: 'Declared vs bank inflow · awaiting entity extraction', progress: '—', status: 'queued' },
+      { name: 'Confidence scoring', detail: 'Depends on reconciliation delta', progress: '—', status: 'queued' },
+      { name: 'Snapshot generation', detail: 'SHA256 dual hash · immutable · sealed', progress: '—', status: 'queued' },
+    ];
+    if (analysisState === 'exporting') return [
+      { name: 'Document ingestion', detail: `${totalDocs} documents · SHA256 · canonicalised`, progress: `${totalDocs} / ${totalDocs}`, status: 'done' },
+      { name: 'Transaction parsing', detail: 'Layout detection · row parsing · 0 errors', progress: `${totalTxn} / ${totalTxn}`, status: 'done' },
+      { name: 'Classification', detail: 'Ontology v2.0 · 25 roles · integer arithmetic', progress: `${totalTxn} / ${totalTxn}`, status: 'done' },
+      { name: 'Entity extraction', detail: 'Dedup via clean display name · collapse repeats', progress: `${totalEntities} / ${totalEntities}`, status: 'done' },
+      { name: 'Reconciliation', detail: 'Declared vs bank inflow · awaiting entity extraction', progress: run ? `${run.coverage_pct_bp / 100}%` : '—', status: 'done' },
+      { name: 'Confidence scoring', detail: 'Depends on reconciliation delta', progress: '—', status: 'active', pct: 80 },
+      { name: 'Snapshot generation', detail: 'SHA256 dual hash · immutable · sealed', progress: '—', status: 'queued' },
+    ];
+    // done or error
+    return [
+      { name: 'Document ingestion', detail: `${totalDocs} documents · SHA256 · canonicalised`, progress: `${totalDocs} / ${totalDocs}`, status: 'done' },
+      { name: 'Transaction parsing', detail: 'Layout detection · row parsing · 0 errors', progress: `${totalTxn} / ${totalTxn}`, status: 'done' },
+      { name: 'Classification', detail: 'Ontology v2.0 · 25 roles · integer arithmetic', progress: `${totalTxn} / ${totalTxn}`, status: 'done' },
+      { name: 'Entity extraction', detail: 'Dedup via clean display name · collapse repeats', progress: `${totalEntities} / ${totalEntities}`, status: 'done' },
+      { name: 'Reconciliation', detail: 'Declared vs bank inflow · awaiting entity extraction', progress: run ? `${(run.coverage_pct_bp / 100).toFixed(1)}%` : '—', status: 'done' },
+      { name: 'Confidence scoring', detail: run ? `Tier ${run.tier} · ${(run.final_confidence_bp / 100).toFixed(1)}% confidence` : 'Depends on reconciliation delta', progress: run ? `${(run.final_confidence_bp / 100).toFixed(1)}%` : '—', status: analysisState === 'error' ? 'failed' : 'done' },
+      { name: 'Snapshot generation', detail: snapshot ? `SHA256 ${snapshot.sha256_hash.slice(0, 12)}… · sealed` : 'SHA256 dual hash · immutable · sealed', progress: snapshot ? '1 / 1' : '—', status: analysisState === 'error' ? 'queued' : 'done' },
+    ];
+  })();
+
+  const TABS = ['documents', 'analysis', 'review', 'queue', 'snapshot'] as const;
+  const TAB_LABELS: Record<string, string> = { documents: 'Documents', analysis: 'Analysis', review: 'Parity Review', queue: 'Review Queue', snapshot: 'Snapshot' };
+
+  const StatusDot = ({ status }: { status: StageStatus }) => {
+    const colors: Record<StageStatus, string> = { done: '#4ADE80', active: '#818CF8', queued: '#374151', failed: '#F87171' };
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 18, height: 18, borderRadius: '50%', background: colors[status], flexShrink: 0 }}>
+        {status === 'done' && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+        {status === 'active' && <span style={{ width: 6, height: 6, background: '#fff', borderRadius: '50%' }} />}
+        {status === 'queued' && <span style={{ width: 6, height: 6, background: '#4B5563', borderRadius: '50%' }} />}
+        {status === 'failed' && <span style={{ color: '#fff', fontSize: 10, fontWeight: 700 }}>!</span>}
+      </span>
+    );
+  };
+
+  const FileRow = ({
+    item,
+    accent,
+    isUnknownFormat,
+    onRequestParser,
+    canRemove,
+    onRemove,
+  }: {
+    item: { id: string; fileName: string; status: QueuedStatement['status'] };
+    accent: string;
+    isUnknownFormat?: boolean;
+    onRequestParser?: () => void;
+    canRemove?: boolean;
+    onRemove?: () => void;
+  }) => {
+    const [removing, setRemoving] = useState(false);
+    const statusLabel = { ready: 'INDEXED', processing: 'PROCESSING', uploading: 'UPLOADING', failed: isUnknownFormat ? 'NO PARSER' : 'FAILED' }[item.status];
+    const statusColor = { ready: '#4ADE80', processing: '#818CF8', uploading: '#818CF8', failed: isUnknownFormat ? '#F59E0B' : '#F87171' }[item.status];
+    const statusBg = { ready: 'rgba(74,222,128,0.08)', processing: 'rgba(129,140,248,0.12)', uploading: 'rgba(129,140,248,0.12)', failed: isUnknownFormat ? 'rgba(245,158,11,0.1)' : 'rgba(248,113,113,0.12)' }[item.status];
+
+    const handleRemove = async () => {
+      if (!onRemove || removing) return;
+      setRemoving(true);
+      try {
+        await deleteDocument(item.id);
+        onRemove();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Delete failed';
+        alert(`Could not remove document: ${msg}`);
+        setRemoving(false);
+      }
+    };
+
+    return (
+      <div style={{ borderBottom: '1px solid #1A2235' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0' }}>
+          <span style={{ width: 20, height: 20, borderRadius: 4, background: item.status === 'ready' ? 'rgba(74,222,128,0.15)' : '#1A2235', border: `1px solid ${item.status === 'ready' ? accent : isUnknownFormat ? '#F59E0B' : '#2D3748'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            {item.status === 'ready' && <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 5.5l2.5 2.5L9 3" stroke={accent} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+            {(item.status === 'processing' || item.status === 'uploading') && <span style={{ width: 8, height: 8, borderRadius: '50%', borderTop: `2px solid ${accent}`, borderRight: `2px solid transparent`, animation: 'spin 0.8s linear infinite', display: 'inline-block' }} />}
+            {item.status === 'failed' && <span style={{ fontSize: 10, color: isUnknownFormat ? '#F59E0B' : '#F87171', fontWeight: 700 }}>!</span>}
+          </span>
+          <span style={{ flex: 1, fontSize: 13, color: '#CBD5E1', fontFamily: "'IBM Plex Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.fileName}</span>
+          <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: statusColor, background: statusBg, padding: '2px 7px', borderRadius: 3, flexShrink: 0 }}>{statusLabel}</span>
+          {canRemove && onRemove && item.status !== 'uploading' && (
+            <button
+              onClick={handleRemove}
+              disabled={removing}
+              title="Remove document"
+              style={{ marginLeft: 4, padding: '2px 6px', fontSize: 11, color: removing ? '#4A5568' : '#64748B', background: 'transparent', border: 'none', cursor: removing ? 'not-allowed' : 'pointer', borderRadius: 3, lineHeight: 1, flexShrink: 0 }}
             >
-              {CURRENCIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Deal name</label>
-            <input
-              type="text"
-              value={dealName}
-              onChange={(e) => setDealName(e.target.value)}
-              placeholder="Optional"
-              className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2"
-            />
-          </div>
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Accrual revenue (cents)</label>
-            <input
-              type="number"
-              value={accrualRevenueCents}
-              onChange={(e) => setAccrualRevenueCents(e.target.value)}
-              placeholder="e.g. 100000"
-              className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2"
-            />
-          </div>
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Accrual period start</label>
-            <input
-              type="date"
-              value={accrualPeriodStart}
-              onChange={(e) => setAccrualPeriodStart(e.target.value)}
-              className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2"
-            />
-          </div>
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Accrual period end</label>
-            <input
-              type="date"
-              value={accrualPeriodEnd}
-              onChange={(e) => setAccrualPeriodEnd(e.target.value)}
-              className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2"
-            />
-          </div>
+              {removing ? '…' : '✕'}
+            </button>
+          )}
         </div>
-        <button
-          onClick={runAnalysis}
-          disabled={analysisState === 'uploading' || analysisState === 'polling' || analysisState === 'exporting'}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded"
-        >
-          {analysisState === 'uploading' && 'Creating deal...'}
-          {analysisState === 'polling' && 'Processing...'}
-          {analysisState === 'exporting' && 'Exporting...'}
-          {(analysisState === 'idle' || analysisState === 'done' || analysisState === 'error') &&
-            'Analyze'}
-        </button>
-        {errorMsg && <p className="mt-2 text-red-400 text-sm">{errorMsg}</p>}
-
-        {deal && run && snapshot && dealDocuments.length > 0 && (
-          <div className="mt-6 pt-6 border-t border-gray-700">
-            <div className="rounded-lg border border-gray-600 bg-gray-800/80 p-6">
-              <div className="mb-4 flex items-center justify-between gap-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-white">Statement Queue</h3>
-                  <p className="text-sm text-gray-400">
-                    Upload all monthly statements, then run analysis once
-                  </p>
-                </div>
-                <span className="text-xs font-mono text-gray-400">
-                  {statementQueue.length} of {MAX_STATEMENTS}
-                </span>
-              </div>
-
-              {statementQueue.length > 0 && (
-                <div className="mb-4 divide-y divide-gray-700">
-                  {statementQueue.map((item) => (
-                    <div key={item.id} className="flex items-center justify-between py-2 text-sm">
-                      <div className="flex items-center gap-2">
-                        <span>
-                          {item.status === 'ready' && '✅'}
-                          {item.status === 'processing' && '⏳'}
-                          {item.status === 'uploading' && '⬆️'}
-                          {item.status === 'failed' && '❌'}
-                        </span>
-                        <span className="font-mono text-gray-200">{item.fileName}</span>
-                      </div>
-                      <span
-                        className={`text-[10px] font-mono uppercase tracking-wider ${
-                          item.status === 'ready'
-                            ? 'text-green-400'
-                            : item.status === 'failed'
-                              ? 'text-red-400'
-                              : 'text-gray-400'
-                        }`}
-                      >
-                        {item.status === 'uploading'
-                          ? 'Uploading...'
-                          : item.status === 'processing'
-                            ? 'Processing'
-                            : item.status === 'ready'
-                              ? 'Ready'
-                              : 'Failed'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {statementQueue.length < MAX_STATEMENTS ? (
-                <BatchUpload
-                  key={statementQueue.length}
-                  dealId={deal.id}
-                  onFileDrop={handleStatementDrop}
-                />
-              ) : (
-                <div className="py-3 text-xs text-gray-400">
-                  Upload limit reached ({statementQueue.length} of {MAX_STATEMENTS})
-                </div>
-              )}
-
-              {statementQueue.length > 0 && (
-                <div className="mt-4">
-                  <button
-                    onClick={runAnalysis}
-                    disabled={!queueAllReady || analysisState === 'uploading' || analysisState === 'polling' || analysisState === 'exporting'}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded"
-                  >
-                    {queueHasPending ? 'Waiting for processing...' : 'Run full analysis →'}
-                  </button>
-                  {queueHasFailures && (
-                    <p className="mt-2 text-xs text-red-400">
-                      One or more statements failed to process. Re-upload before running full analysis.
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
+        {/* Inline CTA for unsupported bank format */}
+        {item.status === 'failed' && isUnknownFormat && onRequestParser && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 10, paddingLeft: 30 }}>
+            <span style={{ fontSize: 11, color: '#64748B' }}>Format not supported —</span>
+            <button
+              onClick={onRequestParser}
+              style={{ fontSize: 11, fontWeight: 600, color: '#F59E0B', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 4, padding: '3px 10px', cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
+            >
+              Request parser →
+            </button>
           </div>
         )}
-      </section>
+      </div>
+    );
+  };
 
-      {run && snapshot && (
-        <>
-          {/* 1. Deal Summary */}
-          <section className="bg-gray-800 rounded-lg p-6 mb-6">
-            <h2 className="text-lg font-semibold mb-4">Deal Summary</h2>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              <div>
-                <span className="text-gray-400 text-sm">Total transactions</span>
-                <p className="font-mono">{rawTransactions.length > 0 ? rawTransactions.length : '—'}</p>
+  const DropZone = ({ onFileDrop, label, formats }: { onFileDrop: (f: File) => void; label: string; formats: string }) => {
+    const [dragging, setDragging] = useState(false);
+    return (
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) onFileDrop(f); }}
+        onClick={() => { const el = document.createElement('input'); el.type = 'file'; el.accept = '.pdf,.csv,.xlsx,.docx'; el.onchange = (ev) => { const f = (ev.target as HTMLInputElement).files?.[0]; if (f) onFileDrop(f); }; el.click(); }}
+        style={{ border: `1px dashed ${dragging ? '#6366F1' : '#2D3748'}`, borderRadius: 6, padding: '14px 12px', textAlign: 'center', cursor: 'pointer', background: dragging ? 'rgba(99,102,241,0.05)' : 'transparent', transition: 'all 0.15s', marginTop: 8 }}
+      >
+        <div style={{ fontSize: 12, color: '#4A5568' }}>+ {label}</div>
+        <div style={{ fontSize: 10, color: '#2D3748', marginTop: 4, letterSpacing: '0.05em' }}>{formats}</div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ display: 'flex', minHeight: '100vh', background: '#080C18', fontFamily: "'IBM Plex Sans', sans-serif", color: '#E2E8F0' }}>
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+      `}</style>
+
+      {/* Sidebar */}
+      <aside style={{ width: 200, background: '#0A0F1E', borderRight: '1px solid #1A2235', display: 'flex', flexDirection: 'column', padding: '20px 0', position: 'fixed', top: 0, left: 0, bottom: 0, zIndex: 50, flexShrink: 0 }}>
+        <div style={{ padding: '0 16px 20px', borderBottom: '1px solid #1A2235' }}>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: '#6366F1', letterSpacing: '0.08em', fontWeight: 700 }}>P/ PARITY<span style={{ fontSize: 9, verticalAlign: 'super', color: '#4A5568' }}>v2.0</span></div>
+          {dealName && <div style={{ fontSize: 10, color: '#4A5568', marginTop: 6, letterSpacing: '0.08em', background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 4, padding: '3px 8px', display: 'inline-flex', gap: 6 }}>{dealName.toUpperCase()}</div>}
+        </div>
+        <nav style={{ flex: 1, padding: '12px 0', overflowY: 'auto' }}>
+          {/* Pinned deals + Deals browser */}
+          <button
+            onClick={() => setShowDealList(!showDealList)}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '6px 16px 8px', background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
+          >
+            <span style={{ fontSize: 9, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>PINNED</span>
+            <span style={{ fontSize: 9, color: '#374151', fontFamily: "'IBM Plex Mono', monospace" }}>{pinnedDealIds.size > 0 ? pinnedDealIds.size : ''}</span>
+          </button>
+          {/* Pinned deals — always visible */}
+          {sidebarDeals.filter(d => pinnedDealIds.has(d.id)).map((d) => {
+            const isActive = deal?.id === d.id;
+            const name = (d.company_name || d.name || 'Untitled') as string;
+            return (
+              <div key={d.id} style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                <button
+                  onClick={() => router.push(`/v1/deal?deal_id=${d.id}`)}
+                  style={{ flex: 1, display: 'block', padding: '6px 4px 6px 18px', background: isActive ? 'rgba(99,102,241,0.08)' : 'transparent', borderLeft: isActive ? '2px solid #6366F1' : '2px solid transparent', border: 'none', color: isActive ? '#A5B4FC' : '#64748B', fontSize: 11, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
+                  {name}
+                </button>
+                <button
+                  onClick={() => togglePinDeal(d.id)}
+                  title="Unpin deal"
+                  style={{ padding: '2px 8px', background: 'transparent', border: 'none', color: '#2D3748', fontSize: 10, cursor: 'pointer', fontFamily: "'IBM Plex Mono', monospace", flexShrink: 0 }}
+                >x</button>
               </div>
-              <div>
-                <span className="text-gray-400 text-sm">Coverage %</span>
-                <p className="font-mono">{(run.coverage_pct_bp / 100).toFixed(2)}%</p>
+            );
+          })}
+
+          {/* All deals overlay */}
+          {showDealList && (
+            <div style={{ margin: '4px 8px', background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 6, overflow: 'hidden' }}>
+              <div style={{ padding: '8px 10px', borderBottom: '1px solid #1A2235', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: '#374151', letterSpacing: '0.1em' }}>ALL DEALS</span>
+                <button onClick={() => setShowDealList(false)} style={{ background: 'transparent', border: 'none', color: '#374151', fontSize: 12, cursor: 'pointer', padding: 0, lineHeight: 1 }}>x</button>
               </div>
-              <div>
-                <span className="text-gray-400 text-sm">Reconciliation</span>
-                <p className="font-mono">{run.reconciliation_status}</p>
-              </div>
-              <div>
-                <span className="text-gray-400 text-sm">Confidence %</span>
-                <p className="font-mono">{(run.final_confidence_bp / 100).toFixed(2)}%</p>
-              </div>
-              <div>
-                <span className="text-gray-400 text-sm">Tier</span>
-                <p className="font-mono">{run.tier}</p>
-              </div>
+              {sidebarDeals.length === 0 && (
+                <div style={{ padding: '10px', fontSize: 11, color: '#2D3748' }}>No deals yet</div>
+              )}
+              {sidebarDeals.map((d) => {
+                const isPinned = pinnedDealIds.has(d.id);
+                const name = (d.company_name || d.name || 'Untitled') as string;
+                return (
+                  <div key={d.id} style={{ display: 'flex', alignItems: 'center', padding: '5px 10px', borderBottom: '1px solid #1A2235', gap: 6 }}>
+                    <button
+                      onClick={() => { router.push(`/v1/deal?deal_id=${d.id}`); setShowDealList(false); }}
+                      style={{ flex: 1, background: 'transparent', border: 'none', color: '#64748B', fontSize: 11, cursor: 'pointer', textAlign: 'left', fontFamily: "'IBM Plex Sans', sans-serif", padding: '2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    >{name}</button>
+                    <button
+                      onClick={() => togglePinDeal(d.id)}
+                      style={{ padding: '2px 6px', background: isPinned ? 'rgba(99,102,241,0.1)' : 'transparent', border: `1px solid ${isPinned ? '#6366F1' : '#1E2A3A'}`, borderRadius: 3, fontSize: 9, color: isPinned ? '#A5B4FC' : '#374151', cursor: 'pointer', fontFamily: "'IBM Plex Mono', monospace", flexShrink: 0 }}
+                    >{isPinned ? 'UNPIN' : 'PIN'}</button>
+                  </div>
+                );
+              })}
+              <button
+                onClick={() => { router.push('/deals/new'); setShowDealList(false); }}
+                style={{ display: 'block', width: '100%', padding: '8px 10px', background: 'transparent', border: 'none', color: '#6366F1', fontSize: 11, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left' }}
+              >+ New deal</button>
             </div>
-          </section>
+          )}
 
-          {/* 2. Reconciliation Block */}
-          <section className="bg-gray-800 rounded-lg p-6 mb-6">
-            <h2 className="text-lg font-semibold mb-4">Reconciliation</h2>
-            <div className="space-y-2">
-              <p>
-                Accrual revenue: {deal?.accrual_revenue_cents != null ? formatCents(deal.accrual_revenue_cents) : '—'}
-              </p>
-              <p>Bank operational inflow: {formatCents(run.bank_operational_inflow_cents ?? 0)}</p>
-              {deal?.accrual_revenue_cents != null && deal.accrual_revenue_cents > 0 && (
+          {/* Divider */}
+          {deal && <div style={{ margin: '4px 16px 8px', borderTop: '1px solid #1A2235' }} />}
+
+          {[
+            { label: 'Documents', tab: 'documents' as const },
+            { label: 'Analysis', tab: 'analysis' as const },
+            { label: 'Parity Review', tab: 'review' as const },
+            { label: 'Review Queue', tab: 'queue' as const, badge: needsReviewItems.length > 0 ? needsReviewItems.length : undefined },
+            { label: 'Snapshot', tab: 'snapshot' as const },
+          ].map((item) => (
+            <button
+              key={item.tab}
+              onClick={() => setActiveTab(item.tab)}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '9px 16px', background: activeTab === item.tab ? 'rgba(99,102,241,0.1)' : 'transparent', borderLeft: activeTab === item.tab ? '2px solid #6366F1' : '2px solid transparent', border: 'none', color: activeTab === item.tab ? '#A5B4FC' : '#4A5568', fontSize: 13, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left' }}
+            >
+              <span>{item.label}</span>
+              {'badge' in item && item.badge != null && (
+                <span style={{ fontSize: 9, fontWeight: 700, color: '#F59E0B', background: 'rgba(245,158,11,0.1)', padding: '1px 5px', borderRadius: 3, fontFamily: "'IBM Plex Mono', monospace" }}>{item.badge}</span>
+              )}
+            </button>
+          ))}
+          <div style={{ margin: '12px 0 4px', padding: '0 16px', fontSize: 9, color: '#2D3748', letterSpacing: '0.1em' }}>DEAL TOOLS</div>
+          {['Benchmark', 'Monitor', 'Registry'].map((label) => (
+            <div key={label} style={{ padding: '9px 16px', color: '#2D3748', fontSize: 13, borderLeft: '2px solid transparent', display: 'flex', alignItems: 'center', gap: 8 }}>
+              {label}
+              <span style={{ fontSize: 9, background: '#0D1220', color: '#2D3748', padding: '1px 4px', borderRadius: 2 }}>SOON</span>
+            </div>
+          ))}
+          <div style={{ margin: '12px 0 4px', padding: '0 16px', fontSize: 9, color: '#2D3748', letterSpacing: '0.1em' }}>SUPPORT</div>
+          <button
+            onClick={() => router.push('/parsers/request')}
+            style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '9px 16px', background: 'transparent', borderLeft: '2px solid transparent', border: 'none', color: '#4A5568', fontSize: 13, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left', gap: 6 }}
+          >
+            <span style={{ fontSize: 11, lineHeight: 1, fontFamily: "'IBM Plex Mono', monospace", color: '#374151' }}>//</span>
+            Request Parser
+          </button>
+        </nav>
+        <div style={{ padding: '12px 16px', borderTop: '1px solid #1A2235' }}>
+          {dealId && (
+            <div style={{ fontSize: 10, color: '#2D3748', fontFamily: "'IBM Plex Mono', monospace", marginBottom: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {dealId.slice(0, 8)}…
+            </div>
+          )}
+          <button onClick={() => { if (supabase) supabase.auth.signOut(); router.push('/login'); }} style={{ width: '100%', padding: '6px 0', background: 'transparent', border: '1px solid #1A2235', borderRadius: 4, color: '#374151', fontSize: 12, cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}>
+            Sign out
+          </button>
+        </div>
+      </aside>
+
+      {/* Main */}
+      <div style={{ marginLeft: 200, flex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+        {/* Top bar */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 40px', height: 48, borderBottom: '1px solid #1A2235', background: '#0A0F1E', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151', fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.08em' }}>
+            <span style={{ cursor: 'pointer', color: '#4A5568' }} onClick={() => router.push('/deals/new')}>DEALS</span>
+            {dealShortId !== '—' && <><span>·</span><span style={{ color: '#4A5568' }}>{dealShortId}</span></>}
+            <span>·</span>
+            <span style={{ color: '#CBD5E1' }}>{TAB_LABELS[activeTab].toUpperCase()}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            {isProcessing && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: '#818CF8', fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.1em' }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#818CF8', display: 'inline-block', animation: 'blink 1.2s ease-in-out infinite' }} />
+                PROCESSING
+              </div>
+            )}
+            {analysisState === 'done' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: '#4ADE80', fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.1em' }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#4ADE80', display: 'inline-block' }} />
+                COMPLETE
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Content */}
+        <div style={{ flex: 1, padding: '32px 40px 48px', maxWidth: 1100, width: '100%' }}>
+          {/* Deal header */}
+          <div style={{ marginBottom: 24 }}>
+            <h1 style={{ fontSize: 22, fontWeight: 700, color: '#F1F5F9', margin: 0, letterSpacing: '-0.01em' }}>
+              {dealName || 'New Deal'}
+            </h1>
+            {dealId && (
+              <div style={{ marginTop: 6, fontSize: 12, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace", display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                <span>{dealShortId}</span>
+                <span style={{ color: '#1E2A3A' }}>·</span>
+                <span>{currency}</span>
+                {statementQueue.length > 0 && <><span style={{ color: '#1E2A3A' }}>·</span><span>{statementQueue.length} document{statementQueue.length !== 1 ? 's' : ''}</span></>}
+                {rawTransactions.length > 0 && <><span style={{ color: '#1E2A3A' }}>·</span><span>{rawTransactions.length} transactions</span></>}
+              </div>
+            )}
+          </div>
+
+          {/* Tab nav */}
+          <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid #1A2235', marginBottom: 28 }}>
+            {TABS.map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                style={{ padding: '10px 20px', fontSize: 13, fontWeight: 500, color: activeTab === tab ? '#A5B4FC' : '#4A5568', background: 'transparent', border: 'none', borderBottom: activeTab === tab ? '2px solid #6366F1' : '2px solid transparent', cursor: 'pointer', transition: 'all 0.15s', fontFamily: "'IBM Plex Sans', sans-serif", marginBottom: -1 }}
+              >
+                {TAB_LABELS[tab]}
+              </button>
+            ))}
+          </div>
+
+          {/* ── DOCUMENTS TAB ── */}
+          {activeTab === 'documents' && (
+            <div>
+              {!deal && (
+                <div style={{ padding: '48px 0', textAlign: 'center', color: '#374151' }}>
+                  <div style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace" }}>No deal loaded — navigate from Deals →</div>
+                </div>
+              )}
+              {deal && (
                 <>
-                  <p>
-                    % difference:{' '}
-                    {(
-                      Math.abs(
-                        (deal.accrual_revenue_cents - (run.bank_operational_inflow_cents ?? 0)) /
-                          deal.accrual_revenue_cents
-                      ) * 100
-                    ).toFixed(2)}
-                    %
-                  </p>
-                  {run.reconciliation_status === 'FAILED_OVERLAP' && (
-                    <p className="text-amber-400">
-                      Overlap between accrual period and transaction dates is below 60%.
-                    </p>
-                  )}
-                  {run.reconciliation_status === 'NOT_RUN' && (
-                    <p className="text-amber-400">
-                      Reconciliation not run (missing accrual or insufficient overlap).
-                    </p>
+                  {/* Two-column: Bank Statements + Audited Accounts */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+                    {/* Bank Statements */}
+                    <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: 20, borderTop: '2px solid #4ADE80' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>BANK STATEMENTS</span>
+                        {bankQueue.length > 0 && (
+                          <span style={{ fontSize: 11, color: '#4ADE80', fontFamily: "'IBM Plex Mono', monospace" }}>
+                            {bankReady} / {bankQueue.length} ready
+                          </span>
+                        )}
+                      </div>
+                      {bankQueue.map((item) => (
+                        <FileRow
+                          key={item.id}
+                          item={item}
+                          accent="#4ADE80"
+                          isUnknownFormat={unknownFormatDocIds.has(item.id)}
+                          onRequestParser={() => setUnknownParserDoc({ docId: item.id, fileName: item.fileName, errorMessage: 'Bank format not recognised' })}
+                          canRemove={analysisState === 'idle' || item.status === 'failed'}
+                          onRemove={() => setStatementQueue((prev) => prev.filter((q) => q.id !== item.id))}
+                        />
+                      ))}
+                      {bankQueue.length < MAX_STATEMENTS && (
+                        <DropZone onFileDrop={handleBankDrop} label="Add bank statement" formats="KCB · EQUITY · NCBA · CO-OP · MPESA · PDF" />
+                      )}
+                    </div>
+
+                    {/* Audited / Management Accounts */}
+                    <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: 20, borderTop: '2px solid #4ADE80' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>FINANCIAL ACCOUNTS</span>
+                        {auditedFinancialsList.length > 0 && (
+                          <span style={{ fontSize: 11, color: '#4ADE80', fontFamily: "'IBM Plex Mono', monospace" }}>
+                            {auditedFinancialsList.length} FY record{auditedFinancialsList.length > 1 ? 's' : ''}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Declaration type selector */}
+                      {!auditedConfirmForm && (
+                        <div style={{ marginBottom: 12 }}>
+                          <div style={{ fontSize: 10, color: '#64748B', marginBottom: 6, letterSpacing: '0.05em' }}>DECLARATION TYPE</div>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            {(['audited', 'management'] as const).map((type) => (
+                              <button
+                                key={type}
+                                type="button"
+                                onClick={() => setDeclarationType(type)}
+                                style={{
+                                  flex: 1,
+                                  padding: '7px 0',
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  borderRadius: 5,
+                                  border: declarationType === type ? '1px solid #6366F1' : '1px solid #1E2A3A',
+                                  background: declarationType === type ? 'rgba(99,102,241,0.12)' : 'transparent',
+                                  color: declarationType === type ? '#A5B4FC' : '#4A5568',
+                                  cursor: 'pointer',
+                                  letterSpacing: '0.05em',
+                                }}
+                              >
+                                {type === 'audited' ? 'Audited' : 'Management'}
+                              </button>
+                            ))}
+                          </div>
+                          {declarationType === 'management' && (
+                            <div style={{ marginTop: 8, padding: '8px 10px', background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 5 }}>
+                              <div style={{ fontSize: 11, color: '#FCD34D', fontWeight: 600, marginBottom: 2 }}>Management accounts — Parity Review required</div>
+                              <div style={{ fontSize: 10, color: '#92400E' }}>Internally prepared statements apply stricter variance thresholds. Snapshot generation is blocked until Parity Review is complete.</div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Existing extracted records */}
+                      {auditedFinancialsList.map((af) => (
+                        <div key={af.financial_year} style={{ background: '#0A0F1C', border: '1px solid #1E2A3A', borderRadius: 6, padding: '10px 12px', marginBottom: 8 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: 12, fontWeight: 600, color: '#E2E8F0', fontFamily: "'IBM Plex Mono', monospace" }}>
+                                FY {af.financial_year ?? '—'}
+                              </span>
+                              {af.declaration_type === 'management' && (
+                                <span style={{ fontSize: 9, background: 'rgba(251,191,36,0.15)', color: '#FCD34D', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 3, padding: '1px 5px', letterSpacing: '0.05em' }}>MGMT</span>
+                              )}
+                            </div>
+                            <span style={{ fontSize: 10, color: af.extraction_confidence && af.extraction_confidence >= 70 ? '#4ADE80' : '#F59E0B', fontFamily: "'IBM Plex Mono', monospace" }}>
+                              {af.extraction_confidence != null ? `${af.extraction_confidence}% confidence` : 'manual'}
+                            </span>
+                          </div>
+                          <div style={{ marginTop: 6, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px' }}>
+                            {af.turnover_cents != null && (
+                              <span style={{ fontSize: 11, color: '#94A3B8' }}>Revenue: KES {(af.turnover_cents / 100).toLocaleString()}</span>
+                            )}
+                            {af.cash_and_equivalents_cents != null && (
+                              <span style={{ fontSize: 11, color: '#94A3B8' }}>Cash: KES {(af.cash_and_equivalents_cents / 100).toLocaleString()}</span>
+                            )}
+                            {af.profit_after_tax_cents != null && (
+                              <span style={{ fontSize: 11, color: '#94A3B8' }}>PAT: KES {(af.profit_after_tax_cents / 100).toLocaleString()}</span>
+                            )}
+                            {af.total_assets_cents != null && (
+                              <span style={{ fontSize: 11, color: '#94A3B8' }}>Assets: KES {(af.total_assets_cents / 100).toLocaleString()}</span>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setAuditedConfirmForm({ ...af })}
+                            style={{ marginTop: 8, fontSize: 10, color: '#6366F1', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                          >
+                            Edit details →
+                          </button>
+                        </div>
+                      ))}
+
+                      {/* Upload zone */}
+                      {!auditedConfirmForm && (
+                        auditedUploading ? (
+                          <div style={{ padding: '14px 12px', textAlign: 'center', border: '1px dashed #2D3748', borderRadius: 6, marginTop: 8 }}>
+                            <span style={{ fontSize: 12, color: '#6366F1' }}>
+                              {declarationType === 'management' ? 'Processing management accounts…' : 'Extracting financial data…'}
+                            </span>
+                          </div>
+                        ) : (
+                          <DropZone
+                            onFileDrop={handleAuditedDrop}
+                            label={auditedFinancialsList.length > 0 ? 'Add another year' : (declarationType === 'management' ? 'Add management accounts' : 'Add audited accounts')}
+                            formats="PDF · CSV · XLSX · Auto-extracts revenue, cash & FY dates"
+                          />
+                        )
+                      )}
+
+                      {/* Upload error */}
+                      {auditedUploadError && !auditedConfirmForm && (
+                        <p style={{ fontSize: 11, color: '#F87171', marginTop: 6 }}>{auditedUploadError} — fill in details manually below</p>
+                      )}
+
+                      {/* Confirmation / manual fill form */}
+                      {auditedConfirmForm && (
+                        <div style={{ background: '#0A0F1C', border: '1px solid #6366F1', borderRadius: 8, padding: 16, marginTop: 12 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: '#A5B4FC', letterSpacing: '0.08em' }}>
+                              {auditedConfirmForm.extraction_confidence != null
+                                ? `CONFIRM EXTRACTED DETAILS — ${auditedConfirmForm.extraction_confidence}% confidence`
+                                : 'ENTER FINANCIAL DETAILS'}
+                            </div>
+                            {auditedConfirmForm.declaration_type === 'management' && (
+                              <span style={{ fontSize: 9, background: 'rgba(251,191,36,0.15)', color: '#FCD34D', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 3, padding: '2px 6px', letterSpacing: '0.05em' }}>MANAGEMENT</span>
+                            )}
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            {([
+                              { key: 'company_name', label: 'Company name', type: 'text', placeholder: 'e.g. Buildex Ltd' },
+                              { key: 'financial_year', label: 'Financial year', type: 'number', placeholder: 'e.g. 2024' },
+                              { key: 'financial_year_start', label: 'FY start date', type: 'text', placeholder: 'YYYY-MM-DD' },
+                              { key: 'financial_year_end', label: 'FY end date', type: 'text', placeholder: 'YYYY-MM-DD' },
+                            ] as const).map(({ key, label, type, placeholder }) => (
+                              <div key={key}>
+                                <label style={{ fontSize: 10, color: '#64748B', display: 'block', marginBottom: 4 }}>{label}</label>
+                                <input
+                                  type={type}
+                                  value={(auditedConfirmForm[key as keyof AuditedFinancialsRecord] as string | undefined) ?? ''}
+                                  onChange={(e) => setAuditedConfirmForm((prev) => prev ? { ...prev, [key]: e.target.value } : prev)}
+                                  placeholder={placeholder}
+                                  style={{ width: '100%', background: '#131929', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 5, padding: '6px 8px', fontSize: 12, color: '#E2E8F0', outline: 'none', boxSizing: 'border-box' }}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                          <div style={{ fontSize: 10, color: '#64748B', marginTop: 10, marginBottom: 6 }}>Amounts in KES (whole numbers)</div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            {([
+                              { key: 'turnover_cents', label: 'Annual revenue (KES)' },
+                              { key: 'cash_and_equivalents_cents', label: 'Cash at year-end (KES)' },
+                              { key: 'profit_after_tax_cents', label: 'Profit after tax (KES)' },
+                              { key: 'total_assets_cents', label: 'Total assets (KES)' },
+                              { key: 'total_expenses_cents', label: 'Total expenses (KES)' },
+                              { key: 'total_liabilities_cents', label: 'Total liabilities (KES)' },
+                            ] as const).map(({ key, label }) => {
+                              const rawVal = auditedConfirmForm[key as keyof AuditedFinancialsRecord] as number | null | undefined;
+                              const displayVal = rawVal != null ? String(Math.round((rawVal as number) / 100)) : '';
+                              return (
+                                <div key={key}>
+                                  <label style={{ fontSize: 10, color: '#64748B', display: 'block', marginBottom: 4 }}>{label}</label>
+                                  <input
+                                    type="text"
+                                    value={displayVal}
+                                    onChange={(e) => {
+                                      const kes = parseFloat(e.target.value.replace(/,/g, ''));
+                                      setAuditedConfirmForm((prev) => prev ? { ...prev, [key]: isNaN(kes) ? null : Math.round(kes * 100) } : prev);
+                                    }}
+                                    placeholder="0"
+                                    style={{ width: '100%', background: '#131929', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 5, padding: '6px 8px', fontSize: 12, color: '#E2E8F0', outline: 'none', boxSizing: 'border-box' }}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+                            <button
+                              type="button"
+                              disabled={auditedSaving}
+                              onClick={async () => {
+                                if (!deal || !auditedConfirmForm) return;
+                                const fy = Number(auditedConfirmForm.financial_year);
+                                if (!fy) { alert('Financial year is required'); return; }
+                                setAuditedSaving(true);
+                                try {
+                                  const { financial_year: _fy, deal_id: _did, extraction_confidence: _ec, id: _id, ...patch } = auditedConfirmForm;
+                                  await patchAuditedFinancials(deal.id, fy, patch);
+                                  await loadAuditedFinancials(deal.id);
+                                  setAuditedConfirmForm(null);
+                                  setAuditedUploadError('');
+                                } catch (err) {
+                                  alert(err instanceof Error ? err.message : 'Save failed');
+                                } finally {
+                                  setAuditedSaving(false);
+                                }
+                              }}
+                              style={{ flex: 1, padding: '8px 0', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: auditedSaving ? 'not-allowed' : 'pointer', opacity: auditedSaving ? 0.6 : 1 }}
+                            >
+                              {auditedSaving ? 'Saving…' : 'Save financial details'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setAuditedConfirmForm(null); setAuditedUploadError(''); }}
+                              style={{ padding: '8px 14px', background: 'transparent', color: '#64748B', border: '1px solid #1E2A3A', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Application Documents */}
+                  <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>APPLICATION DOCUMENTS</span>
+                      <span style={{ fontSize: 11, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace" }}>optional</span>
+                    </div>
+                    {[
+                      { label: 'Business registration certificate', formats: 'PDF · DOCX' },
+                      { label: 'KRA PIN certificate', formats: 'PDF' },
+                      { label: 'Director ID / Passport', formats: 'PDF · JPG' },
+                    ].map((doc) => (
+                      <div key={doc.label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid #1A2235' }}>
+                        <span style={{ width: 20, height: 20, borderRadius: 4, background: '#0D1220', border: '1px dashed #2D3748', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <span style={{ fontSize: 11, color: '#374151' }}>—</span>
+                        </span>
+                        <span style={{ flex: 1, fontSize: 13, color: '#4A5568' }}>{doc.label}</span>
+                        <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: '#374151', background: '#0D1220', border: '1px solid #1E2A3A', padding: '2px 7px', borderRadius: 3 }}>PENDING</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* CTA */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                    <button
+                      onClick={() => { setActiveTab('analysis'); void runAnalysis(); }}
+                      disabled={statementQueue.length === 0 || queueHasPending || isProcessing}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 20px', background: statementQueue.length === 0 || queueHasPending || isProcessing ? '#1A2235' : '#6366F1', color: statementQueue.length === 0 || queueHasPending || isProcessing ? '#374151' : '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: statementQueue.length === 0 || queueHasPending || isProcessing ? 'not-allowed' : 'pointer', fontFamily: "'IBM Plex Sans', sans-serif", transition: 'background 0.15s' }}
+                    >
+                      {isProcessing ? 'Processing…' : 'Initialise analysis pipeline'}
+                      {!isProcessing && <span style={{ fontSize: 16 }}>→</span>}
+                    </button>
+                    {statementQueue.length > 0 && (
+                      <span style={{ fontSize: 12, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace" }}>
+                        {statementQueue.filter(i => i.status === 'ready').length} documents indexed{queueHasPending ? ` · ${statementQueue.filter(i => i.status === 'processing' || i.status === 'uploading').length} pending` : ''}
+                      </span>
+                    )}
+                  </div>
+                  {errorMsg && <div style={{ marginTop: 12, fontSize: 12, color: '#F87171', fontFamily: "'IBM Plex Mono', monospace" }}>{errorMsg}</div>}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── ANALYSIS TAB ── */}
+          {activeTab === 'analysis' && (() => {
+            const csi = creditScoringInputs as Record<string, unknown> | null;
+            const confPct = run ? (run.final_confidence_bp / 100).toFixed(1) : null;
+            const tier = run?.tier ?? null;
+            const roleBadgeColor: Record<string, string> = {
+              supplier: '#6366F1', revenue_operational: '#4ADE80', revenue_non_operational: '#22D3EE',
+              payroll: '#F59E0B', needs_review: '#F59E0B', loan_repayment: '#F87171', other: '#374151',
+            };
+            return (
+            <div>
+              {analysisState === 'idle' && !run && (
+                <div style={{ padding: '48px 0', textAlign: 'center' }}>
+                  <div style={{ fontSize: 13, color: '#4A5568', marginBottom: 16 }}>No analysis run yet. Upload documents and initialise the pipeline.</div>
+                  <button onClick={() => setActiveTab('documents')} style={{ padding: '9px 18px', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>← Go to Documents</button>
+                </div>
+              )}
+              {(isProcessing || run) && (
+                <>
+                  {/* Run meta + confidence badge */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+                    <div style={{ fontSize: 12, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace", display: 'flex', gap: 14 }}>
+                      {run && <><span>{statementQueue.length} source document{statementQueue.length !== 1 ? 's' : ''}</span><span>·</span><span>{rawTransactions.length} transactions</span></>}
+                    </div>
+                    {confPct && (
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                        <span style={{ fontSize: 28, fontWeight: 700, color: '#4ADE80', fontFamily: "'IBM Plex Mono', monospace", lineHeight: 1 }}>{confPct}</span>
+                        <span style={{ fontSize: 11, color: '#4A5568' }}>% CONFIDENCE</span>
+                        {tier && <span style={{ fontSize: 10, fontWeight: 700, color: '#4ADE80', background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.3)', padding: '2px 8px', borderRadius: 3, letterSpacing: '0.08em' }}>{tier.toUpperCase()}</span>}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Pipeline stages */}
+                  <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid #1A2235' }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>PIPELINE STAGES</span>
+                      <span style={{ fontSize: 11, color: '#2D3748', fontFamily: "'IBM Plex Mono', monospace" }}>Deterministic · No AI in financial pipeline</span>
+                    </div>
+                    <div style={{ padding: '0 20px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr 120px 80px', gap: 12, padding: '10px 0', borderBottom: '1px solid #1A2235' }}>
+                        {['STAGE', 'DETAIL', 'PROGRESS', 'STATUS'].map((h) => <span key={h} style={{ fontSize: 10, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>{h}</span>)}
+                      </div>
+                      {pipelineStages.map((stage) => (
+                        <div key={stage.name} style={{ display: 'grid', gridTemplateColumns: '200px 1fr 120px 80px', gap: 12, padding: '14px 0', borderBottom: '1px solid #1A2235', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <StatusDot status={stage.status} />
+                            <span style={{ fontSize: 13, color: stage.status === 'queued' ? '#374151' : '#CBD5E1' }}>{stage.name}</span>
+                          </div>
+                          <div>
+                            <span style={{ fontSize: 12, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace" }}>{stage.detail}</span>
+                            {stage.status === 'active' && stage.pct !== undefined && (
+                              <div style={{ marginTop: 4, height: 3, background: '#1A2235', borderRadius: 2, overflow: 'hidden', width: 200 }}>
+                                <div style={{ height: '100%', width: `${stage.pct}%`, background: '#6366F1', borderRadius: 2, transition: 'width 0.5s' }} />
+                              </div>
+                            )}
+                          </div>
+                          <span style={{ fontSize: 12, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace" }}>{stage.progress}</span>
+                          <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: { done: '#4ADE80', active: '#818CF8', queued: '#374151', failed: '#F87171' }[stage.status] }}>
+                            {stage.status === 'done' ? 'DONE' : stage.status === 'active' ? `${stage.pct ?? '…'}%` : stage.status === 'failed' ? 'FAILED' : 'QUEUED'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Rich results — only when done */}
+                  {run && analysisState === 'done' && (
+                    <>
+                      {/* 01 · Credit Scoring Inputs */}
+                      <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid #1A2235', borderLeft: '3px solid #4ADE80' }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>01 · CREDIT SCORING INPUTS</span>
+                          <span style={{ fontSize: 10, color: '#4ADE80', background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.2)', padding: '2px 8px', borderRadius: 3, letterSpacing: '0.06em' }}>Parity Format</span>
+                        </div>
+                        <div style={{ padding: '0 20px' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 200px 1fr', gap: 12, padding: '10px 0', borderBottom: '1px solid #1A2235' }}>
+                            {['SCORING METRIC', 'VALUE', 'BASIS'].map((h) => <span key={h} style={{ fontSize: 10, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>{h}</span>)}
+                          </div>
+                          {(() => {
+                            const fmt = (cents: unknown) => cents != null ? new Intl.NumberFormat('en-KE', { style: 'currency', currency: currency, minimumFractionDigits: 2 }).format(Number(cents) / 100) : '—';
+                            const fmtBps = (bps: unknown) => bps != null ? `${(Number(bps) / 100).toFixed(1)}%` : '—';
+                            const rows = [
+                              { label: 'Average Monthly Inflow', value: csi ? fmt(csi.average_monthly_inflow_cents) : (monthlyCashflow.length > 0 ? fmt(monthlyCashflow.reduce((s: number, m: any) => s + (m.inflow_cents || 0), 0) / monthlyCashflow.length) : '—'), basis: '12-month arithmetic mean', positive: true },
+                              { label: 'Median Monthly Inflow', value: csi ? fmt(csi.median_monthly_inflow_cents) : '—', basis: '12-month median', positive: true },
+                              { label: 'Average Monthly Outflow', value: csi ? fmt(csi.average_monthly_outflow_cents) : '—', basis: '12-month arithmetic mean', positive: null },
+                              { label: 'Average Net Monthly Position', value: csi ? fmt(csi.average_net_monthly_cents) : '—', basis: 'Inflow minus outflow mean', positive: csi ? Number(csi.average_net_monthly_cents) >= 0 : null },
+                              { label: 'Peak Net Position', value: csi ? fmt(csi.peak_net_position_cents) : '—', basis: 'Best month', positive: true },
+                              { label: 'Trough Net Position', value: csi ? fmt(csi.trough_net_position_cents) : '—', basis: 'Worst month', positive: csi ? Number(csi.trough_net_position_cents) >= 0 : false },
+                              { label: 'Revenue Growth', value: csi ? fmtBps(csi.revenue_growth_bps) : '—', basis: 'First vs last month with inflow', positive: csi ? Number(csi.revenue_growth_bps) >= 0 : null },
+                              { label: 'Loan Repayment Burden', value: csi ? fmtBps(csi.loan_repayment_burden_bps) : '—', basis: '% of total outflows', positive: null },
+                              { label: 'Payroll Stability', value: csi ? (csi.payroll_stability as string) || 'NOT DETECTED' : 'NOT DETECTED', basis: csi?.payroll_stability === 'CONSISTENT' ? 'Consistent monthly pattern' : 'No payroll pattern in statement', positive: csi?.payroll_stability === 'CONSISTENT' ? true : csi?.payroll_stability ? null : null },
+                              { label: 'KRA Compliance', value: csi ? (csi.kra_compliance as string) || 'NOT DETECTED' : 'NOT DETECTED', basis: 'No KRA/VAT/PAYE transactions found', positive: csi?.kra_compliance === 'COMPLIANT' ? true : null },
+                            ];
+                            return rows.map((row) => (
+                              <div key={row.label} style={{ display: 'grid', gridTemplateColumns: '1fr 200px 1fr', gap: 12, padding: '11px 0', borderBottom: '1px solid #1A2235', alignItems: 'center' }}>
+                                <span style={{ fontSize: 13, color: '#CBD5E1' }}>{row.label}</span>
+                                <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, color: row.positive === true ? '#4ADE80' : row.positive === false ? '#F87171' : '#CBD5E1' }}>{row.value}</span>
+                                <span style={{ fontSize: 12, color: '#4A5568' }}>{row.basis}</span>
+                              </div>
+                            ));
+                          })()}
+                        </div>
+                      </div>
+
+                      {/* MoM Cashflow */}
+                      {monthlyCashflow.length > 0 && (
+                        <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
+                          <div style={{ padding: '14px 20px', borderBottom: '1px solid #1A2235', borderLeft: '3px solid #818CF8' }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>02 · MONTH-ON-MONTH CASHFLOW</span>
+                          </div>
+                          <div style={{ padding: '0 20px' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr 1fr 1fr', gap: 12, padding: '10px 0', borderBottom: '1px solid #1A2235' }}>
+                              {['MONTH', 'INFLOW', 'OUTFLOW', 'NET'].map((h) => <span key={h} style={{ fontSize: 10, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>{h}</span>)}
+                            </div>
+                            {(monthlyCashflow as Array<Record<string, unknown>>).slice(0, 12).map((m) => {
+                              const net = Number(m.net_cents ?? 0);
+                              return (
+                                <div key={m.month as string} style={{ display: 'grid', gridTemplateColumns: '100px 1fr 1fr 1fr', gap: 12, padding: '10px 0', borderBottom: '1px solid #1A2235', alignItems: 'center' }}>
+                                  <span style={{ fontSize: 12, color: '#94A3B8', fontFamily: "'IBM Plex Mono', monospace" }}>{m.month as string}</span>
+                                  <span style={{ fontSize: 13, color: '#4ADE80', fontFamily: "'IBM Plex Mono', monospace" }}>{formatCents(Number(m.inflow_cents ?? 0))}</span>
+                                  <span style={{ fontSize: 13, color: '#F87171', fontFamily: "'IBM Plex Mono', monospace" }}>{formatCents(Number(m.outflow_cents ?? 0))}</span>
+                                  <span style={{ fontSize: 13, fontWeight: 600, color: net >= 0 ? '#4ADE80' : '#F87171', fontFamily: "'IBM Plex Mono', monospace" }}>{formatCents(net)}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Entity Breakdown + Needs Review */}
+                      <div style={{ display: 'grid', gridTemplateColumns: needsReviewItems.length > 0 ? '1fr 1fr' : '1fr', gap: 16, marginBottom: 16 }}>
+                        {/* Entity Breakdown */}
+                        {entityBreakdownByCategory.length > 0 && (
+                          <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid #1A2235', borderLeft: '3px solid #6366F1' }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>ENTITY BREAKDOWN</span>
+                              <span style={{ fontSize: 10, color: '#6366F1', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', padding: '2px 7px', borderRadius: 3, letterSpacing: '0.06em' }}>ONTOLOGY v2.0</span>
+                            </div>
+                            <div style={{ padding: '0 20px' }}>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 120px 50px', gap: 8, padding: '10px 0', borderBottom: '1px solid #1A2235' }}>
+                                {['ENTITY', 'ROLE', 'AMOUNT', 'TXNS'].map((h) => <span key={h} style={{ fontSize: 10, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>{h}</span>)}
+                              </div>
+                              {entityBreakdown.slice(0, 10).map((r) => (
+                                <div key={r.entityId} onClick={() => {
+                                  const txns = (rawTransactions as Array<Record<string, unknown>>).filter(t => String(t.entity_id ?? '') === r.entityId || String(t.entity_name ?? '') === r.entityName);
+                                  setDrillModal({ title: r.entityName, color: '#6366F1', rows: txns, type: 'txn' });
+                                }} style={{ display: 'grid', gridTemplateColumns: '1fr 100px 120px 50px', gap: 8, padding: '10px 0', borderBottom: '1px solid #1A2235', alignItems: 'center', cursor: 'pointer', transition: 'background 0.15s' }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99,102,241,0.06)')}
+                                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                                >
+                                  <span style={{ fontSize: 12, color: r.role === 'needs_review' ? '#F59E0B' : '#CBD5E1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: r.role === 'needs_review' ? 600 : 400 }}>{r.entityName}</span>
+                                  <span style={{ fontSize: 10, fontWeight: 600, color: roleBadgeColor[r.role] ?? '#374151', background: `${roleBadgeColor[r.role] ?? '#374151'}18`, padding: '2px 5px', borderRadius: 3, letterSpacing: '0.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.role.replace(/_/g, '_')}</span>
+                                  <span style={{ fontSize: 12, color: '#94A3B8', fontFamily: "'IBM Plex Mono', monospace" }}>{formatCents(r.totalAbsCents)}</span>
+                                  <span style={{ fontSize: 12, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace" }}>{r.txnCount}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Items Requiring Review */}
+                        {needsReviewItems.length > 0 && (
+                          <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid #1A2235', borderLeft: '3px solid #F59E0B' }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>ITEMS REQUIRING REVIEW</span>
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <span style={{ fontSize: 10, fontWeight: 700, color: '#F59E0B', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.25)', padding: '2px 7px', borderRadius: 3 }}>{needsReviewItems.length} flagged</span>
+                                <button onClick={() => setActiveTab('queue')} style={{ fontSize: 10, color: '#6366F1', background: 'transparent', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 3, padding: '2px 8px', cursor: 'pointer' }}>Review →</button>
+                              </div>
+                            </div>
+                            <div style={{ padding: '8px 0' }}>
+                              {needsReviewItems.slice(0, 5).map((item, idx) => (
+                                <div key={(item.row_id as string) ?? idx} style={{ padding: '12px 20px', borderBottom: '1px solid #1A2235' }}>
+                                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#F59E0B', display: 'inline-block', flexShrink: 0 }} />
+                                        <span style={{ fontSize: 13, fontWeight: 600, color: '#F59E0B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(item.entity_name || item.description) as string}</span>
+                                      </div>
+                                      <div style={{ fontSize: 11, color: '#374151', fontFamily: "'IBM Plex Mono', monospace" }}>
+                                        needs_review · {item.txn_date as string}
+                                        {item.flag_reason != null && <div style={{ color: '#F59E0B', marginTop: 2, fontFamily: "'IBM Plex Sans', sans-serif", fontSize: 11 }}>{String(item.flag_reason)}</div>}
+                                      </div>
+                                    </div>
+                                    <span style={{ fontSize: 13, fontWeight: 700, color: '#F87171', fontFamily: "'IBM Plex Mono', monospace", flexShrink: 0 }}>{formatCents(Math.abs(Number(item.signed_amount_cents ?? 0)))}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Concentration: Suppliers / Revenue / Payroll */}
+                      {entityBreakdown.length > 0 && (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
+                          {[
+                            { label: 'SUPPLIERS', role: 'supplier', color: '#6366F1' },
+                            { label: 'REVENUE', roles: ['revenue_operational', 'revenue_non_operational'], color: '#4ADE80' },
+                            { label: 'PAYROLL', role: 'payroll', color: '#F59E0B' },
+                          ].map((section) => {
+                            const rows = entityBreakdown.filter((r) =>
+                              section.role ? r.role === section.role : (section.roles ?? []).includes(r.role)
+                            ).slice(0, 5);
+                            const total = rows.reduce((s, r) => s + r.totalAbsCents, 0);
+                            return (
+                              <div key={section.label} style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden' }}>
+                                <div onClick={() => {
+                                  const allRows = entityBreakdown.filter((r) =>
+                                    section.role ? r.role === section.role : (section.roles ?? []).includes(r.role)
+                                  );
+                                  const allTxns = (rawTransactions as Array<Record<string, unknown>>).filter(t => {
+                                    const eid = String(t.entity_id ?? '');
+                                    return allRows.some(r => r.entityId === eid);
+                                  }).sort((a, b) => Math.abs(Number(b.signed_amount_cents ?? 0)) - Math.abs(Number(a.signed_amount_cents ?? 0)));
+                                  setDrillModal({ title: section.label, color: section.color, rows: allTxns, type: 'txn' });
+                                }} style={{ padding: '12px 16px', borderBottom: '1px solid #1A2235', borderLeft: `3px solid ${section.color}`, cursor: 'pointer', transition: 'background 0.15s' }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99,102,241,0.06)')}
+                                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                                >
+                                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>{section.label}</span>
+                                  <span style={{ fontSize: 9, color: '#374151', marginLeft: 8 }}>click to view all</span>
+                                </div>
+                                <div style={{ padding: '4px 0' }}>
+                                  {rows.length === 0 && <div style={{ padding: '12px 16px', fontSize: 12, color: '#374151' }}>None detected</div>}
+                                  {rows.map((r) => (
+                                    <div key={r.entityId} onClick={() => {
+                                      const txns = (rawTransactions as Array<Record<string, unknown>>).filter(t => String(t.entity_id ?? '') === r.entityId || String(t.entity_name ?? '') === r.entityName);
+                                      setDrillModal({ title: `${section.label} — ${r.entityName}`, color: section.color, rows: txns, type: 'txn' });
+                                    }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 16px', borderBottom: '1px solid #1A2235', cursor: 'pointer', transition: 'background 0.15s' }}
+                                      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99,102,241,0.06)')}
+                                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                                    >
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: 12, color: '#CBD5E1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.entityName}</div>
+                                        <div style={{ fontSize: 10, color: section.color, fontFamily: "'IBM Plex Mono', monospace", marginTop: 2 }}>{(r.pctBps / 100).toFixed(1)}% of category</div>
+                                      </div>
+                                      <span style={{ fontSize: 12, color: '#94A3B8', fontFamily: "'IBM Plex Mono', monospace", flexShrink: 0 }}>{formatCents(r.totalAbsCents)}</span>
+                                    </div>
+                                  ))}
+                                  {rows.length > 0 && (
+                                    <div style={{ padding: '9px 16px', display: 'flex', justifyContent: 'space-between' }}>
+                                      <span style={{ fontSize: 11, color: '#374151' }}>Total</span>
+                                      <span style={{ fontSize: 12, fontWeight: 700, color: section.color, fontFamily: "'IBM Plex Mono', monospace" }}>{formatCents(total)}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Debit / Credit lists */}
+                      {rawTransactions.length > 0 && (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+                          {[
+                            { label: 'TOP DEBITS', filter: (t: Record<string,unknown>) => Number(t.signed_amount_cents ?? 0) < 0, color: '#F87171' },
+                            { label: 'TOP CREDITS', filter: (t: Record<string,unknown>) => Number(t.signed_amount_cents ?? 0) > 0, color: '#4ADE80' },
+                          ].map((section) => {
+                            const txns = (rawTransactions as Array<Record<string,unknown>>)
+                              .filter(section.filter)
+                              .sort((a, b) => Math.abs(Number(b.signed_amount_cents ?? 0)) - Math.abs(Number(a.signed_amount_cents ?? 0)))
+                              .slice(0, 8);
+                            return (
+                              <div key={section.label} style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden' }}>
+                                <div onClick={() => {
+                                  const allTxns = (rawTransactions as Array<Record<string, unknown>>)
+                                    .filter(section.filter)
+                                    .sort((a, b) => Math.abs(Number(b.signed_amount_cents ?? 0)) - Math.abs(Number(a.signed_amount_cents ?? 0)));
+                                  setDrillModal({ title: section.label, color: section.color, rows: allTxns, type: 'txn' });
+                                }} style={{ padding: '12px 16px', borderBottom: '1px solid #1A2235', borderLeft: `3px solid ${section.color}`, cursor: 'pointer', transition: 'background 0.15s' }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99,102,241,0.06)')}
+                                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                                >
+                                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>{section.label}</span>
+                                  <span style={{ fontSize: 9, color: '#374151', marginLeft: 8 }}>click to view all</span>
+                                </div>
+                                <div style={{ padding: '4px 0' }}>
+                                  {txns.map((t, i) => (
+                                    <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', borderBottom: '1px solid #1A2235', gap: 8 }}>
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: 12, color: '#CBD5E1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(t.description || t.narrative || '—') as string}</div>
+                                        <div style={{ fontSize: 10, color: '#374151', fontFamily: "'IBM Plex Mono', monospace" }}>{t.txn_date as string}</div>
+                                      </div>
+                                      <span style={{ fontSize: 13, fontWeight: 600, color: section.color, fontFamily: "'IBM Plex Mono', monospace", flexShrink: 0 }}>{formatCents(Math.abs(Number(t.signed_amount_cents ?? 0)))}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
                   )}
                 </>
               )}
             </div>
-          </section>
+            );
+          })()}
 
-          {/* 3. Entity Breakdown - need transactions */}
-          {entityBreakdownByCategory.length > 0 && (
-            <section className="bg-gray-800 rounded-lg p-6 mb-6">
-              <h2 className="text-lg font-semibold mb-4">Entity Breakdown</h2>
-              <div className="overflow-x-auto space-y-6">
-                {entityBreakdownByCategory.map(({ role, rows, totalCents }) => (
-                  <div key={role}>
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-left border-b border-gray-700">
-                          <th className="py-2">Entity</th>
-                          <th className="py-2">Role</th>
-                          <th className="py-2">Amount ({currency})</th>
-                          <th className="py-2">%</th>
-                          <th className="py-2">Count</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rows.map((r) => (
-                          <tr key={r.entityId} className="border-b border-gray-700/50">
-                            <td className="py-2">{r.entityName}</td>
-                            <td className="py-2 capitalize">{r.role.replace(/_/g, ' ')}</td>
-                            <td className="py-2 font-mono">{formatCents(r.totalAbsCents)}</td>
-                            <td className="py-2">{(r.pctBps / 100).toFixed(1)}%</td>
-                            <td className="py-2">{r.txnCount}</td>
-                          </tr>
-                        ))}
-                        <tr className="border-t-2 border-gray-600 font-medium">
-                          <td className="py-2" colSpan={2}>Total {role.replace(/_/g, ' ')}</td>
-                          <td className="py-2 font-mono">{formatCents(totalCents)}</td>
-                          <td className="py-2">100.0%</td>
-                          <td className="py-2">{rows.reduce((s, r) => s + r.txnCount, 0)}</td>
-                        </tr>
-                      </tbody>
-                    </table>
+          {/* ── PARITY REVIEW TAB ── Intelligence Console */}
+          {activeTab === 'review' && (() => {
+            const classified = entities.length > 0 ? entities.length : (exportData ? entities.length : 0);
+            const txnTotal = rawTransactions.length;
+            const reconDelta = creditScoringInputs ? (creditScoringInputs.average_net_monthly_cents as number ?? 0) : 0;
+            const confidence = snapshot?.confidence_score ?? (exportData?.analysis_run as any)?.confidence_score ?? null;
+            const corpusReady = analysisState === 'done';
+            return (
+              <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+                {/* Left: Chat area — isolated component to avoid full-page re-renders on keystroke */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <ParityReviewChat
+                    dealId={deal!.id}
+                    corpusReady={corpusReady}
+                    txnTotal={txnTotal}
+                    statementCount={statementQueue.filter(s => s.status === 'ready').length}
+                  />
+                </div>
+
+                {/* Right: Corpus state sidebar */}
+                <div style={{ width: 220, flexShrink: 0 }}>
+                  <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: 16, marginBottom: 12 }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', color: '#374151', marginBottom: 14 }}>CORPUS STATE</div>
+                    {[
+                      { label: 'Transactions', value: txnTotal > 0 ? String(txnTotal) : '—' },
+                      { label: 'Classified', value: classified > 0 ? `${classified} entities` : '—' },
+                      { label: 'Entities', value: entities.length > 0 ? String(entities.length) : '—' },
+                      { label: 'Needs review', value: needsReviewItems.length > 0 ? String(needsReviewItems.length) : '0' },
+                      { label: 'Recon delta', value: reconDelta !== 0 ? `${(reconDelta / 100).toLocaleString('en-KE', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—' },
+                      { label: 'Confidence', value: confidence != null ? `${(Number(confidence) * 100).toFixed(1)}%` : '—' },
+                    ].map(({ label, value }) => (
+                      <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
+                        <span style={{ fontSize: 11, color: '#4A5568' }}>{label}</span>
+                        <span style={{ fontSize: 12, color: '#94A3B8', fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600 }}>{value}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </section>
-          )}
 
-          {/* 4. Concentration */}
-          {entityBreakdown.length > 0 && (
-            <section className="bg-gray-800 rounded-lg p-6 mb-6">
-              <h2 className="text-lg font-semibold mb-4">Concentration</h2>
-              <div className="space-y-4">
-                <div>
-                  <h3 className="text-sm text-gray-400 mb-2">Top 5 suppliers by expense %</h3>
-                  <ul className="list-disc list-inside">
-                    {topSuppliers.map((r) => (
-                      <li key={r.entityId}>
-                        {r.entityName}: {(r.pctBps / 100).toFixed(1)}%
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div>
-                  <h3 className="text-sm text-gray-400 mb-2">Top 5 revenue entities</h3>
-                  <ul className="list-disc list-inside">
-                    {topRevenue.map((r) => (
-                      <li key={r.entityId}>
-                        {r.entityName}: {formatCents(r.totalAbsCents)}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <p>
-                  Payroll % of total outflow:{' '}
-                  {totalOutflow > 0 ? ((payrollTotal / totalOutflow) * 100).toFixed(1) : 0}%
-                </p>
-                <p>Largest revenue entity %: {(largestRevenuePct).toFixed(1)}%</p>
-              </div>
-            </section>
-          )}
+                  {/* Override queue */}
+                  <button
+                    onClick={() => setActiveTab('queue')}
+                    style={{ width: '100%', padding: '9px 12px', background: 'transparent', border: '1px solid #1E2A3A', borderRadius: 6, color: '#64748B', fontSize: 12, cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif", textAlign: 'left', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '#6366F1'; (e.currentTarget as HTMLElement).style.color = '#A5B4FC'; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '#1E2A3A'; (e.currentTarget as HTMLElement).style.color = '#64748B'; }}
+                  >
+                    <span>Review queue</span>
+                    <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: needsReviewItems.length > 0 ? '#F59E0B' : '#374151' }}>({needsReviewItems.length}) →</span>
+                  </button>
 
-          {/* 5. Override Panel */}
-          <section className="bg-gray-800 rounded-lg p-6 mb-6">
-            <h2 className="text-lg font-semibold mb-4">Override Classification</h2>
-            <div className="flex flex-wrap gap-4 items-end">
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Entity</label>
-                <select
-                  value={overrideEntityId}
-                  onChange={(e) => setOverrideEntityId(e.target.value)}
-                  className="bg-gray-900 border border-gray-700 rounded px-3 py-2 min-w-[180px]"
-                >
-                  <option value="">Select...</option>
-                  {entities.map((e) => (
-                    <option key={e.entity_id} value={e.entity_id}>
-                      {e.display_name}
-                    </option>
-                  ))}
-                </select>
+                  <button
+                    onClick={() => setActiveTab('snapshot')}
+                    style={{ width: '100%', padding: '9px 12px', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 6, color: '#A5B4FC', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(99,102,241,0.18)'; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(99,102,241,0.1)'; }}
+                  >
+                    Export snapshot
+                  </button>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">New role</label>
-                <select
-                  value={overrideRole}
-                  onChange={(e) => setOverrideRole(e.target.value)}
-                  className="bg-gray-900 border border-gray-700 rounded px-3 py-2"
-                >
-                  {['supplier', 'revenue_operational', 'revenue_non_operational', 'payroll', 'other'].map(
-                    (r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    )
-                  )}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Note (optional)</label>
-                <input
-                  type="text"
-                  value={overrideNote}
-                  onChange={(e) => setOverrideNote(e.target.value)}
-                  placeholder="Optional"
-                  className="bg-gray-900 border border-gray-700 rounded px-3 py-2 min-w-[120px]"
-                />
-              </div>
-              <button
-                onClick={handleAddOverride}
-                disabled={!overrideEntityId || overrideSaving}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded"
-              >
-                {overrideSaving ? 'Saving...' : 'Save override'}
-              </button>
+            );
+          })()}
+
+          {/* ── REVIEW QUEUE TAB ── Override / Reclassify */}
+          {activeTab === 'queue' && deal && (
+            <div style={{ maxWidth: 820 }}>
+              <ReviewQueue
+                dealId={deal.id}
+                analystInitials={userInitials}
+                onQueueUpdate={(remaining) => {
+                  setNeedsReviewItems(prev => {
+                    if (prev.length === remaining) return prev;
+                    return prev.slice(0, remaining);
+                  });
+                }}
+              />
             </div>
-            {overrideSuccess && (
-              <p className="mt-3 text-sm text-green-400">{overrideSuccess}</p>
-            )}
-            {overrideError && (
-              <p className="mt-3 text-sm text-red-400">{overrideError}</p>
-            )}
-            {overridesList.length > 0 && (
-              <div className="mt-4">
-                <h3 className="text-sm text-gray-400 mb-2">Applied overrides this session</h3>
-                <ul className="space-y-1">
-                  {overridesList.map((ov, i) => {
-                    const ent = entities.find((e) => e.entity_id === ov.entity_id);
-                    return (
-                      <li key={(ov.id as string) ?? i} className="text-sm font-mono bg-gray-900 rounded px-3 py-1">
-                        <span className="text-gray-300">{ent?.display_name ?? (ov.entity_id as string)}</span>
-                        <span className="text-gray-500 mx-2">→</span>
-                        <span className="text-blue-300">{ov.new_value as string}</span>
-                        {typeof ov.reason === 'string' && ov.reason && (
-                          <span className="text-gray-500 ml-2 italic">({ov.reason})</span>
-                        )}
-                        <span className="text-gray-600 ml-2">
-                          weight: {ov.weight as number}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            )}
-          </section>
+          )}
 
-          {/* 6. Save & Export Snapshot */}
-          <section className="bg-gray-800 rounded-lg p-6 mb-6">
-            <h2 className="text-lg font-semibold mb-4">Save &amp; Export Snapshot</h2>
-            <div className="flex items-center gap-4 mb-4">
-              <button
-                onClick={handleReExport}
-                disabled={analysisState === 'exporting'}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded"
-              >
-                {analysisState === 'exporting' ? 'Saving...' : 'Save & Export Snapshot'}
-              </button>
-              <button
-                onClick={handleDownloadCSV}
-                className="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded"
-              >
-                Download transactions CSV
-              </button>
-              <button
-                onClick={() => router.push(`/v1/deal/parity-review?dealId=${deal?.id}`)}
-                className="px-4 py-2 bg-indigo-700 hover:bg-indigo-600 rounded"
-              >
-                Analyst Enrichment →
-              </button>
-              {lastExportedAt && (
-                <span className="text-xs text-gray-400">
-                  Last exported: {lastExportedAt.toLocaleTimeString()}
-                </span>
+          {/* ── SNAPSHOT TAB ── */}
+          {activeTab === 'snapshot' && (
+            <div style={{ maxWidth: 720 }}>
+              {!run ? (
+                <div style={{ padding: '48px 0', textAlign: 'center', color: '#374151', fontSize: 13 }}>
+                  Run analysis first to generate a snapshot.
+                </div>
+              ) : (
+                <>
+                  <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: 20, marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1', marginBottom: 14 }}>EXPORT SNAPSHOT</div>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                      <button onClick={handleReExport} disabled={analysisState === 'exporting'}
+                        style={{ padding: '9px 18px', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: analysisState === 'exporting' ? 'not-allowed' : 'pointer', opacity: analysisState === 'exporting' ? 0.6 : 1 }}>
+                        {analysisState === 'exporting' ? 'Generating PDF…' : 'Save & Export PDF'}
+                      </button>
+                      <button onClick={handleDownloadCSV}
+                        style={{ padding: '9px 18px', background: 'transparent', color: '#94A3B8', border: '1px solid #1E2A3A', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>
+                        Download CSV
+                      </button>
+                    </div>
+                    {exportSuccess && <div style={{ fontSize: 12, color: '#4ADE80', marginBottom: 10 }}>{exportSuccess}</div>}
+                    {exportError && <div style={{ fontSize: 12, color: '#F87171', marginBottom: 10 }}>{exportError}</div>}
+                    {lastExportedAt && <div style={{ fontSize: 11, color: '#374151', fontFamily: "'IBM Plex Mono', monospace" }}>Last exported {lastExportedAt.toLocaleTimeString()}</div>}
+                  </div>
+
+                  {snapshot && (
+                    <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: 20 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1', marginBottom: 14 }}>SNAPSHOT HASHES</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {[
+                          { label: 'snapshot_id', value: snapshot.id },
+                          { label: 'sha256_hash', value: snapshot.sha256_hash },
+                          { label: 'financial_state_hash', value: snapshot.financial_state_hash },
+                        ].map(({ label, value }) => (
+                          <div key={label}>
+                            <div style={{ fontSize: 10, color: '#374151', marginBottom: 3, letterSpacing: '0.08em' }}>{label}</div>
+                            <div style={{ fontSize: 12, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace", wordBreak: 'break-all' }}>{value}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
-            {exportSuccess && (
-              <p className="mb-3 text-sm text-green-400">{exportSuccess}</p>
-            )}
-            {exportError && (
-              <p className="mb-3 text-sm text-red-400">{exportError}</p>
-            )}
-            <div className="font-mono text-sm space-y-1 text-gray-300">
-              <p><span className="text-gray-500">snapshot_id:</span> {snapshot.id}</p>
-              <p><span className="text-gray-500">sha256_hash:</span> {snapshot.sha256_hash}</p>
-              <p><span className="text-gray-500">financial_state_hash:</span> {snapshot.financial_state_hash}</p>
-            </div>
-          </section>
+          )}
 
-          {/* 7. Parity Review */}
-          <section className="bg-gray-800 rounded-lg p-6 mb-6">
-            <h2 className="text-lg font-semibold mb-1">Parity Review</h2>
-            <p className="text-xs text-gray-400 mb-4">
-              Ask a question about this deal. Answers are computed deterministically from the latest snapshot — no hallucination.
-            </p>
-            <textarea
-              value={reviewQuestion}
-              onChange={(e) => setReviewQuestion(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAsk();
-              }}
-              placeholder="e.g. What percentage of revenue is payroll?"
-              rows={2}
-              className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm resize-none mb-3 focus:outline-none focus:border-gray-500"
-            />
-            <button
-              onClick={handleAsk}
-              disabled={reviewLoading || !reviewQuestion.trim()}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded text-sm font-medium"
-            >
-              {reviewLoading ? 'Thinking...' : 'Parity Review'}
-            </button>
-            {reviewAnswer && (
-              <div className="mt-4 bg-gray-900 border border-gray-700 rounded p-4">
-                <p className="text-sm text-gray-200 whitespace-pre-line">{reviewAnswer}</p>
+        </div>
+      </div>
+
+      {/* ── Unknown Parser Modal ── */}
+      {unknownParserDoc && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(8,12,24,0.85)', backdropFilter: 'blur(4px)' }}>
+          <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 10, width: 480, maxWidth: '90vw', padding: 28, boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}>
+            {!parserRequestSubmitted ? (
+              <>
+                {/* Header */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#F59E0B', display: 'inline-block' }} />
+                      <span style={{ fontSize: 10, fontWeight: 700, color: '#F59E0B', letterSpacing: '0.1em', fontFamily: "'IBM Plex Mono', monospace" }}>UNKNOWN FORMAT</span>
+                    </div>
+                    <h3 style={{ fontSize: 16, fontWeight: 700, color: '#F1F5F9', margin: 0 }}>Parser not found for this bank</h3>
+                    <p style={{ fontSize: 12, color: '#4A5568', marginTop: 6, lineHeight: 1.5 }}>
+                      <span style={{ color: '#64748B', fontFamily: "'IBM Plex Mono', monospace" }}>{unknownParserDoc.fileName}</span> uses a format we don't currently support. Request a parser and we'll add it to the pipeline.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => { setUnknownParserDoc(null); setParserRequestSubmitted(false); setParserRequestForm({ bankName: '', country: 'Kenya', accountType: 'Business Current', notes: '' }); }}
+                    style={{ background: 'transparent', border: 'none', color: '#374151', fontSize: 18, cursor: 'pointer', padding: '0 0 0 12px', lineHeight: 1, flexShrink: 0 }}
+                  >×</button>
+                </div>
+
+                {/* Form */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: '#64748B', marginBottom: 5, letterSpacing: '0.06em' }}>BANK NAME *</label>
+                    <input
+                      type="text"
+                      value={parserRequestForm.bankName}
+                      onChange={(e) => setParserRequestForm((p) => ({ ...p, bankName: e.target.value }))}
+                      placeholder="e.g. Stanbic Bank, Absa, DTB"
+                      autoFocus
+                      style={{ width: '100%', background: '#080C18', border: '1px solid #1E2A3A', borderRadius: 6, padding: '8px 12px', color: '#F1F5F9', fontSize: 13, outline: 'none', boxSizing: 'border-box', fontFamily: "'IBM Plex Sans', sans-serif" }}
+                    />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, color: '#64748B', marginBottom: 5, letterSpacing: '0.06em' }}>COUNTRY</label>
+                      <select
+                        value={parserRequestForm.country}
+                        onChange={(e) => setParserRequestForm((p) => ({ ...p, country: e.target.value }))}
+                        style={{ width: '100%', background: '#080C18', border: '1px solid #1E2A3A', borderRadius: 6, padding: '8px 12px', color: '#CBD5E1', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
+                      >
+                        {['Kenya', 'Nigeria', 'Uganda', 'Tanzania', 'Ghana', 'South Africa', 'Rwanda', 'Ethiopia', 'Other'].map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11, color: '#64748B', marginBottom: 5, letterSpacing: '0.06em' }}>ACCOUNT TYPE</label>
+                      <select
+                        value={parserRequestForm.accountType}
+                        onChange={(e) => setParserRequestForm((p) => ({ ...p, accountType: e.target.value }))}
+                        style={{ width: '100%', background: '#080C18', border: '1px solid #1E2A3A', borderRadius: 6, padding: '8px 12px', color: '#CBD5E1', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
+                      >
+                        {['Business Current', 'Business Savings', 'Personal Current', 'Personal Savings', 'Mobile Money', 'Other'].map((t) => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: '#64748B', marginBottom: 5, letterSpacing: '0.06em' }}>NOTES <span style={{ color: '#2D3748' }}>optional</span></label>
+                    <textarea
+                      value={parserRequestForm.notes}
+                      onChange={(e) => setParserRequestForm((p) => ({ ...p, notes: e.target.value }))}
+                      placeholder="Any additional info about the format — e.g. PDF vs CSV, layout description…"
+                      rows={2}
+                      style={{ width: '100%', background: '#080C18', border: '1px solid #1E2A3A', borderRadius: 6, padding: '8px 12px', color: '#CBD5E1', fontSize: 12, outline: 'none', resize: 'none', boxSizing: 'border-box', fontFamily: "'IBM Plex Sans', sans-serif" }}
+                    />
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+                  <button
+                    onClick={handleParserRequestSubmit}
+                    disabled={!parserRequestForm.bankName.trim() || parserRequestSubmitting}
+                    style={{ flex: 1, padding: '10px 0', background: !parserRequestForm.bankName.trim() || parserRequestSubmitting ? '#1A2235' : '#6366F1', color: !parserRequestForm.bankName.trim() || parserRequestSubmitting ? '#374151' : '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: !parserRequestForm.bankName.trim() || parserRequestSubmitting ? 'not-allowed' : 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
+                  >
+                    {parserRequestSubmitting ? 'Submitting…' : 'Request parser →'}
+                  </button>
+                  <button
+                    onClick={() => { setUnknownParserDoc(null); setParserRequestSubmitted(false); setParserRequestForm({ bankName: '', country: 'Kenya', accountType: 'Business Current', notes: '' }); }}
+                    style={{ padding: '10px 16px', background: 'transparent', color: '#4A5568', border: '1px solid #1E2A3A', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </>
+            ) : (
+              /* Confirmation */
+              <div style={{ textAlign: 'center', padding: '8px 0' }}>
+                <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10l4.5 4.5L16 6" stroke="#A5B4FC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </div>
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: '#F1F5F9', margin: '0 0 8px' }}>Parser request submitted</h3>
+                <p style={{ fontSize: 13, color: '#4A5568', margin: '0 0 20px', lineHeight: 1.5 }}>
+                  We've logged <strong style={{ color: '#6366F1' }}>{parserRequestForm.bankName}</strong> ({parserRequestForm.country}) for the engineering queue. You'll be able to re-upload once the parser is live.
+                </p>
+                <button
+                  onClick={() => { setUnknownParserDoc(null); setParserRequestSubmitted(false); setParserRequestForm({ bankName: '', country: 'Kenya', accountType: 'Business Current', notes: '' }); }}
+                  style={{ padding: '9px 20px', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Done
+                </button>
               </div>
             )}
-          </section>
-        </>
+          </div>
+        </div>
+      )}
+
+      {/* ── Transaction Drill-Down Modal ── */}
+      {drillModal && (
+        <div onClick={() => setDrillModal(null)} style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(8,12,24,0.85)', backdropFilter: 'blur(4px)' }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 10, width: 680, maxWidth: '92vw', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 24px', borderBottom: '1px solid #1A2235', borderLeft: `3px solid ${drillModal.color}`, flexShrink: 0 }}>
+              <div>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#CBD5E1' }}>{drillModal.title}</span>
+                <span style={{ fontSize: 11, color: '#374151', marginLeft: 10, fontFamily: "'IBM Plex Mono', monospace" }}>{drillModal.rows.length} transaction{drillModal.rows.length !== 1 ? 's' : ''}</span>
+              </div>
+              <button onClick={() => setDrillModal(null)} style={{ background: 'transparent', border: 'none', color: '#374151', fontSize: 18, cursor: 'pointer', padding: '0 0 0 12px', lineHeight: 1 }}>×</button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr 120px', gap: 8, padding: '10px 24px', borderBottom: '1px solid #1A2235', flexShrink: 0 }}>
+              {['DATE', 'DESCRIPTION', 'AMOUNT'].map((h) => <span key={h} style={{ fontSize: 9, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>{h}</span>)}
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {drillModal.rows.length === 0 && (
+                <div style={{ padding: '32px 24px', textAlign: 'center', color: '#374151', fontSize: 12 }}>No transactions found for this entity.</div>
+              )}
+              {drillModal.rows.map((t, i) => {
+                const amt = Number(t.signed_amount_cents ?? 0);
+                return (
+                  <div key={i} style={{ display: 'grid', gridTemplateColumns: '100px 1fr 120px', gap: 8, padding: '9px 24px', borderBottom: '1px solid #1A2235', alignItems: 'center' }}>
+                    <span style={{ fontSize: 11, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace" }}>{(t.txn_date ?? '') as string}</span>
+                    <span style={{ fontSize: 12, color: '#CBD5E1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(t.description || t.narrative || '—') as string}</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: amt >= 0 ? '#4ADE80' : '#F87171', fontFamily: "'IBM Plex Mono', monospace", textAlign: 'right' }}>{formatCents(Math.abs(amt))}</span>
+                  </div>
+                );
+              })}
+            </div>
+            {drillModal.rows.length > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 24px', borderTop: '1px solid #1A2235', flexShrink: 0 }}>
+                <span style={{ fontSize: 11, color: '#374151' }}>Total</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: drillModal.color, fontFamily: "'IBM Plex Mono', monospace" }}>
+                  {formatCents(drillModal.rows.reduce((s, t) => s + Math.abs(Number(t.signed_amount_cents ?? 0)), 0))}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
     </div>
+  );
+}
+
+export default function V1DealPage() {
+  return (
+    <Suspense fallback={<div style={{ minHeight: '100vh', background: '#080C18', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 }}>LOADING…</div>}>
+      <V1DealPageInner />
+    </Suspense>
   );
 }

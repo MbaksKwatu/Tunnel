@@ -3,31 +3,26 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from './AuthProvider'
 import { useRouter } from 'next/navigation'
-import { createBrowserClient } from '@/lib/supabase'
-
-const isDemoMode = process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
-const demoEmail = process.env.NEXT_PUBLIC_DEMO_EMAIL || ''
 
 export default function Login() {
+  const [mode, setMode] = useState<'magic' | 'password'>('magic')
   const [isSignUp, setIsSignUp] = useState(false)
   const [showForgotPassword, setShowForgotPassword] = useState(false)
-  const [email, setEmail] = useState(isDemoMode ? demoEmail : '')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
-  
-  const { signIn, signUp, resetPassword } = useAuth()
+
+  const { signIn, signInWithOtp, signUp, resetPassword } = useAuth()
   const router = useRouter()
 
-  // Check for error in URL (from auth callback)
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search)
       const errorParam = params.get('error')
       if (errorParam) {
         setError(decodeURIComponent(errorParam))
-        // Clean up URL
         window.history.replaceState({}, '', '/login')
       }
     }
@@ -39,56 +34,46 @@ export default function Login() {
     setError('')
     setMessage('')
 
-    const timeoutMs = 20000
     const timeoutId = setTimeout(() => {
-      setError('Sign-in is taking too long. Check your network and that Supabase URL/keys are set correctly in this environment.')
+      setError('Request is taking too long. Check your network connection.')
       setLoading(false)
-    }, timeoutMs)
+    }, 20000)
 
     try {
-      if (showForgotPassword) {
-        // Handle password reset
-        if (!email) {
-          setError('Please enter your email address')
-          setLoading(false)
-          return
-        }
+      if (mode === 'magic') {
+        const { error } = await signInWithOtp(email)
+        if (error) throw error
+        clearTimeout(timeoutId)
+        setMessage('Check your email for a login link. Click it to sign in.')
+      } else if (showForgotPassword) {
+        if (!email) { setError('Please enter your email address'); setLoading(false); return }
         const { error } = await resetPassword(email)
         if (error) throw error
         clearTimeout(timeoutId)
-        setMessage('Check your email for a password reset link! The link will expire in 1 hour.')
+        setMessage('Check your email for a password reset link.')
         setShowForgotPassword(false)
-      } else if (isSignUp && !isDemoMode) {
+      } else if (isSignUp) {
         const result = await signUp(email, password)
         if (result.error) throw result.error
-
-        // Check if user needs email confirmation
-        // If session exists in result.data, user was auto-confirmed (email confirmation disabled)
-        // If no session, user needs to confirm email
+        clearTimeout(timeoutId)
         if (result.data?.session) {
-          clearTimeout(timeoutId)
-          setMessage('Account created successfully! Redirecting...')
-          // AuthProvider will handle redirect via onAuthStateChange
-        } else if (result.data?.user && !result.data?.session) {
-          clearTimeout(timeoutId)
-          setMessage('Check your email to confirm your account! The confirmation link will expire in 1 hour. Check your spam folder if you don\'t see it.')
+          setMessage('Account created! Redirecting...')
         } else {
-          clearTimeout(timeoutId)
-          setMessage('Account created! Check your email to confirm your account.')
+          setMessage('Check your email to confirm your account.')
         }
       } else {
         const { error } = await signIn(email, password)
         if (error) throw error
         clearTimeout(timeoutId)
-        // AuthProvider will handle redirect
       }
     } catch (err: any) {
       clearTimeout(timeoutId)
       const msg = err?.message || 'Authentication failed'
-      setError(msg)
-      if (msg.includes('Invalid login') || msg.includes('invalid') || msg.toLowerCase().includes('credentials')) {
-        setError('Invalid email or password. Please try again.')
-      }
+      setError(
+        msg.toLowerCase().includes('invalid') || msg.toLowerCase().includes('credentials')
+          ? 'Invalid email or password. Please try again.'
+          : msg
+      )
     } finally {
       clearTimeout(timeoutId)
       setLoading(false)
@@ -96,145 +81,141 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-6">
-      <div className="max-w-md w-full bg-gray-800 rounded-lg p-8 space-y-6">
-        {/* Logo/Title */}
-        <div className="text-center">
-          <div className="w-16 h-16 bg-blue-600 rounded-lg flex items-center justify-center mx-auto mb-4">
-            <span className="text-white font-bold text-3xl">P</span>
+    <div
+      className="min-h-screen flex items-center justify-center p-6"
+      style={{ background: '#080C18' }}
+    >
+      <div
+        className="w-full max-w-md rounded-xl p-8 space-y-6"
+        style={{ background: '#0D1220', border: '1px solid rgba(99,102,241,0.2)' }}
+      >
+        {/* Logo */}
+        <div className="text-center space-y-1">
+          <div className="text-2xl font-bold tracking-widest" style={{ color: '#F1F5F9', fontFamily: 'IBM Plex Mono, monospace' }}>
+            PARITY
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2">
-            {showForgotPassword ? 'Reset Password' : isSignUp && !isDemoMode ? 'Create Account' : 'Welcome Back'}
-          </h1>
-          <p className="text-gray-400">
-            {showForgotPassword
-              ? 'Enter your email to receive a password reset link'
-              : isDemoMode
-                ? `Demo: sign in with ${demoEmail || 'the demo account'}`
-                : isSignUp
-                  ? 'Sign up to start assessing deals'
-                  : 'Sign in to continue to Parity'
-            }
-          </p>
+          <div className="text-xs tracking-widest uppercase" style={{ color: '#6366F1', fontFamily: 'IBM Plex Sans, sans-serif' }}>
+            Intelligence Infrastructure
+          </div>
         </div>
 
-        {/* Error Message */}
+        {/* Mode toggle */}
+        <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid rgba(99,102,241,0.25)' }}>
+          <button
+            type="button"
+            onClick={() => { setMode('magic'); setError(''); setMessage('') }}
+            className="flex-1 py-2 text-sm font-medium transition-colors"
+            style={{
+              background: mode === 'magic' ? '#6366F1' : 'transparent',
+              color: mode === 'magic' ? '#fff' : '#94A3B8',
+            }}
+          >
+            Magic Link
+          </button>
+          <button
+            type="button"
+            onClick={() => { setMode('password'); setError(''); setMessage('') }}
+            className="flex-1 py-2 text-sm font-medium transition-colors"
+            style={{
+              background: mode === 'password' ? '#6366F1' : 'transparent',
+              color: mode === 'password' ? '#fff' : '#94A3B8',
+            }}
+          >
+            Password
+          </button>
+        </div>
+
+        {/* Error / success */}
         {error && (
-          <div className="bg-red-500/10 border border-red-500 text-red-500 p-4 rounded">
+          <div className="p-3 rounded-lg text-sm" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.4)', color: '#F87171' }}>
             {error}
           </div>
         )}
-
-        {/* Success Message */}
         {message && (
-          <div className="bg-green-500/10 border border-green-500 text-green-500 p-4 rounded">
+          <div className="p-3 rounded-lg text-sm" style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.4)', color: '#A5B4FC' }}>
             {message}
           </div>
         )}
 
-        {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-2">
-              Email
+            <label className="block text-xs font-medium mb-1.5" style={{ color: '#94A3B8' }}>
+              Email address
             </label>
             <input
-              id="email"
               type="email"
               value={email}
-              onChange={(e) => !isDemoMode && setEmail(e.target.value)}
+              onChange={(e) => setEmail(e.target.value)}
               required
-              readOnly={isDemoMode}
-              className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
               placeholder="you@example.com"
+              className="w-full px-3 py-2.5 rounded-lg text-sm outline-none transition-colors"
+              style={{
+                background: '#131929',
+                border: '1px solid rgba(99,102,241,0.25)',
+                color: '#F1F5F9',
+              }}
             />
           </div>
 
-          {!showForgotPassword && (
+          {mode === 'password' && !showForgotPassword && (
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <label htmlFor="password" className="block text-sm font-medium text-gray-300">
-                  Password
-                </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-medium" style={{ color: '#94A3B8' }}>Password</label>
                 {!isSignUp && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowForgotPassword(true)
-                      setError('')
-                      setMessage('')
-                    }}
-                    className="text-xs text-blue-400 hover:text-blue-300 transition"
-                  >
+                  <button type="button" onClick={() => { setShowForgotPassword(true); setError(''); setMessage('') }}
+                    className="text-xs" style={{ color: '#6366F1' }}>
                     Forgot password?
                   </button>
                 )}
               </div>
               <input
-                id="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={6}
-                className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
                 placeholder="••••••••"
+                className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                style={{ background: '#131929', border: '1px solid rgba(99,102,241,0.25)', color: '#F1F5F9' }}
               />
-              {isSignUp && (
-                <p className="text-xs text-gray-500 mt-1">
-                  Minimum 6 characters
-                </p>
-              )}
             </div>
           )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded font-bold transition"
+            className="w-full py-2.5 rounded-lg font-semibold text-sm transition-opacity"
+            style={{ background: '#6366F1', color: '#fff', opacity: loading ? 0.7 : 1 }}
           >
             {loading ? (
               <span className="flex items-center justify-center gap-2">
-                <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
-                {showForgotPassword ? 'Sending...' : isSignUp ? 'Creating Account...' : 'Signing In...'}
+                {mode === 'magic' ? 'Sending link...' : showForgotPassword ? 'Sending...' : isSignUp ? 'Creating account...' : 'Signing in...'}
               </span>
             ) : (
-              showForgotPassword ? 'Send Reset Link' : isSignUp ? 'Create Account' : 'Sign In'
+              mode === 'magic' ? 'Send Login Link' : showForgotPassword ? 'Send Reset Link' : isSignUp ? 'Create Account' : 'Sign In'
             )}
           </button>
         </form>
 
-        {/* Toggle Sign In / Sign Up / Back to Login */}
-        <div className="text-center">
-          {showForgotPassword ? (
-            <button
-              type="button"
-              onClick={() => {
-                setShowForgotPassword(false)
-                setError('')
-                setMessage('')
-              }}
-              className="text-sm text-gray-400 hover:text-white transition"
-            >
-              Back to sign in
-            </button>
-          ) : !isDemoMode ? (
-            <button
-              type="button"
-              onClick={() => {
-                setIsSignUp(!isSignUp)
-                setError('')
-                setMessage('')
-              }}
-              className="text-sm text-gray-400 hover:text-white transition"
-            >
-              {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
-            </button>
-          ) : null}
-        </div>
+        {mode === 'password' && (
+          <div className="text-center">
+            {showForgotPassword ? (
+              <button type="button" onClick={() => { setShowForgotPassword(false); setError(''); setMessage('') }}
+                className="text-xs" style={{ color: '#64748B' }}>
+                Back to sign in
+              </button>
+            ) : (
+              <button type="button" onClick={() => { setIsSignUp(!isSignUp); setError(''); setMessage('') }}
+                className="text-xs" style={{ color: '#64748B' }}>
+                {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

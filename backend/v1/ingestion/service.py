@@ -313,12 +313,19 @@ class IngestionService:
         except InvalidSchemaError as exc:
             logger.warning("[INGEST] background invalid schema stage=%s: %s", stage, exc)
             currency_mismatch = "currency mismatch" in str(exc).lower()
+            # Differentiate unsupported bank format (triggers parser-request flow on frontend)
+            # from CSV schema errors (fix_csv_header) by examining message keywords.
+            _emsg = str(exc).lower()
+            _is_unsupported = any(
+                kw in _emsg
+                for kw in ("not recognised", "not recognized", "unsupported", "no valid transactions", "bank format")
+            )
             self._update_failed(
                 document_id,
-                error_type="SchemaValidationError",
+                error_type="InvalidSchemaError",
                 error_message=str(exc),
                 stage=stage,
-                next_action="fix_csv_header",
+                next_action="request_parser" if _is_unsupported else "fix_csv_header",
                 currency_mismatch=currency_mismatch,
                 exc=exc,
             )
@@ -450,8 +457,17 @@ async def fail_stuck_processing_documents() -> None:
 
 def register_ingestion_startup(app: FastAPI) -> None:
     """Attach ingestion-related startup handlers (stuck document cleanup)."""
+    from contextlib import asynccontextmanager
 
-    @app.on_event("startup")
-    async def fail_stuck_documents() -> None:
-        """On startup, mark documents stuck in ``processing`` as failed."""
+    original_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def lifespan_with_ingestion(app: FastAPI):
         await fail_stuck_processing_documents()
+        if original_lifespan is not None:
+            async with original_lifespan(app):
+                yield
+        else:
+            yield
+
+    app.router.lifespan_context = lifespan_with_ingestion

@@ -117,7 +117,7 @@ def _build_session_response(
     deal_id: Optional[str] = None
 ) -> SessionResponse:
     """Build SessionResponse from database row"""
-    base_url = os.getenv("API_BASE_URL", "https://paritytunnel-w7d2.onrender.com")
+    base_url = os.getenv("API_BASE_URL", "https://parity-ingestion.onrender.com")
     session_id = session_data["session_id"]
     status = session_data["status"]
 
@@ -210,7 +210,7 @@ async def create_session(
         raise HTTPException(status_code=500, detail="Failed to create session")
 
     # 3. Build status URL
-    base_url = os.getenv("API_BASE_URL", "https://paritytunnel-w7d2.onrender.com")
+    base_url = os.getenv("API_BASE_URL", "https://parity-ingestion.onrender.com")
     status_url = f"{base_url}/api/musa/sessions/{session_id}/status"
 
     # 4. Trigger background processing

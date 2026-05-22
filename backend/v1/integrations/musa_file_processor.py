@@ -175,6 +175,7 @@ def _run_export(deal_id: str, created_by: str) -> dict:
             "override_penalty_bp": run["override_penalty_bp"],
         },
         overrides_applied=overrides,
+        audited_financials=None,
     )
 
     return export_snapshot(
@@ -224,7 +225,7 @@ async def _send_webhook(
         "completed_at": completed_at,
     }
     headers = {
-        "X-Api-Key": webhook_token,
+        "Authorization": f"Bearer {webhook_token}",
         "Content-Type": "application/json",
     }
     try:
@@ -342,7 +343,7 @@ async def process_musa_session(
             {"status": "complete", "completed_at": completed_at}
         ).eq("session_id", session_id).execute()
 
-        base_url = os.getenv("API_BASE_URL", "https://paritytunnel-w7d2.onrender.com")
+        base_url = os.getenv("API_BASE_URL", "https://parity-ingestion.onrender.com")
         pdf_url = f"{base_url}/v1/deals/{deal_id}/snapshot/pdf"
 
         logger.info("[MUSA] Session complete session=%s pdf_url=%s", session_id, pdf_url)

@@ -20,10 +20,10 @@ export function BatchUpload({ dealId: _dealId, onFileDrop }: BatchUploadProps) {
 
     const invalidFiles = files.filter((f) => {
       const lower = f.name.toLowerCase();
-      return !lower.endsWith('.pdf') && !lower.endsWith('.xlsx') && !lower.endsWith('.xls');
+      return !lower.endsWith('.pdf') && !lower.endsWith('.xlsx') && !lower.endsWith('.xls') && !lower.endsWith('.csv');
     });
     if (invalidFiles.length > 0) {
-      setError('Only PDF or Excel files are supported');
+      setError('Only PDF, Excel, or CSV files are supported');
       return;
     }
 
@@ -44,6 +44,8 @@ export function BatchUpload({ dealId: _dealId, onFileDrop }: BatchUploadProps) {
       'application/pdf': ['.pdf'],
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
       'application/vnd.ms-excel': ['.xls'],
+      'text/csv': ['.csv'],
+      'text/plain': ['.csv'],
     },
     maxFiles: 1,
     noClick: true,

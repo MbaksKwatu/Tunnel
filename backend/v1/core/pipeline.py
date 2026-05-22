@@ -6,6 +6,7 @@ from ..parsing.common import canonical_hash
 from .transfer_matcher import match_transfers
 from .entities import build_entities
 from .classifier import classify
+from .anomaly_detector import annotate_anomalies
 from .metrics_engine import compute_metrics
 from .confidence_engine import compute_override_penalty_bp, finalize_confidence
 
@@ -41,6 +42,11 @@ def run_pipeline(
                 "role_version": "v1_rules",
             }
         )
+
+    # Step 3.5: anomaly detection — annotates each tx["anomalies"] in-place
+    entity_id_to_display = {e["entity_id"]: e["display_name"] for e in entities}
+    entity_display_map = {tid: entity_id_to_display[eid] for tid, eid in txn_entity_map.items()}
+    annotate_anomalies(txs, entity_display_map)
 
     # Step 4: metrics
     metrics = compute_metrics(txs, accrual)

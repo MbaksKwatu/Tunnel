@@ -198,8 +198,9 @@ def _keyword_classify(descriptor: str, amount_cents: int) -> Optional[Tuple[str,
     if _classify_currency_conversion(d.upper()):
         return ("currency_conversion", "keyword_match:currency_conversion")
 
-    # PAYED BY / PAID BY prefix → revenue_operational (must run before all other checks)
-    if d.startswith("payed by") or d.startswith("paid by"):
+    # PAYED / PAID prefix → revenue_operational (must run before all other checks)
+    # Covers "PAYED BY ...", "PAID BY ...", and "PAYED 703193... BY:FLIXNET/..."
+    if d.startswith("payed ") or d.startswith("paid by"):
         return ("revenue_operational", "keyword_match:payed_by_prefix")
 
     # MPS credit prefix → revenue_operational
@@ -284,9 +285,23 @@ def _keyword_classify(descriptor: str, amount_cents: int) -> Optional[Tuple[str,
             else:
                 return ("revenue_operational", f"keyword_match:{kw}:bill_payment_inbound")
 
+    # Bank to Mobile — Equity Bank B2C to phone number
+    if "bank to mobile" in d:
+        if amt < 0:
+            return ("supplier", "keyword_match:bank_to_mobile_outflow")
+        else:
+            return ("supplier", "keyword_match:bank_to_mobile_outflow")
+
     # EazzyBiz B2C bulk MPESA outflow → supplier_payment (direction-guarded)
     if "eazzybiz" in d and amt < 0:
         return ("supplier_payment", "keyword_match:eazzybiz_b2c_outflow")
+
+    # EAZZY-FUNDS TRNSF — Equity Bank fund transfer (distinct from EazzyBiz B2C)
+    if "eazzy-funds" in d or "eazzy funds" in d:
+        if amt > 0:
+            return ("revenue_operational", "keyword_match:eazzy_funds_inflow")
+        else:
+            return ("supplier", "keyword_match:eazzy_funds_outflow")
 
     # USSD MPESA individual send → supplier_payment (direction-guarded)
     if d.startswith("ussd/mpesa") and amt < 0:
@@ -321,15 +336,13 @@ def _keyword_classify(descriptor: str, amount_cents: int) -> Optional[Tuple[str,
             else:
                 return ("mpesa_inflow", f"keyword_match:{kw}:mobile_transfer_keywords_inbound")
 
-    # 14. PesaLink
+    # 14. PesaLink — channel only; direction determines role, no amount threshold
     for kw in _PESALINK_INFLOW_KEYWORDS:
         if kw in d:
             if amt > 0:
                 return ("pesalink_inflow", f"keyword_match:{kw}:pesalink_keywords")
-            elif amt <= -_LARGE_POSITIVE_THRESHOLD_CENTS:
-                return ("needs_review", f"keyword_match:{kw}:pesalink_large_outbound")
             else:
-                return ("bill_payment", f"keyword_match:{kw}:pesalink_keywords_outbound")
+                return ("pesalink_outflow", f"keyword_match:{kw}:pesalink_keywords_outbound")
 
     # 15. Revenue operational
     for kw in _REVENUE_OP_KEYWORDS:

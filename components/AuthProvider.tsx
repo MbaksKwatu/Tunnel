@@ -11,6 +11,7 @@ interface AuthContextType {
   session: Session | null
   loading: boolean
   signIn: (email: string, password: string) => Promise<{ error?: any }>
+  signInWithOtp: (email: string) => Promise<{ error?: any }>
   signUp: (email: string, password: string) => Promise<{ error?: any; data?: any }>
   resetPassword: (email: string) => Promise<{ error?: any }>
   signOut: () => Promise<void>
@@ -60,10 +61,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(session?.user ?? null)
         setApiToken(session?.access_token ?? null)
         if (event === 'SIGNED_IN') {
-          router.push('/v1/deal')
+          document.cookie = 'sb-auth-hint=1; path=/; max-age=86400; SameSite=Lax'
+          // Only redirect if coming from login/auth pages — don't interrupt an active session
+          const path = window.location.pathname
+          if (path === '/login' || path.startsWith('/auth')) {
+            router.push('/deals')
+          }
         }
-        
+
         if (event === 'SIGNED_OUT') {
+          document.cookie = 'sb-auth-hint=; path=/; max-age=0'
           router.push('/login')
         }
       }
@@ -130,8 +137,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error }
   }
 
+  const signInWithOtp = async (email: string) => {
+    const supabase = getSupabaseClient()
+    if (!supabase) {
+      return { error: { message: 'Supabase not configured' } }
+    }
+    const redirectTo = typeof window !== 'undefined'
+      ? `${window.location.origin}/auth/callback`
+      : process.env.NEXT_PUBLIC_SITE_URL
+        ? `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
+        : '/auth/callback'
+    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } })
+    return { error }
+  }
+
   const signOut = async () => {
     setApiToken(null)
+    document.cookie = 'sb-auth-hint=; path=/; max-age=0'
     const supabase = getSupabaseClient()
     if (supabase) {
       await supabase.auth.signOut()
@@ -144,6 +166,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     session,
     loading,
     signIn,
+    signInWithOtp,
     signUp,
     resetPassword,
     signOut,

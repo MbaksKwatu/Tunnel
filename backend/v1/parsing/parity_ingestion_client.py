@@ -137,7 +137,20 @@ def parse_via_parity_ingestion(
         # We got a response; try to parse JSON regardless of status code.
         result: Any = None
         if resp.status_code == 415:
-            # Keep strict schema error semantics.
+            # Before giving up, try inline parsers that run directly on the Render
+            # worker (pdfplumber only — no OCR).  This covers KCB iBANK Online PDFs
+            # that the deployed parity-ingestion service may not yet recognise.
+            inline_rows = _try_inline_parse(file_bytes, fname, document_id)
+            if inline_rows:
+                logger.info(
+                    "[BACKEND] Inline parser succeeded for document_id=%s rows=%d",
+                    document_id,
+                    len(inline_rows),
+                )
+                rows_sorted = sort_rows(inline_rows)
+                raw_hash = canonical_hash(rows_sorted)
+                return rows_sorted, raw_hash, "KES", {}
+
             try:
                 detail = resp.json().get("detail", "Bank format not recognised by parity-ingestion.")
             except Exception:
@@ -199,6 +212,28 @@ def parse_via_parity_ingestion(
                 # If salvage fails, fall back to raising the timeout.
                 pass
         raise
+
+
+def _try_inline_parse(
+    file_bytes: bytes,
+    file_name: str,
+    document_id: str,
+) -> list:
+    """
+    Attempt to parse a PDF that parity-ingestion rejected (415).
+
+    Currently handles KCB iBANK Online format.
+    Returns a list of backend-format rows, or [] if format not recognised.
+    """
+    try:
+        from .kcb_inline import detect_kcb_online_bytes, extract_kcb_online_rows
+        if detect_kcb_online_bytes(file_bytes):
+            logger.info("[INLINE] Detected KCB Online format — parsing inline")
+            return extract_kcb_online_rows(file_bytes, document_id)
+    except Exception as exc:
+        logger.warning("[INLINE] KCB inline parse failed: %s", exc)
+
+    return []
 
 
 # Backward-compatible name for imports

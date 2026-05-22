@@ -62,7 +62,7 @@ export interface Deal {
   accrual_revenue_cents?: number
   accrual_period_start?: string
   accrual_period_end?: string
-  /** Distinct batch uploads used (1–4); usually derived client-side from documents if not on deal row */
+  /** Distinct batch uploads used (1–20); usually derived client-side from documents if not on deal row */
   batch_upload_count?: number
 }
 
@@ -110,11 +110,15 @@ export interface ExportResponse {
 export async function createDeal(
   currency: string,
   name?: string,
-  accrual?: AccrualInput
+  accrual?: AccrualInput,
+  companyName?: string,
+  analystInitials?: string
 ): Promise<{ deal: Deal }> {
   const form = new FormData()
   form.append('currency', currency)
   if (name) form.append('name', name)
+  if (companyName) form.append('company_name', companyName)
+  if (analystInitials) form.append('analyst_initials', analystInitials)
   if (accrual?.accrual_revenue_cents != null)
     form.append('accrual_revenue_cents', String(accrual.accrual_revenue_cents))
   if (accrual?.accrual_period_start)
@@ -247,6 +251,61 @@ export async function uploadDocumentsBatch(
   }
 }
 
+export interface AuditedFinancialsRecord {
+  id?: string
+  deal_id: string
+  financial_year?: number
+  financial_year_start?: string
+  financial_year_end?: string
+  company_name?: string
+  declaration_type?: 'audited' | 'management'
+  turnover_cents?: number | null
+  profit_after_tax_cents?: number | null
+  total_assets_cents?: number | null
+  cash_and_equivalents_cents?: number | null
+  total_expenses_cents?: number | null
+  total_liabilities_cents?: number | null
+  extraction_confidence?: number
+}
+
+export async function uploadAuditedFinancials(
+  dealId: string,
+  file: File,
+  declarationType: 'audited' | 'management' = 'audited'
+): Promise<AuditedFinancialsRecord> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('declaration_type', declarationType)
+  const res = await fetchApiFormData(`${BASE}/deals/${dealId}/upload-financials`, {
+    method: 'POST',
+    body: form,
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function getAuditedFinancials(
+  dealId: string
+): Promise<{ deal_id: string; records: AuditedFinancialsRecord[] }> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/audited-financials`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function patchAuditedFinancials(
+  dealId: string,
+  financialYear: number,
+  fields: Partial<AuditedFinancialsRecord>
+): Promise<AuditedFinancialsRecord> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/audited-financials/${financialYear}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
 export async function addOverride(
   dealId: string,
   entityId: string,
@@ -281,6 +340,33 @@ export async function askParity(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ question }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export interface ParityReviewChatResponse {
+  response: string
+  conversation_history: Array<{ role: string; content: unknown }>
+  tools_called: string[]
+  is_proactive?: boolean
+  usage: {
+    input_tokens: number
+    output_tokens: number
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?: number
+  }
+}
+
+export async function askParityReview(
+  dealId: string,
+  message: string,
+  conversationHistory: Array<{ role: string; content: unknown }> = []
+): Promise<ParityReviewChatResponse> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/parity-review/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, conversation_history: conversationHistory }),
   })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
@@ -417,4 +503,170 @@ export async function downloadEnrichedPdf(
 ): Promise<Response> {
   const params = enrichmentId ? `?enrichment_id=${enrichmentId}` : ''
   return fetchApi(`${BASE}/deals/${dealId}/snapshot/pdf/enriched${params}`)
+}
+
+export interface NeedsReviewTransaction {
+  row_id: string
+  txn_hash: string
+  txn_date: string
+  description: string
+  signed_amount_cents: number
+  entity_name: string
+  current_role: string
+}
+
+export async function getNeedsReviewTransactions(
+  dealId: string
+): Promise<{ transactions: NeedsReviewTransaction[]; total: number }> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/transactions/needs-review`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function resolveTransaction(
+  dealId: string,
+  rowId: string,
+  newRole: string,
+  analystInitials: string
+): Promise<{ success: boolean; remaining_count: number }> {
+  const form = new FormData()
+  form.append('row_id', rowId)
+  form.append('new_role', newRole)
+  form.append('analyst_initials', analystInitials)
+  const res = await fetchApiFormData(`${BASE}/deals/${dealId}/transactions/resolve`, {
+    method: 'POST',
+    body: form,
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+// ── Intelligence Query Interface ──────────────────────────────────────────────
+
+export type QueryType = 'classification' | 'computation' | 'pattern'
+export type UserRole = 'analyst' | 'officer'
+
+export interface IntelligenceAskResponse {
+  id: string
+  response_text: string
+  basis_sources: string[]
+  computation_steps: string[]
+}
+
+export async function intelligenceAsk(
+  dealId: string,
+  query: string,
+  queryType: QueryType,
+  userRole: UserRole,
+  analystInitials: string
+): Promise<IntelligenceAskResponse> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/intelligence/ask`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query,
+      query_type: queryType,
+      user_role: userRole,
+      analyst_initials: analystInitials,
+    }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export interface ExportSummary {
+  deal_id: string
+  deal_name: string
+  company_name: string
+  analyst_initials: string
+  files_uploaded: number
+  total_transactions: number
+  override_count: number
+  logged_entries: number
+  tier: string
+  has_snapshot: boolean
+}
+
+export async function getExportSummary(dealId: string): Promise<ExportSummary> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/export-summary`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function downloadSnapshotPdf(dealId: string): Promise<Response> {
+  return fetchApi(`${BASE}/deals/${dealId}/snapshot/pdf`)
+}
+
+export async function exportTransactionsCsvBlob(dealId: string): Promise<Response> {
+  return fetchApi(`${BASE}/deals/${dealId}/export/transactions`)
+}
+
+export async function logIntelligenceEntry(
+  dealId: string,
+  entryId: string
+): Promise<{ success: boolean; logged_count: number }> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/intelligence/${entryId}/log`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export interface DealListItem {
+  id: string
+  name?: string
+  company_name?: string
+  analyst_initials?: string
+  currency?: string
+  created_at?: string
+  [key: string]: unknown
+}
+
+export async function listDeals(userId: string): Promise<{ deals: DealListItem[] }> {
+  const res = await fetchApi(`${BASE}/deals?created_by=${encodeURIComponent(userId)}`)
+  if (!res.ok) return { deals: [] }
+  return res.json()
+}
+
+export interface NeedsReviewItem {
+  row_id: string
+  txn_hash: string
+  txn_date: string
+  description: string
+  signed_amount_cents: number
+  entity_name?: string
+  entity_id?: string
+  role?: string
+  flag_reason?: string
+}
+
+export async function getNeedsReview(dealId: string): Promise<{ transactions: NeedsReviewItem[]; total: number }> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/transactions/needs-review`)
+  if (!res.ok) return { transactions: [], total: 0 }
+  return res.json()
+}
+
+export interface ReconciliationResult {
+  deal_id: string
+  reconciliation: Record<string, unknown>
+}
+
+export async function getReconciliation(dealId: string): Promise<ReconciliationResult> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/reconciliation`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Reconciliation failed' }))
+    throw new Error(err.detail ?? 'Reconciliation failed')
+  }
+  return res.json()
+}
+
+export async function deleteDocument(documentId: string): Promise<{ deleted: boolean; document_id: string; deal_id: string }> {
+  const res = await fetchApi(`${BASE}/documents/${documentId}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Delete failed' }))
+    throw new Error(err.detail ?? 'Delete failed')
+  }
+  return res.json()
 }
