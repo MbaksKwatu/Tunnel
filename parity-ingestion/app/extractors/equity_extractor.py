@@ -539,6 +539,7 @@ def _run_personal_on_pages(
     for page in pages:
         text = page.extract_text()
         if not text:
+            page.flush_cache()
             continue
 
         in_transactions = False
@@ -566,6 +567,7 @@ def _run_personal_on_pages(
             state.row_idx = _append_raw_transaction(
                 state.transactions, parsed, file_path, state.row_idx
             )
+        page.flush_cache()
 
 
 def _extract_equity_personal(pdf: Any, file_path: str) -> List[RawTransaction]:
@@ -583,6 +585,7 @@ def _run_business_on_pages(
     for page in pages:
         text = page.extract_text()
         if not text:
+            page.flush_cache()
             continue
 
         lines = text.split("\n")
@@ -620,6 +623,7 @@ def _run_business_on_pages(
                 )
             elif line:
                 state.buffer.append(line)
+        page.flush_cache()
 
 
 def _run_split_date_on_pages(
@@ -717,6 +721,7 @@ def _run_split_date_on_pages(
             state.row_idx = _append_raw_transaction(
                 state.transactions, parsed, file_path, state.row_idx
             )
+        page.flush_cache()
 
 
 def _extract_equity_business(pdf: Any, file_path: str) -> List[RawTransaction]:
@@ -940,6 +945,7 @@ def extract_equity_clms_pdf(file_path: str) -> ExtractionResult:
         for page in pdf.pages:
             words = page.extract_words()
             if not words:
+                page.flush_cache()
                 continue
 
             words_sorted = sorted(words, key=lambda w: (w["top"], w["x0"]))
@@ -1031,6 +1037,8 @@ def extract_equity_clms_pdf(file_path: str) -> ExtractionResult:
                         extraction_confidence=1.0,
                     )
                 )
+
+            page.flush_cache()
 
     return ExtractionResult(
         source_file=file_path,
