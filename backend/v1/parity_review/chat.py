@@ -14,6 +14,7 @@ from .personalities import SME_DEBT_FUND_PERSONALITY
 from .context import build_snapshot_context
 from .proactive_analysis import generate_proactive_analysis
 from . import formatters
+from .tools.deal_summary import get_deal_summary
 from .tools.financial_metrics import calculate_financial_metrics
 from .tools.operational_metrics import calculate_operational_metrics
 from .tools.entity_details import get_entity_details
@@ -31,6 +32,15 @@ _PROACTIVE_TRIGGERS = frozenset({
 })
 
 PARITY_TOOLS: List[Dict[str, Any]] = [
+    {
+        "name": "get_deal_summary",
+        "description": (
+            "Return deal-level transaction counts and totals: credits vs debits (count and amount), "
+            "breakdown by transaction role (revenue, supplier, payroll, tax, loan, needs_review), "
+            "monthly inflow/outflow/net table, and distinct entity count."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
     {
         "name": "calculate_financial_metrics",
         "description": (
@@ -212,6 +222,8 @@ def _dispatch_tool(
     tool_input: Dict[str, Any],
     deal_data: Dict[str, Any],
 ) -> Dict[str, Any]:
+    if name == "get_deal_summary":
+        return get_deal_summary(deal_data)
     if name == "calculate_financial_metrics":
         return calculate_financial_metrics(deal_data)
     if name == "calculate_operational_metrics":
