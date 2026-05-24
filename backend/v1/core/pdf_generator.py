@@ -812,11 +812,20 @@ def generate_pdf(
     _REV_CAP = 100
     if review_ents:
         story += _section_header("08  ITEMS REQUIRING REVIEW")
-        count = len(review_ents)
-        story.append(_body_line(
-            f"{count} transaction{'s' if count != 1 else ''} flagged for analyst review "
-            "before finalising this record."
-        ))
+        total_review_ents = len(review_ents)
+        shown = min(total_review_ents, _REV_CAP)
+        if total_review_ents > _REV_CAP:
+            header_line = (
+                f"{total_review_ents} entities flagged for analyst review "
+                f"(showing top {_REV_CAP} by amount) before finalising this record."
+            )
+        else:
+            header_line = (
+                f"{total_review_ents} "
+                f"{'entity' if total_review_ents == 1 else 'entities'} flagged for analyst review "
+                "before finalising this record."
+            )
+        story.append(_body_line(header_line))
         story.append(Spacer(1, 4))
         rev_rows = [["Entity", "Flagged As", "Amount", "Action Required"]]
         for r in review_ents[:_REV_CAP]:
@@ -834,8 +843,12 @@ def generate_pdf(
             ])
         story.append(_table(rev_rows, [140, 90, 95, 175], right_cols=[2]))
         story.append(Spacer(1, 4))
-        if count > _REV_CAP:
-            story.append(_p(f"Showing first {_REV_CAP} items requiring review.", _S_SMALL))
+        if total_review_ents > _REV_CAP:
+            story.append(_p(
+                f"Showing {_REV_CAP} of {total_review_ents} flagged entities. "
+                "Full list available in CSV export.",
+                _S_SMALL,
+            ))
         story.append(Spacer(1, 12))
 
     # ── 09  MONTHLY CASHFLOW ──────────────────────────────────────────────────
