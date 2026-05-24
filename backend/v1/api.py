@@ -2004,6 +2004,50 @@ def add_section_to_snapshot(request: Request, deal_id: str, body: dict = Body(..
 # Parity Review AI — Claude Sonnet 4.6 Chat Interface
 # ===================================================================
 
+@router.get("/deals/{deal_id}/parity-review/chat/session")
+def get_parity_chat_session(request: Request, deal_id: str):
+    """Load persisted Parity Review chat session for the current user + deal."""
+    from .db.supabase_client import get_supabase
+
+    user_id = _extract_user_id_from_request(request) or "anonymous"
+    try:
+        sb = get_supabase()
+        row = (
+            sb.table("parity_chat_sessions")
+            .select("id, chat_history, conversation_history, updated_at")
+            .eq("deal_id", deal_id)
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        if row.data:
+            return {
+                "session_id": row.data["id"],
+                "chat_history": row.data["chat_history"],
+                "conversation_history": row.data["conversation_history"],
+                "updated_at": row.data["updated_at"],
+            }
+    except Exception:
+        logger.warning("[parity-review] failed to load chat session deal=%s user=%s", deal_id, user_id)
+
+    return {"session_id": None, "chat_history": [], "conversation_history": []}
+
+
+@router.delete("/deals/{deal_id}/parity-review/chat/session")
+def clear_parity_chat_session(request: Request, deal_id: str):
+    """Clear persisted chat session so the analyst can start fresh."""
+    from .db.supabase_client import get_supabase
+
+    user_id = _extract_user_id_from_request(request) or "anonymous"
+    try:
+        sb = get_supabase()
+        sb.table("parity_chat_sessions").delete().eq("deal_id", deal_id).eq("user_id", user_id).execute()
+    except Exception:
+        logger.warning("[parity-review] failed to clear chat session deal=%s", deal_id)
+
+    return {"cleared": True}
+
+
 @router.post("/deals/{deal_id}/parity-review/chat")
 def parity_review_chat(request: Request, deal_id: str, body: dict = Body(...)):
     """
@@ -2012,7 +2056,7 @@ def parity_review_chat(request: Request, deal_id: str, body: dict = Body(...)):
     Body:
         message (str): Analyst's question.
         conversation_history (list, optional): Prior [{role, content}] turns.
-        personality (str, optional): "sme_debt_fund" (default). Future: mfi, dfi, bank.
+        chat_history (list, optional): Display messages [{role, text, time}] for persistence.
 
     Returns:
         response (str): AI answer.
@@ -2022,12 +2066,14 @@ def parity_review_chat(request: Request, deal_id: str, body: dict = Body(...)):
     """
     from .parity_review.context import parse_snapshot
     from .parity_review.chat import run_chat
+    from .db.supabase_client import get_supabase
 
     message = (body.get("message") or "").strip()
     if not message:
         _error("BAD_REQUEST", "message is required")
 
     conversation_history = body.get("conversation_history") or []
+    chat_history = body.get("chat_history") or []
 
     repos = _repos(request)
     if not repos["deals"].get_deal(deal_id):
@@ -2061,5 +2107,22 @@ def parity_review_chat(request: Request, deal_id: str, body: dict = Body(...)):
     except Exception as exc:
         logger.exception("[parity-review] run_chat failed deal=%s", deal_id)
         raise HTTPException(status_code=500, detail=f"AI chat error: {exc}")
+
+    # Persist chat session to Supabase (fire-and-forget, don't block response)
+    user_id = _extract_user_id_from_request(request) or "anonymous"
+    try:
+        sb = get_supabase()
+        sb.table("parity_chat_sessions").upsert(
+            {
+                "deal_id": deal_id,
+                "user_id": user_id,
+                "chat_history": chat_history,
+                "conversation_history": result["conversation_history"],
+                "updated_at": "now()",
+            },
+            on_conflict="deal_id,user_id",
+        ).execute()
+    except Exception:
+        logger.warning("[parity-review] failed to persist chat session deal=%s", deal_id)
 
     return result

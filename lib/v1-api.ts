@@ -361,15 +361,34 @@ export interface ParityReviewChatResponse {
 export async function askParityReview(
   dealId: string,
   message: string,
-  conversationHistory: Array<{ role: string; content: unknown }> = []
+  conversationHistory: Array<{ role: string; content: unknown }> = [],
+  chatHistory: Array<{ role: string; text: string; time: string }> = []
 ): Promise<ParityReviewChatResponse> {
   const res = await fetchApi(`${BASE}/deals/${dealId}/parity-review/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, conversation_history: conversationHistory }),
+    body: JSON.stringify({ message, conversation_history: conversationHistory, chat_history: chatHistory }),
   })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
+}
+
+export interface ParityChatSession {
+  session_id: string | null
+  chat_history: Array<{ role: string; text: string; time: string }>
+  conversation_history: Array<{ role: string; content: unknown }>
+  updated_at?: string
+}
+
+export async function getParityChatSession(dealId: string): Promise<ParityChatSession> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/parity-review/chat/session`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function clearParityChatSession(dealId: string): Promise<void> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/parity-review/chat/session`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(await res.text())
 }
 
 export async function exportTransactionsCsv(dealId: string): Promise<Response> {

@@ -1,13 +1,70 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, memo } from 'react'
-import { askParityReview } from '@/lib/v1-api'
+import { askParityReview, getParityChatSession, clearParityChatSession } from '@/lib/v1-api'
 
 // ── Lightweight markdown → HTML ────────────────────────────────────────────
 
+function convertTables(text: string): string {
+  const lines = text.split('\n')
+  const out: string[] = []
+  let i = 0
+  while (i < lines.length) {
+    // Detect table block: line starts with |
+    if (lines[i].trim().startsWith('|') && lines[i].trim().endsWith('|')) {
+      const block: string[] = []
+      while (i < lines.length && lines[i].trim().startsWith('|') && lines[i].trim().endsWith('|')) {
+        block.push(lines[i].trim())
+        i++
+      }
+      if (block.length >= 2) {
+        out.push(renderTable(block))
+      } else {
+        out.push(...block)
+      }
+    } else {
+      out.push(lines[i])
+      i++
+    }
+  }
+  return out.join('\n')
+}
+
+function renderTable(rows: string[]): string {
+  const parseCells = (row: string) =>
+    row.split('|').slice(1, -1).map(c => c.trim())
+
+  // Find separator row (contains only -, :, spaces, |)
+  let sepIdx = -1
+  for (let i = 0; i < rows.length; i++) {
+    if (/^\|[\s\-:|]+\|$/.test(rows[i])) { sepIdx = i; break }
+  }
+
+  const headerCells = sepIdx > 0 ? parseCells(rows[sepIdx - 1]) : null
+  const bodyStart = sepIdx >= 0 ? sepIdx + 1 : (headerCells ? 1 : 0)
+  const bodyRows = rows.slice(bodyStart).filter(r => !/^\|[\s\-:|]+\|$/.test(r))
+
+  const thStyle = 'padding:5px 10px;border:1px solid #1E2A3A;font-size:11px;font-weight:600;color:#A5B4FC;background:#0F172A;text-align:left;white-space:nowrap'
+  const tdStyle = 'padding:4px 10px;border:1px solid #1E2A3A;font-size:12px;color:#CBD5E1;white-space:nowrap'
+
+  let html = '<table style="border-collapse:collapse;width:100%;margin:8px 0;font-family:\'IBM Plex Mono\',monospace">'
+  if (headerCells) {
+    html += '<thead><tr>' + headerCells.map(c => `<th style="${thStyle}">${c}</th>`).join('') + '</tr></thead>'
+  }
+  html += '<tbody>'
+  for (const row of bodyRows) {
+    const cells = parseCells(row)
+    html += '<tr>' + cells.map(c => `<td style="${tdStyle}">${c}</td>`).join('') + '</tr>'
+  }
+  html += '</tbody></table>'
+  return html
+}
+
 function mdToHtml(md: string): string {
-  return md
+  let s = md
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  s = convertTables(s)
+  return s
     .replace(/^## (.+)$/gm, '<h3 style="font-size:13px;font-weight:700;margin:12px 0 4px;color:#A5B4FC">$1</h3>')
     .replace(/^### (.+)$/gm, '<h4 style="font-size:12px;font-weight:700;margin:10px 0 3px;color:#94A3B8">$1</h4>')
     .replace(/^---$/gm, '<hr style="border:none;border-top:1px solid #1E2A3A;margin:8px 0"/>')
@@ -46,6 +103,7 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([])
   const [conversationHistory, setConversationHistory] = useState<Array<{ role: string; content: unknown }>>([])
   const [proactiveTriggered, setProactiveTriggered] = useState(false)
+  const [sessionLoaded, setSessionLoaded] = useState(false)
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -54,27 +112,47 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [chatHistory])
 
-  // Auto-trigger proactive analysis
+  // Load existing session on mount
   useEffect(() => {
-    if (corpusReady && !proactiveTriggered && chatHistory.length === 0) {
+    if (!corpusReady || sessionLoaded) return
+    setSessionLoaded(true)
+    ;(async () => {
+      try {
+        const session = await getParityChatSession(dealId)
+        if (session.chat_history && session.chat_history.length > 0) {
+          setChatHistory(session.chat_history as ChatMessage[])
+          setConversationHistory(session.conversation_history)
+          setProactiveTriggered(true)  // don't re-trigger proactive
+          return
+        }
+      } catch {
+        // no session — fall through to proactive
+      }
+      // No existing session — trigger proactive analysis
       setProactiveTriggered(true)
       doAsk('start')
-    }
-  }, [corpusReady, proactiveTriggered, chatHistory.length])
+    })()
+  }, [corpusReady, sessionLoaded, dealId])
 
   const doAsk = useCallback(async (overrideMessage?: string) => {
     const message = overrideMessage || question.trim()
     if (!message || loading) return
     const now = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+
+    // Build updated chat history for persistence
+    let updatedChatHistory = [...chatHistory]
     if (!overrideMessage) {
-      setChatHistory(prev => [...prev, { role: 'analyst', text: message, time: now }])
+      updatedChatHistory = [...updatedChatHistory, { role: 'analyst' as const, text: message, time: now }]
+      setChatHistory(updatedChatHistory)
       setQuestion('')
     }
+
     setLoading(true)
     try {
-      const result = await askParityReview(dealId, message, conversationHistory)
+      const result = await askParityReview(dealId, message, conversationHistory, updatedChatHistory)
       const answerTime = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-      setChatHistory(prev => [...prev, { role: 'parity', text: result.response, time: answerTime }])
+      const newHistory = [...updatedChatHistory, { role: 'parity' as const, text: result.response, time: answerTime }]
+      setChatHistory(newHistory)
       setConversationHistory(result.conversation_history)
     } catch (e) {
       const errText = e instanceof Error ? e.message : 'Request failed'
@@ -83,7 +161,15 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
     } finally {
       setLoading(false)
     }
-  }, [question, loading, dealId, conversationHistory])
+  }, [question, loading, dealId, conversationHistory, chatHistory])
+
+  const handleClearChat = useCallback(async () => {
+    try { await clearParityChatSession(dealId) } catch { /* ignore */ }
+    setChatHistory([])
+    setConversationHistory([])
+    setProactiveTriggered(false)
+    setSessionLoaded(false)
+  }, [dealId])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); doAsk() }
@@ -125,6 +211,16 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
           }}>
             {corpusReady ? 'READY' : 'PENDING'}
           </span>
+          {chatHistory.length > 0 && (
+            <button
+              onClick={handleClearChat}
+              style={{ marginLeft: 'auto', fontSize: 10, color: '#4A5568', background: 'transparent', border: '1px solid #1E2A3A', borderRadius: 4, padding: '3px 10px', cursor: 'pointer', fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.06em' }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '#EF4444'; (e.currentTarget as HTMLElement).style.color = '#F87171'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '#1E2A3A'; (e.currentTarget as HTMLElement).style.color = '#4A5568'; }}
+            >
+              CLEAR CHAT
+            </button>
+          )}
         </div>
 
         {/* Corpus description card */}

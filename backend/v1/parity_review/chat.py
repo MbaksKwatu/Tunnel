@@ -19,6 +19,7 @@ from .tools.financial_metrics import calculate_financial_metrics
 from .tools.operational_metrics import calculate_operational_metrics
 from .tools.entity_details import get_entity_details
 from .tools.explain_flags import explain_flagged_item
+from .tools.query_transactions import query_transactions
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,50 @@ PARITY_TOOLS: List[Dict[str, Any]] = [
                 }
             },
             "required": ["entity_name"],
+        },
+    },
+    {
+        "name": "query_transactions",
+        "description": (
+            "Search and filter individual transactions. Supports filtering by: "
+            "role (needs_review, revenue_operational, supplier_payment, payroll, loan_repayment, tax_payment), "
+            "minimum/maximum amount in cents, entity name substring, date range (YYYY-MM-DD), "
+            "and anomaly presence. Returns matching transactions with txn_id, date, amount, "
+            "description, entity name, and anomaly details. Sorted by amount descending."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "role": {
+                    "type": "string",
+                    "description": "Filter by transaction role (exact match).",
+                },
+                "min_amount_cents": {
+                    "type": "integer",
+                    "description": "Minimum absolute amount in cents (e.g. 500000 = 5,000 KES).",
+                },
+                "max_amount_cents": {
+                    "type": "integer",
+                    "description": "Maximum absolute amount in cents.",
+                },
+                "entity_name": {
+                    "type": "string",
+                    "description": "Entity name or description substring (case-insensitive).",
+                },
+                "date_from": {
+                    "type": "string",
+                    "description": "Start date inclusive (YYYY-MM-DD).",
+                },
+                "date_to": {
+                    "type": "string",
+                    "description": "End date inclusive (YYYY-MM-DD).",
+                },
+                "has_anomalies": {
+                    "type": "boolean",
+                    "description": "If true, only transactions with anomalies. If false, only clean.",
+                },
+            },
+            "required": [],
         },
     },
 ]
@@ -232,6 +277,8 @@ def _dispatch_tool(
         return get_entity_details(tool_input["entity_name"], deal_data)
     if name == "explain_flagged_item":
         return explain_flagged_item(tool_input["entity_name"], deal_data)
+    if name == "query_transactions":
+        return query_transactions(tool_input, deal_data)
     return {"error": f"Unknown tool: {name}"}
 
 
