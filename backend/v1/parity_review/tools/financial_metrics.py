@@ -40,11 +40,11 @@ def calculate_financial_metrics(deal_data: Dict[str, Any]) -> Dict[str, Any]:
     if monthly_loan_cents > 0 and avg_inflow_cents > 0:
         dscr = avg_inflow_cents / monthly_loan_cents
         dscr_assessment = (
-            "Excellent (>2.0)"      if dscr >= 2.0  else
-            "Good (1.5-2.0)"        if dscr >= 1.5  else
-            "Acceptable (1.25-1.5)" if dscr >= 1.25 else
-            "Weak (1.0-1.25)"       if dscr >= 1.0  else
-            "Inadequate (<1.0)"
+            ">2.0"       if dscr >= 2.0  else
+            "1.5-2.0"    if dscr >= 1.5  else
+            "1.25-1.5"   if dscr >= 1.25 else
+            "1.0-1.25"   if dscr >= 1.0  else
+            "<1.0"
         )
     else:
         dscr = None
@@ -53,12 +53,7 @@ def calculate_financial_metrics(deal_data: Dict[str, Any]) -> Dict[str, Any]:
     # Revenue growth (bps → %)
     rev_growth_pct = rev_growth_bps / 100
     if rev_growth_bps != 0:
-        growth_assessment = (
-            "Strong growth"               if rev_growth_pct >= 20  else
-            "Healthy growth"              if rev_growth_pct >= 10  else
-            "Stable"                      if rev_growth_pct >= 0   else
-            "Declining — needs explanation"
-        )
+        growth_assessment = f"{rev_growth_pct:.1f}% (H2 vs H1)"
     else:
         growth_assessment = "Insufficient data to calculate growth"
 
@@ -68,11 +63,7 @@ def calculate_financial_metrics(deal_data: Dict[str, Any]) -> Dict[str, Any]:
         avg_net = sum(nets) / len(nets)
         std_dev = math.sqrt(sum((x - avg_net) ** 2 for x in nets) / len(nets))
         volatility_pct = (std_dev / abs(avg_net) * 100) if avg_net != 0 else 0
-        volatility_assessment = (
-            "Highly volatile (>50%)"       if volatility_pct > 50  else
-            "Moderately volatile (25-50%)" if volatility_pct > 25  else
-            "Stable (<25%)"
-        )
+        volatility_assessment = f"CV {volatility_pct:.1f}%"
     else:
         volatility_pct = None
         std_dev = None
@@ -100,11 +91,7 @@ def calculate_financial_metrics(deal_data: Dict[str, Any]) -> Dict[str, Any]:
         },
         "loan_burden": {
             "value_pct": round(loan_burden_bps / 100, 1),
-            "assessment": (
-                "Healthy (<30%)" if loan_burden_bps < 3000 else
-                "Elevated (30-50%)" if loan_burden_bps < 5000 else
-                "High (>50%)"
-            ),
+            "assessment": f"{round(loan_burden_bps / 100, 1)}% of total outflow",
         },
         "cash_flow_volatility": {
             "value_pct": round(volatility_pct, 1) if volatility_pct is not None else None,
@@ -129,26 +116,10 @@ def _financial_summary(
 ) -> str:
     parts = []
     if dscr is not None:
-        if dscr >= 1.5:
-            parts.append(f"Strong debt service capacity (DSCR: {dscr:.2f})")
-        elif dscr >= 1.25:
-            parts.append(f"Acceptable debt service capacity (DSCR: {dscr:.2f})")
-        else:
-            parts.append(f"⚠️ Weak debt service capacity (DSCR: {dscr:.2f})")
-
-    if rev_growth_pct >= 15:
-        parts.append(f"Strong revenue growth ({rev_growth_pct:.1f}%)")
-    elif rev_growth_pct >= 0:
-        parts.append(f"Stable revenue ({rev_growth_pct:.1f}% growth)")
-    else:
-        parts.append(f"⚠️ Revenue declining ({rev_growth_pct:.1f}%)")
-
-    if volatility_pct is not None and volatility_pct > 50:
-        parts.append("⚠️ Highly volatile cash flows")
-
-    if negative_months > 0 and total_months > 0:
-        pct_neg = (negative_months / total_months) * 100
-        if pct_neg > 33:
-            parts.append(f"⚠️ {negative_months}/{total_months} months cash flow negative")
-
-    return ". ".join(parts) + "." if parts else "Insufficient data for summary."
+        parts.append(f"DSCR: {dscr:.2f}")
+    parts.append(f"Revenue growth: {rev_growth_pct:.1f}%")
+    if volatility_pct is not None:
+        parts.append(f"Cash flow CV: {volatility_pct:.1f}%")
+    if total_months > 0:
+        parts.append(f"Negative cash flow months: {negative_months}/{total_months}")
+    return ". ".join(parts) + "." if parts else "Insufficient data."

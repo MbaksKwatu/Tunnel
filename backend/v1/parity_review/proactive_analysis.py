@@ -1,6 +1,6 @@
 """
-Generate proactive analysis when Parity Review chat first opens.
-Surfaces key insights without waiting for user questions.
+Generate proactive data summary when Parity Review chat first opens.
+Pure computation — returns figures, counts, and breakdowns with no interpretation.
 """
 from __future__ import annotations
 
@@ -11,247 +11,163 @@ from .tools.operational_metrics import calculate_operational_metrics
 
 
 _REVIEW_ROLES = frozenset({"needs_review", "other"})
+_SUPPLIER_ROLES = frozenset({"supplier", "supplier_payment"})
+_REVENUE_ROLES = frozenset({"revenue_operational", "revenue_other"})
 
 
 def generate_proactive_analysis(deal_data: Dict[str, Any]) -> str:
     financial = calculate_financial_metrics(deal_data)
     operational = calculate_operational_metrics(deal_data)
 
-    critical_issues = _identify_critical_issues(deal_data, financial, operational)
-    risks = _identify_key_risks(deal_data, operational)
-    strengths = _identify_strengths(deal_data, financial, operational)
-    recommendations = _generate_recommendations(critical_issues, risks)
-
     sections: List[str] = []
 
     company_name = (
         deal_data.get("canonical", {}).get("company_name")
         or deal_data.get("canonical", {}).get("deal_name")
-        or "this company"
+        or "this deal"
     )
-    sections.append(f"I've analyzed **{company_name}**'s snapshot. Here are the key findings:\n")
+    currency = deal_data.get("currency", "KES")
+    sections.append(f"**{company_name}** — Snapshot Data Summary\n")
 
-    if critical_issues:
-        sections.append(f"## 🔴 CRITICAL ISSUES ({len(critical_issues)})\n")
-        for issue in critical_issues:
-            sections.append(f"• {issue}\n")
-        sections.append("")
+    sections.append(_format_deal_overview(deal_data, currency))
+    sections.append(_format_financial_metrics(financial, currency))
+    sections.append(_format_top_entities(deal_data, currency))
+    sections.append(_format_unclassified_summary(deal_data, currency))
+    sections.append("---\n\nAsk a question to query the data.")
 
-    if risks:
-        sections.append("## ⚠️ KEY RISKS\n")
-        for risk in risks:
-            sections.append(f"• {risk}\n")
-        sections.append("")
-
-    if strengths:
-        sections.append("## ✅ STRENGTHS\n")
-        for s in strengths:
-            sections.append(f"• {s}\n")
-        sections.append("")
-
-    sections.append("## 📊 FINANCIAL SUMMARY\n")
-    sections.append(_format_financial_summary(financial))
-    sections.append("")
-
-    if recommendations:
-        sections.append("## 💡 RECOMMENDATIONS\n")
-        for rec in recommendations:
-            sections.append(f"• {rec}\n")
-        sections.append("")
-
-    sections.append("---\n\nWhat would you like to explore further?")
     return "\n".join(sections)
 
 
-def _identify_critical_issues(
-    deal_data: Dict[str, Any],
-    financial: Dict[str, Any],
-    operational: Dict[str, Any],
-) -> List[str]:
-    issues: List[str] = []
-    currency = deal_data.get("currency", "KES")
-
-    rev_growth_pct = financial.get("revenue_growth", {}).get("value_pct")
-    if rev_growth_pct is not None and rev_growth_pct < -20:
-        issues.append(f"Revenue declined {abs(rev_growth_pct):.1f}% year-over-year — needs explanation")
-
-    dscr = financial.get("dscr", {}).get("value")
-    if dscr is not None and dscr < 1.25:
-        issues.append(f"DSCR of {dscr:.2f} is below recommended 1.25 threshold — debt service capacity concern")
-
+def _format_deal_overview(deal_data: Dict[str, Any], currency: str) -> str:
     tagged = deal_data.get("tagged", [])
+    total_txns = len(tagged)
+    n_months = deal_data.get("n_months", 0)
+
+    credits = [t for t in tagged if t.get("signed_amount_cents", 0) > 0]
+    debits = [t for t in tagged if t.get("signed_amount_cents", 0) < 0]
+    total_inflow = sum(t["signed_amount_cents"] for t in credits) / 100
+    total_outflow = sum(abs(t["signed_amount_cents"]) for t in debits) / 100
+
     review_count = sum(1 for t in tagged if t.get("role") in _REVIEW_ROLES)
-    total_txns = len(tagged) or 1
-    flagged_pct = (review_count / total_txns) * 100
 
-    if flagged_pct > 20:
-        issues.append(
-            f"{review_count} transactions ({flagged_pct:.1f}%) need classification — high data quality issue"
-        )
-
-    for t in tagged:
-        for a in t.get("anomalies") or []:
-            if a.get("severity") == "CRITICAL":
-                entity_name = t.get("entity_name") or "Unknown"
-                amt_kes = abs(t.get("signed_amount_cents", 0)) / 100
-                reason = (a.get("type") or "unknown").replace("_", " ").lower()
-                issues.append(f"{entity_name}: {currency} {amt_kes:,.0f} flagged as {reason}")
-                if len(issues) >= 5:
-                    return issues
-
-    burn = financial.get("burn_rate", {})
-    negative_months = burn.get("negative_months", 0)
-    total_months = burn.get("total_months", 0) or deal_data.get("n_months", 12)
-    if total_months > 0 and negative_months > total_months / 3:
-        issues.append(
-            f"{negative_months}/{total_months} months had negative cash flow — liquidity concern"
-        )
-
-    return issues
+    lines = [
+        "## DEAL OVERVIEW\n",
+        "| Metric | Value |",
+        "|--------|-------|",
+        f"| Transactions | {total_txns:,} |",
+        f"| Period | {n_months} months |",
+        f"| Total inflow | {currency} {total_inflow:,.2f} |",
+        f"| Total outflow | {currency} {total_outflow:,.2f} |",
+        f"| Net cash flow | {currency} {total_inflow - total_outflow:,.2f} |",
+        f"| Unclassified | {review_count} transactions |",
+        "",
+    ]
+    return "\n".join(lines)
 
 
-def _identify_key_risks(
-    deal_data: Dict[str, Any],
-    operational: Dict[str, Any],
-) -> List[str]:
-    risks: List[str] = []
+def _format_financial_metrics(financial: Dict[str, Any], currency: str) -> str:
+    lines = ["## COMPUTED METRICS\n"]
 
-    cust = operational.get("customer_concentration", {})
-    top_cust_pct = cust.get("top_customer_pct")
-    top_cust_name = cust.get("top_customer_name")
-    if top_cust_pct and top_cust_pct > 25:
-        risks.append(
-            f"**{top_cust_name}** represents {top_cust_pct:.1f}% of revenue (HIGH customer concentration)"
-        )
-    elif top_cust_pct and top_cust_pct > 15:
-        risks.append(
-            f"**{top_cust_name}** represents {top_cust_pct:.1f}% of revenue (moderate concentration)"
-        )
-
-    sup = operational.get("supplier_concentration", {})
-    top_sup_pct = sup.get("top_supplier_pct")
-    top_sup_name = sup.get("top_supplier_name")
-    if top_sup_pct and top_sup_pct > 20:
-        risks.append(
-            f"**{top_sup_name}** represents {top_sup_pct:.1f}% of costs (supplier concentration)"
-        )
-
-    wc = operational.get("working_capital_trend", {})
-    if wc.get("assessment") == "Deteriorating":
-        risks.append("Working capital deteriorating over the period — operational strain")
-
-    payroll = operational.get("payroll_stability", {})
-    payroll_assessment = payroll.get("assessment", "")
-    if "Minimal" in payroll_assessment or "Sparse" in payroll_assessment:
-        risks.append(f"Limited formal payroll detected — {payroll_assessment.lower()}")
-
-    return risks
-
-
-def _identify_strengths(
-    deal_data: Dict[str, Any],
-    financial: Dict[str, Any],
-    operational: Dict[str, Any],
-) -> List[str]:
-    strengths: List[str] = []
-
-    dscr = financial.get("dscr", {}).get("value")
-    if dscr and dscr >= 1.5:
-        strengths.append(f"DSCR: {dscr:.2f} (strong debt service capacity — above 1.5 threshold)")
-    elif dscr and dscr >= 1.25:
-        strengths.append(f"DSCR: {dscr:.2f} (acceptable debt service capacity)")
-
-    loan_burden_pct = financial.get("loan_burden", {}).get("value_pct", 0)
-    if loan_burden_pct < 5:
-        strengths.append(f"Loan burden: {loan_burden_pct:.1f}% of outflows (low debt load)")
-
-    rev_growth_pct = financial.get("revenue_growth", {}).get("value_pct")
-    if rev_growth_pct is not None and rev_growth_pct > 15:
-        strengths.append(f"Revenue growth: {rev_growth_pct:.1f}% (strong growth trajectory)")
-    elif rev_growth_pct is not None and rev_growth_pct > 0:
-        strengths.append(f"Revenue growth: {rev_growth_pct:.1f}% (positive growth)")
-
-    volatility = financial.get("cash_flow_volatility", {})
-    if volatility.get("assessment") == "Stable (<25%)":
-        strengths.append("Stable cash flows — predictable revenue pattern")
-
-    cust = operational.get("customer_concentration", {})
-    top_cust_pct = cust.get("top_customer_pct")
-    if top_cust_pct and top_cust_pct < 15:
-        strengths.append(
-            f"Diversified customer base — top customer only {top_cust_pct:.1f}% of revenue"
-        )
-
-    csi = deal_data.get("csi", {})
-    metrics = deal_data.get("metrics", {})
-    kra = csi.get("kra_compliance") or metrics.get("kra_compliance")
-    if kra and kra.upper() == "COMPLIANT":
-        tax_months = deal_data.get("tax_months", 0)
-        strengths.append(f"Tax compliant — KRA payments in {tax_months} months")
-
-    return strengths
-
-
-def _generate_recommendations(
-    critical_issues: List[str],
-    risks: List[str],
-) -> List[str]:
-    recommendations: List[str] = []
-
-    if critical_issues:
-        recommendations.append(
-            "**Address critical issues before proceeding** — obtain explanations and supporting documentation"
-        )
-
-    if any("classification" in i.lower() or "flagged" in i.lower() for i in critical_issues):
-        recommendations.append(
-            "Review and classify flagged transactions to improve data quality"
-        )
-
-    if any("revenue" in i.lower() and "decline" in i.lower() for i in critical_issues):
-        recommendations.append(
-            "Request explanation for revenue decline — verify if temporary or structural issue"
-        )
-
-    if any("concentration" in r.lower() for r in risks):
-        recommendations.append(
-            "Assess concentration risk mitigation — customer contracts, supplier alternatives"
-        )
-
-    if any("capital injection" in i.lower() for i in critical_issues):
-        recommendations.append(
-            "Classify capital injection transactions — distinguish equity from loans"
-        )
-
-    if not critical_issues and not risks:
-        recommendations.append(
-            "Financial profile appears healthy — proceed with standard due diligence"
-        )
-
-    return recommendations
-
-
-def _format_financial_summary(financial: Dict[str, Any]) -> str:
-    lines: List[str] = []
-
+    rows = []
     dscr = financial.get("dscr", {})
     if dscr.get("value") is not None:
-        lines.append(f"**DSCR:** {dscr['value']:.2f} — {dscr['assessment']}")
+        rows.append(f"| DSCR | {dscr['value']:.2f} |")
 
     growth = financial.get("revenue_growth", {})
     if growth.get("value_pct") is not None:
-        lines.append(f"**Revenue Growth:** {growth['value_pct']:.1f}% — {growth['assessment']}")
+        rows.append(f"| Revenue growth (H1 vs H2) | {growth['value_pct']:.1f}% |")
 
     volatility = financial.get("cash_flow_volatility", {})
-    if volatility.get("assessment"):
-        lines.append(f"**Cash Flow Volatility:** {volatility['assessment']}")
+    cv = volatility.get("value_pct")
+    if cv is not None:
+        rows.append(f"| Cash flow CV | {cv:.1f}% |")
 
     burden = financial.get("loan_burden", {})
     if burden.get("value_pct") is not None:
-        lines.append(f"**Loan Burden:** {burden['value_pct']:.1f}% — {burden['assessment']}")
+        rows.append(f"| Loan repayment / total outflow | {burden['value_pct']:.1f}% |")
 
     burn = financial.get("burn_rate", {})
-    if burn.get("negative_months", 0) > 0:
-        lines.append(f"**Burn Rate:** {burn['assessment']}")
+    neg = burn.get("negative_months", 0)
+    total = burn.get("total_months", 0)
+    if total > 0:
+        rows.append(f"| Months with negative cash flow | {neg} / {total} |")
 
-    return "\n".join(lines) if lines else "Financial metrics calculated — ask for details"
+    if rows:
+        lines.append("| Metric | Value |")
+        lines.append("|--------|-------|")
+        lines.extend(rows)
+    else:
+        lines.append("No financial metrics computed.")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _format_top_entities(deal_data: Dict[str, Any], currency: str) -> str:
+    tagged = deal_data.get("tagged", [])
+
+    supplier_totals: Dict[str, int] = {}
+    revenue_totals: Dict[str, int] = {}
+
+    for t in tagged:
+        name = t.get("entity_name") or t.get("description") or "Unknown"
+        role = t.get("role", "")
+        amt = abs(t.get("signed_amount_cents", 0))
+        if role in _SUPPLIER_ROLES:
+            supplier_totals[name] = supplier_totals.get(name, 0) + amt
+        elif role in _REVENUE_ROLES:
+            revenue_totals[name] = revenue_totals.get(name, 0) + amt
+
+    lines = ["## TOP ENTITIES\n"]
+
+    top_suppliers = sorted(supplier_totals.items(), key=lambda x: x[1], reverse=True)[:10]
+    if top_suppliers:
+        lines.append("**Suppliers (by total amount)**\n")
+        lines.append("| # | Entity | Amount |")
+        lines.append("|---|--------|--------|")
+        for i, (name, cents) in enumerate(top_suppliers, 1):
+            lines.append(f"| {i} | {name[:50]} | {currency} {cents / 100:,.2f} |")
+        lines.append("")
+
+    top_revenue = sorted(revenue_totals.items(), key=lambda x: x[1], reverse=True)[:10]
+    if top_revenue:
+        lines.append("**Revenue sources (by total amount)**\n")
+        lines.append("| # | Entity | Amount |")
+        lines.append("|---|--------|--------|")
+        for i, (name, cents) in enumerate(top_revenue, 1):
+            lines.append(f"| {i} | {name[:50]} | {currency} {cents / 100:,.2f} |")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _format_unclassified_summary(deal_data: Dict[str, Any], currency: str) -> str:
+    tagged = deal_data.get("tagged", [])
+    review_txns = [t for t in tagged if t.get("role") in _REVIEW_ROLES]
+
+    if not review_txns:
+        return "## UNCLASSIFIED TRANSACTIONS\n\nNone.\n"
+
+    total_amt = sum(abs(t.get("signed_amount_cents", 0)) for t in review_txns) / 100
+
+    entity_counts: Dict[str, int] = {}
+    for t in review_txns:
+        name = t.get("entity_name") or t.get("description") or "Unknown"
+        entity_counts[name] = entity_counts.get(name, 0) + 1
+
+    top_unclassified = sorted(entity_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    lines = [
+        "## UNCLASSIFIED TRANSACTIONS\n",
+        f"**Count:** {len(review_txns)} transactions",
+        f"**Total amount:** {currency} {total_amt:,.2f}\n",
+    ]
+
+    if top_unclassified:
+        lines.append("| Entity | Transactions |")
+        lines.append("|--------|-------------|")
+        for name, count in top_unclassified:
+            lines.append(f"| {name[:50]} | {count} |")
+        lines.append("")
+
+    return "\n".join(lines)

@@ -17,4 +17,7 @@ steps:
       - --memory=2Gi
       - --cpu=2
       - --allow-unauthenticated
-      - --set-env-vars=PARITY_INGESTION_URL=https://parity-ingestion-gmkewhxbha-uc.a.run.app
+      - --timeout=300
+      - --concurrency=80
+      - --min-instances=0
+      - --max-instances=3

@@ -106,27 +106,4 @@ def get_entity_details(entity_name: str, deal_data: Dict[str, Any]) -> Dict[str,
             "flagged_transactions": len(flagged_txns),
         },
         "recent_transactions": formatted,
-        "risk_assessment": _assess_entity_risk(pct_of_category, len(entity_txns), len(flagged_txns), entity_type),
     }
-
-
-def _assess_entity_risk(
-    pct_of_category: float,
-    total_txns: int,
-    flagged_count: int,
-    entity_type: str,
-) -> str:
-    risks = []
-    if "Customer" in entity_type and pct_of_category > 25:
-        risks.append("⚠️ HIGH customer concentration — over 25% of revenue from one source")
-    elif "Customer" in entity_type and pct_of_category > 15:
-        risks.append("⚠️ MODERATE customer concentration — over 15% of revenue")
-    if "Supplier" in entity_type and pct_of_category > 15:
-        risks.append("⚠️ Moderate supplier concentration — over 15% of supplier spend")
-    if total_txns <= 2 and pct_of_category > 5:
-        risks.append("⚠️ Rare entity with significant amounts — possible capital injection or one-off")
-    if flagged_count > 0 and total_txns > 0:
-        flag_pct = flagged_count / total_txns * 100
-        if flag_pct >= 50:
-            risks.append(f"⚠️ {flag_pct:.0f}% of transactions flagged for review")
-    return " | ".join(risks) if risks else "✓ No significant risks identified"

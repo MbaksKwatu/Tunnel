@@ -1,62 +1,106 @@
 # Vercel environment variables (PDS frontend)
 
-**Scope:** `ParitySME/Tunnel` only — the Next.js app deployed as **`v0-fund-iq-1-0`** on Vercel. Backend lives on Render; Supabase is shared. Do not conflate this with other folders in the monorepo.
+**Scope:** `ParitySME/Tunnel` — Next.js apps on Vercel. Backends run on **GCP Cloud Run** (not Render). Two Vercel projects map to prod vs staging.
 
 ---
 
-## Required variables
+## Infrastructure map (May 2026)
 
-Set these in Vercel → **Settings** → **Environment Variables** for **Production** (and Preview/Development if you use them).
+| Role | Vercel project | Production URL | Backend (`NEXT_PUBLIC_API_URL`) | Supabase |
+|------|----------------|----------------|----------------------------------|----------|
+| **Production** | `parityplatform` (`v0-fund-iq-1-0`) | https://parityfinance.vercel.app | `https://parity-backend-prod-121148713552.us-central1.run.app` | `ifcdbhbuucmjgtjkluna` |
+| **Staging** | `parity-sme-staging` | https://parity-sme-staging.vercel.app | `https://parity-backend-121148713552.us-central1.run.app` | `kstuensfekanfberjubz` |
 
-| Key | Source | Production value (PDS) |
-|-----|--------|-------------------------|
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase → **Settings** → **API** → Project URL | `https://ifcdbhbuucmjgtjkluna.supabase.co` |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Same page → **anon** `public` key (JWT, starts with `eyJ`) | Copy from dashboard (do not use service role) |
-| `NEXT_PUBLIC_API_URL` | Render Parity API | `https://paritytunnel-w7d2.onrender.com` |
+**GCP Cloud Run (us-central1, project `parity-491822`):**
 
-Wrong or missing **`NEXT_PUBLIC_SUPABASE_*`** causes **“Sign-in is taking too long”** — the browser client in `lib/supabase.ts` cannot initialize auth.
+| Service | URL |
+|---------|-----|
+| Backend prod | `https://parity-backend-prod-121148713552.us-central1.run.app` |
+| Backend staging | `https://parity-backend-121148713552.us-central1.run.app` |
+| Ingestion | `https://parity-ingestion-121148713552.us-central1.run.app` |
 
----
+**Legacy Render (keep until Musa webhook migrated + 48h stable):**
 
-## Fix broken production login
-
-1. **Supabase** — Open project **`ifcdbhbuucmjgtjkluna`** → Settings → API → copy **Project URL** and **anon public** key.
-2. **Vercel** — Project **`v0-fund-iq-1-0`** → Environment Variables → set/update the three keys above for **Production**.
-3. **Redeploy** — Deployments → latest → **Redeploy**. Next.js inlines `NEXT_PUBLIC_*` at **build** time; env-only changes do nothing until a new deployment runs.
-
----
-
-## Do not change
-
-- **Render:** `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` — server-side only; separate from the anon key above.
-- **Local:** `ParitySME/Tunnel/.env.local` — placeholders for dev; not used by Vercel.
+| Service | URL |
+|---------|-----|
+| API (old prod frontend target) | `https://parity-ingestion.onrender.com` |
+| API (alternate) | `https://paritytunnel-w7d2.onrender.com` |
 
 ---
 
-## Verify
+## Production — `parityplatform`
 
-- Open the production URL in an **incognito** window.
-- **Network:** requests to **`ifcdbhbuucmjgtjkluna.supabase.co`** (auth/session) should return **200**, not hang or fail CORS.
-- Sign-in should finish in a few seconds.
+Set in Vercel → **parityplatform** → Settings → Environment Variables → **Production**:
+
+| Key | Value |
+|-----|--------|
+| `NEXT_PUBLIC_SUPABASE_URL` | `https://ifcdbhbuucmjgtjkluna.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon key from prod Supabase dashboard |
+| `NEXT_PUBLIC_API_URL` | `https://parity-backend-prod-121148713552.us-central1.run.app` |
+
+After any `NEXT_PUBLIC_*` change: **Deployments → Redeploy** (values are inlined at build time).
+
+Verify:
+
+```bash
+cd Tunnel && vercel link --project parityplatform --yes
+vercel env run --environment=production -- sh -c 'echo $NEXT_PUBLIC_API_URL'
+```
 
 ---
 
-## Why builds fail without Supabase env
+## Staging — `parity-sme-staging`
 
-If `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` are missing at build time, Next.js may error (e.g. URL and key required) or ship a client that cannot authenticate.
+Set in Vercel → **parity-sme-staging** → Settings → Environment Variables → **Production**:
+
+| Key | Value |
+|-----|--------|
+| `NEXT_PUBLIC_SUPABASE_URL` | `https://kstuensfekanfberjubz.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon key from staging Supabase (or copy from `STAGING_SUPABASE_ANON_KEY`) |
+| `NEXT_PUBLIC_API_URL` | `https://parity-backend-121148713552.us-central1.run.app` |
+
+**Note:** Use `--no-sensitive` when adding `NEXT_PUBLIC_API_URL` via CLI; marking it sensitive can store an empty value in non-interactive mode.
+
+Verify:
+
+```bash
+cd Tunnel && vercel link --project parity-sme-staging --yes
+vercel env run --environment=production -- sh -c 'echo $NEXT_PUBLIC_API_URL'
+```
+
+In the browser (DevTools → Network), API calls should hit `parity-backend-…run.app`, not `localhost:8000` or Render.
 
 ---
 
-## Recent `main` commits (handoff)
+## Musa integration
 
-Pinned short hashes for the December / upload / ingestion stability work. Older pipeline commits on `main` are omitted here (`prev`-style entries in older notes are replaced by these pins); use `git log` for full history.
+Musa partner API (not a `/webhook/musa` path):
+
+- `POST https://parity-backend-prod-121148713552.us-central1.run.app/api/musa/sessions`
+- Requires `X-API-Key` (see `backend/v1/integrations/auth.py`)
+
+Coordinate with Musa to point their integration at the GCP prod URL. Keep Render URLs live during transition.
+
+---
+
+## Rollback
+
+**Production:** set `NEXT_PUBLIC_API_URL` back to `https://parity-ingestion.onrender.com` and redeploy.
+
+**Staging:** restore previous env or leave empty (previous state was broken).
+
+---
+
+## Do not change on Vercel
+
+- `STAGING_*` server-side vars — not read by the Next.js client; used for reference or future server routes only.
+- Local `Tunnel/.env.local` — dev only.
+
+---
+
+## Recent deploy commits
 
 | Hash | Subject |
 |------|---------|
 | `c0f2539` | chore(deploy): backend Dockerfile and Cloud Build config |
 | `08072e3` | docs: Vercel env handoff for PDS Tunnel frontend |
-| `bf4bfdb` | fix(ingestion): Equity PDF amount cells and split Running Balance header |
-| `44a0c25` | chore(backend): startup recovery for stuck document processing |
-| `7fdb675` | fix: send document uploads as multipart without JSON Content-Type |
-| `6f4c638` | test: add Jan/Feb Equity xlsx fixtures for test_parsers |
-| `2b2edd3` | fix(xlsx): Equity Dec 2024 Transacti on Date header and newline dates |
