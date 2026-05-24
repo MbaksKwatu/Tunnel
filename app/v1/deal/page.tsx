@@ -508,7 +508,7 @@ function V1DealPageInner() {
       setOverridesList([]);
       await refreshBatchUploadCount(activeDeal.id);
       const txRes = await listDealTransactions(activeDeal.id);
-      setRawTransactions(txRes.transactions as Array<Record<string, unknown>>);
+      setRawTransactions(txRes.transactions as unknown as Array<Record<string, unknown>>);
       setAnalysisState('done');
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : 'Analysis failed');
