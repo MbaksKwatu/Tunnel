@@ -123,6 +123,12 @@ def build_snapshot_context(deal_data: Dict[str, Any]) -> str:
     total_expense_cents  = sum(abs(t["signed_amount_cents"]) for t in tagged if t["signed_amount_cents"] < 0)
     loan_repayment_cents = deal_data["loan_repayment_total_cents"]
 
+    # Debit/credit counts and totals (all transactions, regardless of role)
+    credit_txns = [t for t in tagged if t["signed_amount_cents"] > 0]
+    debit_txns  = [t for t in tagged if t["signed_amount_cents"] < 0]
+    total_credit_cents = sum(t["signed_amount_cents"] for t in credit_txns)
+    total_debit_cents  = sum(abs(t["signed_amount_cents"]) for t in debit_txns)
+
     # Needs-review counts: prefer live transaction count injected by API; fall back to snapshot
     live_txn_count = deal_data.get("live_needs_review_txns")
     snapshot_txn_count = sum(1 for t in tagged if t["role"] in _NEEDS_REVIEW_ONLY)
@@ -154,27 +160,38 @@ def build_snapshot_context(deal_data: Dict[str, Any]) -> str:
 
 **Period**: {n_months} months of bank statements
 **Currency**: {currency}
+**Total transactions**: {len(tagged)}
+
+---
+
+## TRANSACTION COUNTS
+
+| Direction | Count | Total Amount |
+|-----------|-------|-------------|
+| Credits (inflows) | {len(credit_txns)} | {_fmt_kes(total_credit_cents)} |
+| Debits (outflows) | {len(debit_txns)} | {_fmt_kes(total_debit_cents)} |
+| Net | — | {_fmt_kes(total_credit_cents - total_debit_cents)} |
 
 ---
 
 ## FINANCIAL SUMMARY
 
-**Revenue Metrics**:
-- Total Revenue (operational): {_fmt_kes(total_revenue_cents)}
+**Revenue (classified operational)**:
+- Total: {_fmt_kes(total_revenue_cents)}
 - Avg Monthly Inflow: {_fmt_kes(avg_inflow)}
-- Revenue Growth YoY: {rev_growth_bps / 100:.1f}%
+- Revenue Growth (H2 vs H1): {rev_growth_bps / 100:.1f}%
 
-**Expense Metrics**:
-- Total Expenses: {_fmt_kes(total_expense_cents)}
+**Expenses**:
+- Total: {_fmt_kes(total_expense_cents)}
 - Avg Monthly Outflow: {_fmt_kes(avg_outflow)}
 - Avg Net Monthly: {_fmt_kes(avg_net)}
 
-**Debt Metrics**:
+**Debt**:
 - Loan Repayment Total: {_fmt_kes(loan_repayment_cents)}
 - Loan Repayment Burden: {loan_burden_bps / 100:.1f}% of outflows
 
 **Classification**:
-- Needs-review items: {review_txn_count} transactions across {review_entity_count} distinct entities require analyst classification.
+- Needs-review: {review_txn_count} transactions across {review_entity_count} distinct entities
 
 ---
 
@@ -201,11 +218,12 @@ Top customer concentration: {top_customer_pct:.1f}% of all revenue
 
 ---
 
-You have access to these tools to dig deeper:
-- calculate_financial_metrics() — DSCR, revenue growth, cash flow volatility
-- calculate_operational_metrics() — supplier/customer concentration, working capital
+Available tools:
+- get_deal_summary() — transaction counts by direction and role, monthly breakdown, role distribution
+- calculate_financial_metrics() — DSCR, revenue growth, cash flow volatility, burn rate
+- calculate_operational_metrics() — supplier/customer concentration percentages, working capital trend, payroll frequency
 - get_entity_details(entity_name) — full transaction history for any entity
-- explain_flagged_item(entity_name) — why something is flagged
+- explain_flagged_item(entity_name) — anomaly details for flagged entities
 """
 
 
