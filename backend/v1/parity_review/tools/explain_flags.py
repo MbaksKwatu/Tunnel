@@ -70,7 +70,7 @@ def explain_flagged_item(entity_name: str, deal_data: Dict[str, Any]) -> Dict[st
                 "amount_kes": t["signed_amount_cents"] / 100,
                 "type": "UNCLASSIFIED",
                 "severity": "HIGH",
-                "reason": f"Transaction role is '{t['role']}' — needs analyst classification",
+                "reason": f"Transaction role is '{t['role']}'",
             })
 
     critical = [a for a in all_anomalies if a.get("severity") == "CRITICAL"]
@@ -90,7 +90,6 @@ def explain_flagged_item(entity_name: str, deal_data: Dict[str, Any]) -> Dict[st
     }
 
     explanation = _generate_explanation(entity_name, critical, high, medium, low, history, flagged_txns, currency)
-    recommended_action = _recommended_action(critical, high, history)
 
     return {
         "flagged": True,
@@ -105,7 +104,6 @@ def explain_flagged_item(entity_name: str, deal_data: Dict[str, Any]) -> Dict[st
         "detailed_anomalies": all_anomalies,
         "entity_context": history,
         "explanation": explanation,
-        "recommended_action": recommended_action,
     }
 
 
@@ -143,21 +141,3 @@ def _generate_explanation(
     return "\n".join(parts)
 
 
-def _recommended_action(
-    critical: List[Dict],
-    high: List[Dict],
-    history: Dict,
-) -> str:
-    if critical:
-        types = " ".join(str(c.get("type", "")) for c in critical).upper()
-        if "CAPITAL" in types or "INJECTION" in types:
-            return (
-                "CLASSIFY THIS TRANSACTION: Determine if this is equity injection, "
-                "shareholder loan, or large customer payment. Request supporting documentation."
-            )
-        return "INVESTIGATE IMMEDIATELY: Review original bank statement and obtain client explanation before proceeding."
-    if high:
-        return "REVIEW AND CLASSIFY: Assign proper category. May need client clarification."
-    if history["total_transactions"] <= 2:
-        return "VERIFY ENTITY: Rare entity — confirm legitimacy and relationship to the business."
-    return "REVIEW RECOMMENDED: Classify these transactions to improve data quality."

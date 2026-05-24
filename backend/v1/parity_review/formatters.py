@@ -1,6 +1,6 @@
 """
 Response formatting utilities for Parity Review.
-Visual indicators, structured data, and better markdown for tool results.
+Structured data and markdown tables for tool results. No interpretation or assessment.
 """
 from __future__ import annotations
 
@@ -10,10 +10,6 @@ from typing import Any, Dict, List
 def format_metric_response(metric_name: str, result: Dict[str, Any]) -> str:
     output: List[str] = []
     output.append(f"## {metric_name}\n")
-
-    assessment = result.get("assessment", "")
-    indicator = _risk_indicator(assessment)
-    output.append(f"{indicator} **{assessment}**\n")
 
     value = result.get("value") or result.get("value_pct")
     if value is not None:
@@ -40,7 +36,7 @@ def format_entity_profile(entity_result: Dict[str, Any]) -> str:
 
     output: List[str] = []
     output.append(f"## {entity_result['entity_name']}\n")
-    output.append(f"**Type:** {entity_result['entity_type']}\n")
+    output.append(f"**Classification:** {entity_result['entity_type']}\n")
 
     output.append("\n| Metric | Value |")
     output.append("|--------|-------|")
@@ -51,19 +47,14 @@ def format_entity_profile(entity_result: Dict[str, Any]) -> str:
     output.append(f"| First Seen | {profile.get('first_seen', '—')} |")
     output.append(f"| Last Seen | {profile.get('last_seen', '—')} |\n")
 
-    risk = entity_result.get("risk_assessment", "")
-    if risk:
-        indicator = "🔴" if "HIGH" in risk else "✅"
-        output.append(f"{indicator} **Risk Assessment:** {risk}\n")
-
     recent = entity_result.get("recent_transactions", [])
     if recent:
-        output.append("\n### Recent Transactions\n")
-        for txn in recent[:5]:
-            flag = " 🚩" if txn.get("flagged") else ""
+        output.append("\n### Transaction History\n")
+        output.append("| Date | Amount | Direction |")
+        output.append("|------|--------|-----------|")
+        for txn in recent[:10]:
             output.append(
-                f"- {txn['date']}: {currency} {abs(txn['amount_kes']):,.0f} "
-                f"({txn['direction']}){flag}"
+                f"| {txn['date']} | {currency} {abs(txn['amount_kes']):,.0f} | {txn['direction']} |"
             )
 
     return "\n".join(output)
@@ -71,41 +62,27 @@ def format_entity_profile(entity_result: Dict[str, Any]) -> str:
 
 def format_flag_explanation(flag_result: Dict[str, Any]) -> str:
     if not flag_result.get("flagged"):
-        return f"✅ {flag_result.get('message', 'Not flagged')}"
+        return flag_result.get("message", "Not flagged")
 
     output: List[str] = []
-    output.append(f"## 🚩 {flag_result['entity_name']} — Flagged for Review\n")
+    output.append(f"## {flag_result['entity_name']} — Flagged Transactions\n")
+
+    output.append(f"**Flagged transaction count:** {flag_result['total_flagged_transactions']}\n")
 
     anomalies = flag_result["anomalies_by_severity"]
-    output.append(f"**Total Flagged Transactions:** {flag_result['total_flagged_transactions']}\n")
-
-    output.append("**By Severity:**")
-    if anomalies.get("critical", 0) > 0:
-        output.append(f"- 🔴 **CRITICAL:** {anomalies['critical']}")
-    if anomalies.get("high", 0) > 0:
-        output.append(f"- ⚠️ **HIGH:** {anomalies['high']}")
-    if anomalies.get("medium", 0) > 0:
-        output.append(f"- ⚠️ **MEDIUM:** {anomalies['medium']}")
+    output.append("| Severity | Count |")
+    output.append("|----------|-------|")
+    for level in ("critical", "high", "medium", "low"):
+        count = anomalies.get(level, 0)
+        if count > 0:
+            output.append(f"| {level.upper()} | {count} |")
     output.append("")
 
-    output.append(flag_result.get("explanation", ""))
-
-    action = flag_result.get("recommended_action", "")
-    if action:
-        output.append(f"\n### 💡 Recommended Action\n{action}")
+    explanation = flag_result.get("explanation", "")
+    if explanation:
+        output.append(explanation)
 
     return "\n".join(output)
-
-
-def _risk_indicator(assessment: str) -> str:
-    low = assessment.lower()
-    if any(w in low for w in ("excellent", "strong", "good", "healthy", "stable")):
-        return "✅"
-    if any(w in low for w in ("acceptable", "moderate")):
-        return "⚠️"
-    if any(w in low for w in ("weak", "poor", "inadequate", "high risk", "high (", "declining")):
-        return "🔴"
-    return "ℹ️"
 
 
 def _format_value(value: float, unit: str = "") -> str:

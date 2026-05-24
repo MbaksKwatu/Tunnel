@@ -34,27 +34,26 @@ PARITY_TOOLS: List[Dict[str, Any]] = [
     {
         "name": "calculate_financial_metrics",
         "description": (
-            "Calculate critical financial metrics: DSCR (Debt Service Coverage Ratio), "
-            "revenue growth, cash flow volatility, burn rate, and loan repayment burden. "
-            "Use when asked about financial health, debt capacity, or profitability."
+            "Compute financial metrics from transaction data: DSCR (Debt Service Coverage Ratio), "
+            "revenue growth percentage, cash flow coefficient of variation, burn rate, "
+            "and loan repayment as percentage of outflow."
         ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "calculate_operational_metrics",
         "description": (
-            "Calculate operational health metrics: supplier concentration, customer concentration, "
-            "working capital trend, and payroll stability. Use when asked about operational risks, "
-            "concentration risk, or business stability."
+            "Compute operational metrics from transaction data: supplier concentration percentages, "
+            "customer concentration percentages, working capital trend, and payroll frequency."
         ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "get_entity_details",
         "description": (
-            "Get full transaction history and risk profile for a specific entity "
-            "(supplier, customer, or counterparty). Use when asked about a specific "
-            "company, person, or RTGS reference."
+            "Look up the full transaction history for a specific entity "
+            "(supplier, customer, or counterparty). Returns transaction dates, amounts, "
+            "reference codes, and totals."
         ),
         "input_schema": {
             "type": "object",
@@ -70,16 +69,16 @@ PARITY_TOOLS: List[Dict[str, Any]] = [
     {
         "name": "explain_flagged_item",
         "description": (
-            "Explain why a specific entity or transaction is flagged for review. "
-            "Returns anomaly details, severity breakdown, and recommended analyst action. "
-            "Use when asked why something is flagged or needs review."
+            "Return data on why a specific entity or transaction is flagged. "
+            "Returns the anomaly types, severity counts, and transaction details "
+            "for the flagged items."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "entity_name": {
                     "type": "string",
-                    "description": "The name of the flagged entity to explain.",
+                    "description": "The name of the flagged entity to look up.",
                 }
             },
             "required": ["entity_name"],

@@ -169,14 +169,14 @@ class TestFinancialMetrics:
         growth = result["revenue_growth"]
         # -5140 bps = -51.4%
         assert growth["value_pct"] == pytest.approx(-51.4, abs=0.5)
-        assert "Declining" in growth["assessment"]
+        assert "-51.4" in growth["assessment"]
         print(f"\nRevenue growth: {growth['value_pct']}% — {growth['assessment']}")
 
     def test_loan_burden(self, deal_data):
         result = calculate_financial_metrics(deal_data)
         burden = result["loan_burden"]
         assert burden["value_pct"] == pytest.approx(1.0, abs=0.1)
-        assert "Healthy" in burden["assessment"]
+        assert "% of total outflow" in burden["assessment"]
 
     def test_summary_present(self, deal_data):
         result = calculate_financial_metrics(deal_data)
@@ -196,7 +196,7 @@ class TestOperationalMetrics:
         sup = result["supplier_concentration"]
         assert sup["top_supplier_name"] is not None
         assert sup["top_supplier_pct"] == pytest.approx(100.0, abs=0.1)  # only one supplier
-        print(f"\nTop supplier: {sup['top_supplier_name']} ({sup['top_supplier_pct']}%) — {sup['risk_level']}")
+        print(f"\nTop supplier: {sup['top_supplier_name']} ({sup['top_supplier_pct']}%)")
 
     def test_customer_concentration(self, deal_data):
         result = calculate_operational_metrics(deal_data)
@@ -204,19 +204,20 @@ class TestOperationalMetrics:
         # Joyce is top revenue source
         assert cust["top_customer_name"] == "Joyce Mwanziu Avia"
         assert cust["top_customer_pct"] > 50  # dominates with 109M out of 159M revenue
-        assert cust["risk_level"] == "HIGH RISK"
-        print(f"\nTop customer: {cust['top_customer_name']} ({cust['top_customer_pct']}%) — {cust['risk_level']}")
+        print(f"\nTop customer: {cust['top_customer_name']} ({cust['top_customer_pct']}%)")
 
     def test_payroll_stability(self, deal_data):
         result = calculate_operational_metrics(deal_data)
         payroll = result["payroll_stability"]
         assert payroll["months_with_payroll"] == 1
-        print(f"\nPayroll: {payroll['assessment']}")
+        print(f"\nPayroll: {payroll['months_with_payroll']}/{payroll['total_months']} months")
 
-    def test_summary_contains_risk_flags(self, deal_data):
+    def test_all_sections_present(self, deal_data):
         result = calculate_operational_metrics(deal_data)
-        summary = result["summary"]
-        assert "⚠️" in summary or "✓" in summary
+        assert "supplier_concentration" in result
+        assert "customer_concentration" in result
+        assert "working_capital_trend" in result
+        assert "payroll_stability" in result
 
 
 class TestEntityDetails:
@@ -239,9 +240,9 @@ class TestEntityDetails:
         assert result["found"] is False
         assert "suggestion" in result
 
-    def test_risk_assessment_high_concentration(self, deal_data):
+    def test_high_concentration_pct(self, deal_data):
         result = get_entity_details("Joyce Mwanziu", deal_data)
-        assert "⚠️" in result["risk_assessment"]
+        assert result["profile"]["pct_of_category"] > 50
 
     def test_recent_transactions_present(self, deal_data):
         result = get_entity_details("Peter Karanja", deal_data)
@@ -257,15 +258,15 @@ class TestExplainFlags:
         assert result["total_flagged_transactions"] >= 1
         assert result["anomalies_by_severity"]["critical"] >= 1
         print(f"\n{result['entity_name']} — {result['total_flagged_transactions']} flagged txns")
-        print(f"Recommended: {result['recommended_action']}")
 
     def test_explanation_contains_entity_name(self, deal_data):
         result = explain_flagged_item("Peter Karanja", deal_data)
         assert "Peter Karanja" in result["explanation"]
 
-    def test_recommended_action_capital_injection(self, deal_data):
+    def test_anomaly_details_present(self, deal_data):
         result = explain_flagged_item("Peter Karanja", deal_data)
-        assert "CLASSIFY" in result["recommended_action"] or "INVESTIGATE" in result["recommended_action"]
+        assert len(result["detailed_anomalies"]) >= 1
+        assert result["detailed_anomalies"][0]["type"] == "POSSIBLE_CAPITAL_INJECTION"
 
     def test_unflagged_entity(self, deal_data):
         result = explain_flagged_item("KCB Bank", deal_data)
@@ -318,7 +319,6 @@ class TestFullToolChain:
         print(f"Top customer: {om['customer_concentration']['top_customer_name']} ({om['customer_concentration']['top_customer_pct']}%)")
         print(f"Joyce: {ed['profile']['pct_of_category']:.1f}% of revenue")
         print(f"Peter Karanja: {ef['total_flagged_transactions']} flagged txns")
-        print(f"Operational summary: {om['summary']}")
         print(f"Financial summary: {fm['summary']}")
 
 
