@@ -2044,6 +2044,12 @@ def parity_review_chat(request: Request, deal_id: str, body: dict = Body(...)):
         raise HTTPException(status_code=500, detail=f"Failed to parse snapshot: {exc}")
 
     try:
+        live_txn_count = repos["txn_map"].count_needs_review(deal_id)
+        deal_data["live_needs_review_txns"] = live_txn_count
+    except Exception:
+        logger.warning("[parity-review] live needs_review count failed deal=%s", deal_id)
+
+    try:
         result = run_chat(
             message=message,
             deal_data=deal_data,

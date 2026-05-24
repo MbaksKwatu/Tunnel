@@ -15,12 +15,13 @@ from ..core.snapshot_engine import decompress_canonical_json_if_needed
 
 logger = logging.getLogger(__name__)
 
-_REVENUE_ROLES  = frozenset({"revenue_operational", "revenue_non_operational"})
-_SUPPLIER_ROLES = frozenset({"supplier_payment"})
-_PAYROLL_ROLES  = frozenset({"payroll"})
-_LOAN_ROLES     = frozenset({"loan_repayment", "loan_inflow"})
-_TAX_ROLES      = frozenset({"tax_payment", "kra_payment"})
-_REVIEW_ROLES   = frozenset({"needs_review", "other"})
+_REVENUE_ROLES       = frozenset({"revenue_operational", "revenue_non_operational"})
+_SUPPLIER_ROLES      = frozenset({"supplier_payment"})
+_PAYROLL_ROLES       = frozenset({"payroll"})
+_LOAN_ROLES          = frozenset({"loan_repayment", "loan_inflow"})
+_TAX_ROLES           = frozenset({"tax_payment", "kra_payment"})
+_REVIEW_ROLES        = frozenset({"needs_review", "other"})
+_NEEDS_REVIEW_ONLY   = frozenset({"needs_review"})
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +52,9 @@ def parse_snapshot(snapshot_row: Dict[str, Any]) -> Dict[str, Any]:
     top_suppliers = [r for r in entity_breakdown if r["role"] in _SUPPLIER_ROLES][:10]
     top_revenue   = [r for r in entity_breakdown if r["role"] in _REVENUE_ROLES][:10]
     review_ents   = [r for r in entity_breakdown if r["role"] in _REVIEW_ROLES][:20]
+
+    # Needs-review entity count from snapshot (distinct entities classified needs_review)
+    needs_review_entity_count = sum(1 for r in entity_breakdown if r["role"] in _NEEDS_REVIEW_ONLY)
 
     # Loan repayment total (cents)
     loan_repayment_total = sum(
@@ -88,6 +92,8 @@ def parse_snapshot(snapshot_row: Dict[str, Any]) -> Dict[str, Any]:
         "tax_months": len(tax_months_set),
         "n_months": n_months,
         "currency": canonical.get("currency", "KES"),
+        "needs_review_entity_count": needs_review_entity_count,
+        # live_needs_review_txns injected by API layer; absent when called outside request context
     }
 
 
@@ -117,8 +123,11 @@ def build_snapshot_context(deal_data: Dict[str, Any]) -> str:
     total_expense_cents  = sum(abs(t["signed_amount_cents"]) for t in tagged if t["signed_amount_cents"] < 0)
     loan_repayment_cents = deal_data["loan_repayment_total_cents"]
 
-    # Flagged / needs_review count
-    review_count = sum(1 for t in tagged if t["role"] in _REVIEW_ROLES)
+    # Needs-review counts: prefer live transaction count injected by API; fall back to snapshot
+    live_txn_count = deal_data.get("live_needs_review_txns")
+    snapshot_txn_count = sum(1 for t in tagged if t["role"] in _NEEDS_REVIEW_ONLY)
+    review_txn_count = live_txn_count if live_txn_count is not None else snapshot_txn_count
+    review_entity_count = deal_data.get("needs_review_entity_count", 0)
 
     top_suppliers = deal_data["top_suppliers"]
     top_revenue   = deal_data["top_revenue"]
@@ -165,7 +174,7 @@ def build_snapshot_context(deal_data: Dict[str, Any]) -> str:
 - Loan Repayment Burden: {loan_burden_bps / 100:.1f}% of outflows
 
 **Classification**:
-- Transactions needing review: {review_count}
+- Needs-review items: {review_txn_count} transactions across {review_entity_count} distinct entities require analyst classification.
 
 ---
 
