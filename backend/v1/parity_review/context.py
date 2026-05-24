@@ -220,6 +220,7 @@ Top customer concentration: {top_customer_pct:.1f}% of all revenue
 
 Available tools:
 - get_deal_summary() — transaction counts by direction and role, monthly breakdown, role distribution
+- query_transactions(filters) — search individual transactions by role, amount range, entity, date range, anomaly presence. Returns txn_id, date, amount, description, entity.
 - calculate_financial_metrics() — DSCR, revenue growth, cash flow volatility, burn rate
 - calculate_operational_metrics() — supplier/customer concentration percentages, working capital trend, payroll frequency
 - get_entity_details(entity_name) — full transaction history for any entity
