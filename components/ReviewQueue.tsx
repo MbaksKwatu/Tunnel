@@ -34,7 +34,7 @@ function ReviewQueue({ dealId, analystInitials, onQueueUpdate }: Props) {
   const [selectedRole, setSelectedRole] = useState('supplier')
   const [resolving, setResolving] = useState(false)
   const [resolvedCount, setResolvedCount] = useState(0)
-  const [bulkMode, setBulkMode] = useState(false)
+  const [bulkMode, setBulkMode] = useState(true)
   const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set())
   const [bulkRole, setBulkRole] = useState('supplier')
   const [bulkResolving, setBulkResolving] = useState(false)
@@ -186,7 +186,28 @@ function ReviewQueue({ dealId, analystInitials, onQueueUpdate }: Props) {
         {/* Column headers */}
         {items.length > 0 && (
           <div style={{ display: 'grid', gridTemplateColumns: bulkMode ? '32px 100px 1fr 100px 120px' : '100px 1fr 100px 120px', gap: 8, padding: '10px 16px', borderBottom: '1px solid #1A2235' }}>
-            {bulkMode && <span />}
+            {bulkMode && (
+              <div
+                style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}
+                onClick={() => {
+                  if (bulkSelected.size === items.length) {
+                    setBulkSelected(new Set())
+                  } else {
+                    setBulkSelected(new Set(items.map(i => i.row_id as string)))
+                  }
+                }}
+              >
+                <div style={{
+                  width: 16, height: 16, borderRadius: 3,
+                  border: `1px solid ${bulkSelected.size === items.length && items.length > 0 ? '#6366F1' : bulkSelected.size > 0 ? '#6366F1' : '#2D3748'}`,
+                  background: bulkSelected.size === items.length && items.length > 0 ? '#6366F1' : bulkSelected.size > 0 ? 'rgba(99,102,241,0.3)' : 'transparent',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  {bulkSelected.size === items.length && items.length > 0 && <span style={{ color: '#fff', fontSize: 10, lineHeight: 1 }}>✓</span>}
+                  {bulkSelected.size > 0 && bulkSelected.size < items.length && <span style={{ color: '#fff', fontSize: 10, lineHeight: 1 }}>—</span>}
+                </div>
+              </div>
+            )}
             {['DATE', 'DESCRIPTION', 'ROLE', 'AMOUNT'].map((h) => (
               <span key={h} style={{ fontSize: 9, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>{h}</span>
             ))}

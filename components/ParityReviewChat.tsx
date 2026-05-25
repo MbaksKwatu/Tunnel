@@ -6,16 +6,23 @@ import { askParityReview, getParityChatSession, clearParityChatSession } from '@
 // ── Lightweight markdown → HTML ────────────────────────────────────────────
 
 function convertTables(text: string): string {
-  const lines = text.split('\n')
+  const lines = text.split(/\r?\n/)
   const out: string[] = []
   let i = 0
   while (i < lines.length) {
-    // Detect table block: line starts with |
-    if (lines[i].trim().startsWith('|') && lines[i].trim().endsWith('|')) {
+    const trimmed = lines[i].trim()
+    if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
       const block: string[] = []
-      while (i < lines.length && lines[i].trim().startsWith('|') && lines[i].trim().endsWith('|')) {
-        block.push(lines[i].trim())
-        i++
+      while (i < lines.length) {
+        const t = lines[i].trim()
+        if (t.startsWith('|') && t.endsWith('|')) {
+          block.push(t)
+          i++
+        } else if (t === '' && block.length > 0 && i + 1 < lines.length && lines[i + 1].trim().startsWith('|')) {
+          i++
+        } else {
+          break
+        }
       }
       if (block.length >= 2) {
         out.push(renderTable(block))
@@ -72,7 +79,7 @@ function mdToHtml(md: string): string {
     .replace(/^• (.+)$/gm, '<div style="padding-left:12px;margin:2px 0">· $1</div>')
     .replace(/^- (.+)$/gm, '<div style="padding-left:12px;margin:2px 0">· $1</div>')
     .replace(/[📊💡🏦📈📉⚠️✅❌🔍💰📋🏢📌🔎💼📁📂🗂️📄📃📑🔔🔕]/gu, '')
-    .replace(/\n{2,}/g, '<br/>')
+    .replace(/\n/g, '<br/>')
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
