@@ -435,3 +435,102 @@ def test_payed_flixnet_revenue():
     assert role == "revenue_operational"
     assert "payed_by_prefix" in reason
 
+
+# ── LOAN KEYWORD EXPANSIONS ───────────────────────────────────────────────────
+
+def test_od_limit_credit_loan_inflow():
+    """'od limit' credit → loan_inflow (new keyword, no loan substring)."""
+    role, reason = classify_with_reason(txn("od limit approved equity bank", 500000))
+    assert role == "loan_inflow"
+    assert "keyword_match" in reason
+
+def test_stawi_credit_loan_inflow():
+    """Safaricom Stawi mobile credit → loan_inflow."""
+    role, reason = classify_with_reason(txn("stawi credit safaricom 254722000001", 200000))
+    assert role == "loan_inflow"
+    assert "keyword_match" in reason
+
+def test_zidisha_credit_loan_inflow():
+    """Zidisha peer-lending disbursement → loan_inflow."""
+    role, reason = classify_with_reason(txn("zidisha loan disbursement ref 20251101", 1500000))
+    assert role == "loan_inflow"
+    assert "keyword_match" in reason
+
+def test_mshwari_credit_loan_inflow():
+    """M-Shwari credit facility → loan_inflow."""
+    role, reason = classify_with_reason(txn("mshwari loan credited to account", 300000))
+    assert role == "loan_inflow"
+    assert "keyword_match" in reason
+
+def test_kcb_mpesa_credit_loan_inflow():
+    """KCB M-PESA loan disbursement → loan_inflow."""
+    role, reason = classify_with_reason(txn("kcb m-pesa loan credit 0712345678", 1000000))
+    assert role == "loan_inflow"
+    assert "keyword_match" in reason
+
+def test_jiinue_credit_loan_inflow():
+    """Equity Bank Jiinue product credit → loan_inflow."""
+    role, reason = classify_with_reason(txn("jiinue credit equity bank limited", 750000))
+    assert role == "loan_inflow"
+    assert "keyword_match" in reason
+
+def test_jiendeleze_credit_loan_inflow():
+    """Equity Bank Jiendeleze product credit → loan_inflow."""
+    role, reason = classify_with_reason(txn("jiendeleze disbursement equity bank", 2000000))
+    assert role == "loan_inflow"
+    assert "keyword_match" in reason
+
+def test_jiinue_repayment_debit_loan_repayment():
+    """Jiinue repayment debit → loan_repayment (Buildex regression guard)."""
+    role, reason = classify_with_reason(txn("jiinue repayment equity bank", -400000))
+    assert role == "loan_repayment"
+    assert "keyword_match" in reason
+
+def test_overdraft_repayment_debit_loan_repayment():
+    """'overdraft repayment' debit → loan_repayment (no loan substring in phrase)."""
+    role, reason = classify_with_reason(txn("overdraft repayment equity bank march", -850000))
+    assert role == "loan_repayment"
+    assert "keyword_match" in reason
+
+def test_od_repayment_debit_loan_repayment():
+    """'od repayment' debit → loan_repayment."""
+    role, reason = classify_with_reason(txn("od repayment ref 20250301 kcb", -300000))
+    assert role == "loan_repayment"
+    assert "keyword_match" in reason
+
+def test_od_recovery_debit_loan_repayment():
+    """'od recovery' debit → loan_repayment."""
+    role, reason = classify_with_reason(txn("od recovery automatic debit equity", -620000))
+    assert role == "loan_repayment"
+    assert "keyword_match" in reason
+
+def test_payloan_credit_loan_inflow():
+    """'payloan' hits 'loan' substring → loan_inflow on credit (already covered, regression guard)."""
+    role, reason = classify_with_reason(txn("payloan 254700000001 drawdown", 1000000))
+    assert role == "loan_inflow"
+    assert "keyword_match" in reason
+
+def test_tendepay_debit_loan_repayment():
+    """TENDEPAY LIMITED debits (Buildex KCB + Equity) → loan_repayment."""
+    role, reason = classify_with_reason(txn("transfer 107853 tendepay limited", -200000000))
+    assert role == "loan_repayment"
+    assert "keyword_match" in reason
+
+def test_tendepay_ltd_debit_loan_repayment():
+    """TENDEPAY LTD variant (Equity RTGS descriptor) → loan_repayment."""
+    role, reason = classify_with_reason(txn("rtgs: rtobzn04308434 tendepay ltd", -15000000))
+    assert role == "loan_repayment"
+    assert "keyword_match" in reason
+
+def test_swift_charge_jiinue_bank_charge():
+    """SWIFT charge on Jiinue RTGS → bank_charge, not loan_repayment (lender name must not win)."""
+    role, reason = classify_with_reason(txn("swift charge jiinue loan funds ref 20250315", -575))
+    assert role == "bank_charge"
+    assert "swift_charge_fee" in reason
+
+def test_swift_charge_generic_bank_charge():
+    """Any 'swift charge' descriptor → bank_charge regardless of other content."""
+    role, reason = classify_with_reason(txn("swift charge outward wire ref xyz", -2500))
+    assert role == "bank_charge"
+    assert "swift_charge_fee" in reason
+
