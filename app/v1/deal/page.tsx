@@ -1115,13 +1115,13 @@ function V1DealPageInner() {
               <span style={{ fontSize: 9, background: '#0D1220', color: '#2D3748', padding: '1px 4px', borderRadius: 2 }}>SOON</span>
             </div>
           ))}
-          <div style={{ margin: '12px 0 4px', padding: '0 16px', fontSize: 9, color: '#2D3748', letterSpacing: '0.1em' }}>SUPPORT</div>
+          <div style={{ margin: '12px 0 4px', padding: '0 16px', fontSize: 9, color: '#2D3748', letterSpacing: '0.1em' }}>FORMAT DESK</div>
           <button
             onClick={() => router.push('/parsers/request')}
             style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '9px 16px', background: 'transparent', borderLeft: '2px solid transparent', border: 'none', color: '#4A5568', fontSize: 13, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left', gap: 6 }}
           >
             <span style={{ fontSize: 11, lineHeight: 1, fontFamily: "'IBM Plex Mono', monospace", color: '#374151' }}>//</span>
-            Request Parser
+            New Bank Format
           </button>
         </nav>
         <div style={{ padding: '12px 16px', borderTop: '1px solid #1A2235' }}>

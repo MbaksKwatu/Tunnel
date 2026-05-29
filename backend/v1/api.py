@@ -964,6 +964,30 @@ def export(request: Request, deal_id: str, force: bool = False):
     except Exception as exc:
         logger.warning("[EXPORT] account_coverage persist failed (non-fatal): %s", exc)
 
+    # Auto-trigger full fiscal-year reconciliation when audited financials exist
+    if audited_financials:
+        try:
+            from .analysis.snapshot_generator import generate_reconciliation_section
+            recon = generate_reconciliation_section(deal_id)
+            recon_tier = recon.get("tier", "LOW_CONFIDENCE")
+            cash_status = (recon.get("cash_position") or {}).get("status")
+            recon_status_val = "OK" if recon_tier in ("HIGH_CONFIDENCE", "MEDIUM_CONFIDENCE") else "LOW"
+            cash_variance_bp = None
+            if cash_status == "EXACT_MATCH":
+                cash_variance_bp = 10000
+            elif cash_status == "ACCEPTABLE_VARIANCE":
+                cp = recon.get("cash_position") or {}
+                declared = cp.get("total_declared_kes", 0)
+                if declared and declared > 0:
+                    variance_pct = abs(cp.get("variance_pct") or 0)
+                    cash_variance_bp = max(0, 10000 - int(variance_pct * 100))
+            repos["runs"].update_reconciliation(run["id"], recon_status_val, cash_variance_bp)
+            run["reconciliation_status"] = recon_status_val
+            run["reconciliation_pct_bp"] = cash_variance_bp
+            logger.info("[EXPORT] reconciliation auto-triggered deal=%s tier=%s status=%s bp=%s", deal_id, recon_tier, recon_status_val, cash_variance_bp)
+        except Exception as exc:
+            logger.warning("[EXPORT] reconciliation auto-trigger failed (non-fatal): %s", exc)
+
     # Seed default flags on first snapshot (idempotent — skipped if flags already exist)
     try:
         avg_inflow = int(run.get("average_monthly_inflow_cents") or 0)
