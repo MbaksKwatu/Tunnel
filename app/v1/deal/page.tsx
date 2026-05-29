@@ -23,6 +23,7 @@ import {
   exportTransactionsCsv,
   getNeedsReview,
   listDeals,
+  getMonthlyCashflow,
 } from '@/lib/v1-api';
 import type { DealListItem } from '@/lib/v1-api';
 import { BatchUpload } from '@/components/BatchUpload';
@@ -509,6 +510,7 @@ function V1DealPageInner() {
       await refreshBatchUploadCount(activeDeal.id);
       const txRes = await listDealTransactions(activeDeal.id);
       setRawTransactions(txRes.transactions as unknown as Array<Record<string, unknown>>);
+      getMonthlyCashflow(activeDeal.id).then((r) => setMonthlyCashflow(r.monthly_cashflow as unknown as Array<Record<string, unknown>>)).catch(() => {});
       setAnalysisState('done');
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : 'Analysis failed');
@@ -575,6 +577,7 @@ function V1DealPageInner() {
       const data = await exportSnapshot(deal.id);
       setExportData(data);
       setLastExportedAt(new Date());
+      getMonthlyCashflow(deal.id).then((r) => setMonthlyCashflow(r.monthly_cashflow as unknown as Array<Record<string, unknown>>)).catch(() => {});
       setAnalysisState('done');
 
       // Build entity breakdown from the freshly returned data to pass to PDF (same logic as entityBreakdownByCategory)

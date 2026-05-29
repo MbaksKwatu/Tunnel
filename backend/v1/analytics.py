@@ -16,6 +16,16 @@ _ANNUAL_REVENUE_ROLES = frozenset({
     "revenue_non_operational",
 })
 
+# ── Inflow roles for monthly cashflow ────────────────────────────────────────
+_CASHFLOW_INFLOW_ROLES = frozenset({
+    "revenue_operational",
+    "revenue_non_operational",
+    "mpesa_inflow",
+    "pesalink_inflow",
+    "loan_inflow",
+    "capital_injection",
+})
+
 # ── Expense roles counted in top-expenses surface ─────────────────────────────
 _EXPENSE_ROLES = frozenset({
     "supplier",
@@ -205,3 +215,51 @@ def top_expenses_with_frequency(
         }
         for name, data in sorted_entities[:top_n]
     ]
+
+
+def monthly_cashflow(transactions: list[dict]) -> list[dict]:
+    """
+    Month-by-month inflow/outflow/net from classified transactions.
+
+    Inflows:  roles in _CASHFLOW_INFLOW_ROLES with amount_cents > 0.
+    Outflows: abs(amount_cents) where amount_cents < 0.
+    Zero-inflow months are included, not skipped.
+    All amounts integer cents. No floats.
+    Returns list sorted by month ascending.
+    """
+    monthly_in: dict[str, int] = {}
+    monthly_out: dict[str, int] = {}
+    months_seen: set[str] = set()
+
+    for txn in transactions:
+        amount = txn.get("amount_cents", 0)
+        if not isinstance(amount, int):
+            raise ValueError(
+                f"Non-integer amount_cents: {amount} on txn {txn.get('txn_id')}"
+            )
+        txn_date = txn.get("txn_date", "")
+        if not txn_date:
+            continue
+        month = str(txn_date)[:7]
+        if len(month) < 7:
+            continue
+        months_seen.add(month)
+
+        role = txn.get("role") or txn.get("classification") or ""
+        if role in _CASHFLOW_INFLOW_ROLES and amount > 0:
+            monthly_in[month] = monthly_in.get(month, 0) + amount
+        elif amount < 0:
+            monthly_out[month] = monthly_out.get(month, 0) + abs(amount)
+
+    result = []
+    for month in sorted(months_seen):
+        inflow = monthly_in.get(month, 0)
+        outflow = monthly_out.get(month, 0)
+        net = inflow - outflow
+        result.append({
+            "month": month,
+            "inflow_cents": inflow,
+            "outflow_cents": outflow,
+            "net_cents": net,
+        })
+    return result

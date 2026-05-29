@@ -1609,7 +1609,7 @@ def log_intelligence_entry(request: Request, deal_id: str, entry_id: str):
 # Parity Review — Suggestions Engine
 # ===================================================================
 
-from .analytics import loan_drawdowns as _loan_drawdowns  # noqa: E402
+from .analytics import loan_drawdowns as _loan_drawdowns, monthly_cashflow as _monthly_cashflow  # noqa: E402
 from .suggestions import generate_suggestions  # noqa: E402
 
 
@@ -1651,6 +1651,50 @@ def get_loan_drawdowns(request: Request, deal_id: str):
         })
 
     return _loan_drawdowns(tagged)
+
+
+@router.get("/deals/{deal_id}/analytics/monthly-cashflow")
+def get_monthly_cashflow(request: Request, deal_id: str):
+    """
+    Month-by-month inflow / outflow / net for a deal.
+    Computed from classified transactions in the latest snapshot.
+    Inflows: revenue_operational, revenue_non_operational, mpesa_inflow,
+             pesalink_inflow, loan_inflow, capital_injection.
+    Outflows: all transactions with negative amount_cents.
+    """
+    repos = _repos(request)
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+    snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    if not snapshot:
+        _error("NOT_FOUND", "No snapshot found. Run export first.")
+
+    import json
+    from .core.snapshot_engine import decompress_canonical_json_if_needed
+
+    data = json.loads(decompress_canonical_json_if_needed(snapshot["canonical_json"]))
+    transactions = data.get("transactions", [])
+    txn_entity_map = data.get("txn_entity_map", [])
+
+    role_lookup = {str(m.get("txn_id") or ""): m.get("role", "") for m in txn_entity_map}
+
+    tagged = []
+    for t in transactions:
+        txn_id = str(t.get("id") or t.get("txn_id") or "")
+        role = role_lookup.get(txn_id, "")
+        amount = int(t.get("signed_amount_cents", 0))
+        txn_date = str(t.get("txn_date", ""))
+        if not txn_date:
+            continue
+        tagged.append({
+            "role": role,
+            "amount_cents": amount,
+            "txn_date": txn_date,
+            "txn_id": txn_id,
+        })
+
+    rows = _monthly_cashflow(tagged)
+    return {"monthly_cashflow": rows, "count": len(rows)}
 
 
 @router.get("/deals/{deal_id}/review/suggestions")
