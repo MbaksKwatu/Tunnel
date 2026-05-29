@@ -964,6 +964,30 @@ def export(request: Request, deal_id: str, force: bool = False):
     except Exception as exc:
         logger.warning("[EXPORT] account_coverage persist failed (non-fatal): %s", exc)
 
+    # Auto-trigger full fiscal-year reconciliation when audited financials exist
+    if audited_financials:
+        try:
+            from .analysis.snapshot_generator import generate_reconciliation_section
+            recon = generate_reconciliation_section(deal_id)
+            recon_tier = recon.get("tier", "LOW_CONFIDENCE")
+            cash_status = (recon.get("cash_position") or {}).get("status")
+            recon_status_val = "OK" if recon_tier in ("HIGH_CONFIDENCE", "MEDIUM_CONFIDENCE") else "LOW"
+            cash_variance_bp = None
+            if cash_status == "EXACT_MATCH":
+                cash_variance_bp = 10000
+            elif cash_status == "ACCEPTABLE_VARIANCE":
+                cp = recon.get("cash_position") or {}
+                declared = cp.get("total_declared_kes", 0)
+                if declared and declared > 0:
+                    variance_pct = abs(cp.get("variance_pct") or 0)
+                    cash_variance_bp = max(0, 10000 - int(variance_pct * 100))
+            repos["runs"].update_reconciliation(run["id"], recon_status_val, cash_variance_bp)
+            run["reconciliation_status"] = recon_status_val
+            run["reconciliation_pct_bp"] = cash_variance_bp
+            logger.info("[EXPORT] reconciliation auto-triggered deal=%s tier=%s status=%s bp=%s", deal_id, recon_tier, recon_status_val, cash_variance_bp)
+        except Exception as exc:
+            logger.warning("[EXPORT] reconciliation auto-trigger failed (non-fatal): %s", exc)
+
     # Seed default flags on first snapshot (idempotent — skipped if flags already exist)
     try:
         avg_inflow = int(run.get("average_monthly_inflow_cents") or 0)
@@ -1585,7 +1609,7 @@ def log_intelligence_entry(request: Request, deal_id: str, entry_id: str):
 # Parity Review — Suggestions Engine
 # ===================================================================
 
-from .analytics import loan_drawdowns as _loan_drawdowns  # noqa: E402
+from .analytics import loan_drawdowns as _loan_drawdowns, monthly_cashflow as _monthly_cashflow  # noqa: E402
 from .suggestions import generate_suggestions  # noqa: E402
 
 
@@ -1627,6 +1651,50 @@ def get_loan_drawdowns(request: Request, deal_id: str):
         })
 
     return _loan_drawdowns(tagged)
+
+
+@router.get("/deals/{deal_id}/analytics/monthly-cashflow")
+def get_monthly_cashflow(request: Request, deal_id: str):
+    """
+    Month-by-month inflow / outflow / net for a deal.
+    Computed from classified transactions in the latest snapshot.
+    Inflows: revenue_operational, revenue_non_operational, mpesa_inflow,
+             pesalink_inflow, loan_inflow, capital_injection.
+    Outflows: all transactions with negative amount_cents.
+    """
+    repos = _repos(request)
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+    snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    if not snapshot:
+        _error("NOT_FOUND", "No snapshot found. Run export first.")
+
+    import json
+    from .core.snapshot_engine import decompress_canonical_json_if_needed
+
+    data = json.loads(decompress_canonical_json_if_needed(snapshot["canonical_json"]))
+    transactions = data.get("transactions", [])
+    txn_entity_map = data.get("txn_entity_map", [])
+
+    role_lookup = {str(m.get("txn_id") or ""): m.get("role", "") for m in txn_entity_map}
+
+    tagged = []
+    for t in transactions:
+        txn_id = str(t.get("id") or t.get("txn_id") or "")
+        role = role_lookup.get(txn_id, "")
+        amount = int(t.get("signed_amount_cents", 0))
+        txn_date = str(t.get("txn_date", ""))
+        if not txn_date:
+            continue
+        tagged.append({
+            "role": role,
+            "amount_cents": amount,
+            "txn_date": txn_date,
+            "txn_id": txn_id,
+        })
+
+    rows = _monthly_cashflow(tagged)
+    return {"monthly_cashflow": rows, "count": len(rows)}
 
 
 @router.get("/deals/{deal_id}/review/suggestions")

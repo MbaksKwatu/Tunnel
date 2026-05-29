@@ -404,6 +404,11 @@ class AnalysisRunsRepo(AnalysisRunsRepository, BaseRepo):
             return None
         return max(rows, key=lambda r: r.get("created_at") or "")
 
+    def update_reconciliation(self, run_id: str, status: str, pct_bp: Optional[int]) -> None:
+        self.client.table(self.table).update(
+            {"reconciliation_status": status, "reconciliation_pct_bp": pct_bp}
+        ).eq("id", run_id).execute()
+
 
 class SnapshotsRepo(SnapshotsRepository, BaseRepo):
     def __init__(self):
