@@ -510,7 +510,12 @@ function V1DealPageInner() {
       await refreshBatchUploadCount(activeDeal.id);
       const txRes = await listDealTransactions(activeDeal.id);
       setRawTransactions(txRes.transactions as unknown as Array<Record<string, unknown>>);
-      getMonthlyCashflow(activeDeal.id).then((r) => setMonthlyCashflow(r.monthly_cashflow as unknown as Array<Record<string, unknown>>)).catch(() => {});
+      try {
+        const mcRes = await getMonthlyCashflow(activeDeal.id);
+        setMonthlyCashflow(mcRes.monthly_cashflow as unknown as Array<Record<string, unknown>>);
+      } catch (e) {
+        console.error('getMonthlyCashflow failed after export:', e);
+      }
       setAnalysisState('done');
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : 'Analysis failed');
@@ -577,7 +582,12 @@ function V1DealPageInner() {
       const data = await exportSnapshot(deal.id);
       setExportData(data);
       setLastExportedAt(new Date());
-      getMonthlyCashflow(deal.id).then((r) => setMonthlyCashflow(r.monthly_cashflow as unknown as Array<Record<string, unknown>>)).catch(() => {});
+      try {
+        const mcRes = await getMonthlyCashflow(deal.id);
+        setMonthlyCashflow(mcRes.monthly_cashflow as unknown as Array<Record<string, unknown>>);
+      } catch (e) {
+        console.error('getMonthlyCashflow failed after re-export:', e);
+      }
       setAnalysisState('done');
 
       // Build entity breakdown from the freshly returned data to pass to PDF (same logic as entityBreakdownByCategory)
@@ -690,6 +700,11 @@ function V1DealPageInner() {
   useEffect(() => {
     if (analysisState === 'done' && deal?.id) {
       getNeedsReview(deal.id).then((res) => setNeedsReviewItems(res.transactions as unknown as Array<Record<string, unknown>>)).catch(() => {});
+      if (monthlyCashflow.length === 0) {
+        getMonthlyCashflow(deal.id)
+          .then((r) => setMonthlyCashflow(r.monthly_cashflow as unknown as Array<Record<string, unknown>>))
+          .catch((e) => console.error('useEffect getMonthlyCashflow failed:', e));
+      }
     }
   }, [analysisState, deal?.id]);
 
