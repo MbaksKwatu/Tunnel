@@ -91,6 +91,10 @@ def extract_audited_financials_via_ingestion(
                 data.get("extraction_confidence"),
                 data.get("extraction_method"),
             )
+            if data.get("extraction_confidence", 0) == 0:
+                raise AuditedFinancialsExtractionError(
+                    "Unsupported audited financials format: extraction confidence is zero"
+                )
             return data
         except AuditedFinancialsExtractionError as exc:
             if ext in _TABULAR_EXTENSIONS:
@@ -116,6 +120,10 @@ def extract_audited_financials_via_ingestion(
             data.get("financial_year"),
             data.get("extraction_confidence"),
         )
+        if data.get("extraction_confidence", 0) == 0:
+            raise AuditedFinancialsExtractionError(
+                "Unsupported audited financials format: extraction confidence is zero"
+            )
         return data
     except Exception as exc:
         raise AuditedFinancialsExtractionError(

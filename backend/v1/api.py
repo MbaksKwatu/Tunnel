@@ -1805,7 +1805,10 @@ async def upload_audited_financials(
     try:
         data = extract_audited_financials_via_ingestion(file_bytes, filename)
     except AuditedFinancialsExtractionError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=422,
+            detail={"status": "PARSE_FAILED", "detail": str(exc)},
+        ) from exc
 
     # Attach deal FK and declaration_type; exclude non-column keys
     row = {
