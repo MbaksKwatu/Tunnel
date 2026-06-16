@@ -71,7 +71,7 @@ export interface AnalysisRun {
   deal_id: string
   non_transfer_abs_total_cents: number
   coverage_pct_bp: number
-  reconciliation_status: 'OK' | 'NOT_RUN' | 'FAILED_OVERLAP'
+  reconciliation_status: 'OK' | 'NOT_RUN' | 'FAILED_OVERLAP' | 'LOW'
   reconciliation_pct_bp: number | null
   final_confidence_bp: number
   tier: 'Low' | 'Medium' | 'High'
@@ -667,9 +667,55 @@ export async function getNeedsReview(dealId: string): Promise<{ transactions: Ne
   return res.json()
 }
 
+export interface ReconciliationCashPosition {
+  status?: string
+  variance_pct?: number | null
+  variance_kes?: number
+  fiscal_year_end?: string
+  [key: string]: unknown
+}
+
+export interface ReconciliationRevenue {
+  assessment?: string
+  gap_pct?: number | null
+  fiscal_period?: string
+  [key: string]: unknown
+}
+
+export interface ReconciliationExpenses {
+  gap_pct?: number | null
+  explanation?: string
+  [key: string]: unknown
+}
+
+export interface ReconciliationLoanActivity {
+  status?: string
+  variance_pct?: number | null
+  [key: string]: unknown
+}
+
+export interface ReconciliationAccountCoverage {
+  status?: string
+  coverage_pct?: number
+  advisory_tier?: string
+  missing_pct?: number
+  [key: string]: unknown
+}
+
+export interface ReconciliationSection {
+  tier?: string
+  note?: string
+  cash_position?: ReconciliationCashPosition
+  revenue?: ReconciliationRevenue
+  expenses?: ReconciliationExpenses
+  loan_activity?: ReconciliationLoanActivity
+  account_coverage?: ReconciliationAccountCoverage
+  [key: string]: unknown
+}
+
 export interface ReconciliationResult {
   deal_id: string
-  reconciliation: Record<string, unknown>
+  reconciliation: ReconciliationSection
 }
 
 export async function getReconciliation(dealId: string): Promise<ReconciliationResult> {
