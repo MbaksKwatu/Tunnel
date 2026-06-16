@@ -24,6 +24,7 @@ import {
   getNeedsReview,
   listDeals,
   getMonthlyCashflow,
+  getReconciliation,
 } from '@/lib/v1-api';
 import type { DealListItem } from '@/lib/v1-api';
 import { BatchUpload } from '@/components/BatchUpload';
@@ -38,6 +39,7 @@ import type {
   ExportResponse,
   DocumentListItem,
   AuditedFinancialsRecord,
+  ReconciliationSection,
 } from '@/lib/v1-api';
 // generateParityPdf is loaded dynamically at click time so Next.js never
 // evaluates jsPDF's Node.js build during server compilation.
@@ -138,6 +140,7 @@ function V1DealPageInner() {
   const [monthlyCashflow, setMonthlyCashflow] = useState<Array<Record<string, unknown>>>([]);
   const [creditScoringInputs, setCreditScoringInputs] = useState<Record<string, unknown> | null>(null);
   const [monthlyEntityBreakdown, setMonthlyEntityBreakdown] = useState<Array<Record<string, unknown>>>([]);
+  const [reconciliationDetail, setReconciliationDetail] = useState<ReconciliationSection | null>(null);
   // Chat state moved to ParityReviewChat component for performance
   const [dealDocuments, setDealDocuments] = useState<DocumentListItem[]>([]);
   const [auditedFinancialsList, setAuditedFinancialsList] = useState<AuditedFinancialsRecord[]>([]);
@@ -708,6 +711,15 @@ function V1DealPageInner() {
     }
   }, [analysisState, deal?.id]);
 
+  // Load fiscal-year reconciliation breakdown when analysis completes and audited financials exist
+  useEffect(() => {
+    if (analysisState === 'done' && deal?.id && auditedFinancialsList.length > 0) {
+      getReconciliation(deal.id)
+        .then((r) => setReconciliationDetail(r.reconciliation))
+        .catch((e) => console.error('getReconciliation failed:', e));
+    }
+  }, [analysisState, deal?.id, auditedFinancialsList.length]);
+
   // parityInputInteracted, proactive analysis trigger — moved to ParityReviewChat
 
   const handleParserRequestSubmit = async () => {
@@ -912,7 +924,7 @@ function V1DealPageInner() {
       { name: 'Transaction parsing', detail: 'Layout detection · row parsing · 0 errors', progress: `${totalTxn} / ${totalTxn}`, status: 'done' },
       { name: 'Classification', detail: 'Ontology v2.0 · 25 roles · integer arithmetic', progress: `${totalTxn} / ${totalTxn}`, status: 'done' },
       { name: 'Entity extraction', detail: 'Dedup via clean display name · collapse repeats', progress: `${totalEntities} / ${totalEntities}`, status: 'done' },
-      { name: 'Reconciliation', detail: 'Declared vs bank inflow · awaiting entity extraction', progress: run ? `${run.coverage_pct_bp / 100}%` : '—', status: 'done' },
+      { name: 'Reconciliation', detail: run ? `Status: ${run.reconciliation_status}` : 'Declared vs bank inflow · awaiting entity extraction', progress: run && run.reconciliation_pct_bp != null ? `${(run.reconciliation_pct_bp / 100).toFixed(1)}%` : '—', status: 'done' },
       { name: 'Confidence scoring', detail: 'Depends on reconciliation delta', progress: '—', status: 'active', pct: 80 },
       { name: 'Snapshot generation', detail: 'SHA256 dual hash · immutable · sealed', progress: '—', status: 'queued' },
     ];
@@ -922,7 +934,7 @@ function V1DealPageInner() {
       { name: 'Transaction parsing', detail: 'Layout detection · row parsing · 0 errors', progress: `${totalTxn} / ${totalTxn}`, status: 'done' },
       { name: 'Classification', detail: 'Ontology v2.0 · 25 roles · integer arithmetic', progress: `${totalTxn} / ${totalTxn}`, status: 'done' },
       { name: 'Entity extraction', detail: 'Dedup via clean display name · collapse repeats', progress: `${totalEntities} / ${totalEntities}`, status: 'done' },
-      { name: 'Reconciliation', detail: 'Declared vs bank inflow · awaiting entity extraction', progress: run ? `${(run.coverage_pct_bp / 100).toFixed(1)}%` : '—', status: 'done' },
+      { name: 'Reconciliation', detail: run ? `Status: ${run.reconciliation_status}` : 'Declared vs bank inflow · awaiting entity extraction', progress: run && run.reconciliation_pct_bp != null ? `${(run.reconciliation_pct_bp / 100).toFixed(1)}%` : '—', status: 'done' },
       { name: 'Confidence scoring', detail: run ? `Tier ${run.tier} · ${(run.final_confidence_bp / 100).toFixed(1)}% confidence` : 'Depends on reconciliation delta', progress: run ? `${(run.final_confidence_bp / 100).toFixed(1)}%` : '—', status: analysisState === 'error' ? 'failed' : 'done' },
       { name: 'Snapshot generation', detail: snapshot ? `SHA256 ${snapshot.sha256_hash.slice(0, 12)}… · sealed` : 'SHA256 dual hash · immutable · sealed', progress: snapshot ? '1 / 1' : '—', status: analysisState === 'error' ? 'queued' : 'done' },
     ];
@@ -1629,6 +1641,134 @@ function V1DealPageInner() {
                           </div>
                         </div>
                       )}
+
+                      {/* Reconciliation */}
+                      {run && (() => {
+                        const STATUS_COLORS: Record<string, string> = {
+                          OK: '#4ADE80',
+                          HIGH_CONFIDENCE: '#4ADE80',
+                          EXACT_MATCH: '#4ADE80',
+                          ACCEPTABLE: '#4ADE80',
+                          ACCEPTABLE_VARIANCE: '#4ADE80',
+                          MEDIUM_CONFIDENCE: '#F59E0B',
+                          LOW: '#F59E0B',
+                          NOT_RUN: '#4A5568',
+                          SKIPPED: '#4A5568',
+                          INSUFFICIENT_DATA: '#4A5568',
+                          LOW_CONFIDENCE: '#F87171',
+                          FAILED_OVERLAP: '#F87171',
+                          SIGNIFICANT_VARIANCE: '#F87171',
+                          VARIANCE: '#F87171',
+                          ERROR: '#F87171',
+                        };
+                        const reconColor = STATUS_COLORS[run.reconciliation_status] ?? '#4A5568';
+                        const RECON_BASIS: Record<string, string> = {
+                          OK: 'Declared accrual revenue matches bank-detected operational inflow within tolerance',
+                          FAILED_OVERLAP: 'Bank statement period covers less than 60% of the declared accrual period — result not reliable',
+                          NOT_RUN: 'No accrual revenue or accrual period declared for this deal — reconciliation not run',
+                          LOW: 'Fiscal-year reconciliation ran with LOW_CONFIDENCE tier — see breakdown below',
+                        };
+                        const fmtKes = (v: unknown) =>
+                          v != null ? new Intl.NumberFormat('en-KE', { style: 'currency', currency, minimumFractionDigits: 2 }).format(Number(v)) : '—';
+                        const fmtPct = (v: unknown) => v != null ? `${Number(v)}%` : '—';
+
+                        type ReconRow = { check: string; result: string; basis: string; color?: string };
+                        const detailRows: ReconRow[] = [];
+                        if (reconciliationDetail) {
+                          detailRows.push({
+                            check: 'Fiscal-Year Reconciliation Tier',
+                            result: reconciliationDetail.tier ?? '—',
+                            basis: 'Combines cash position, loan activity and account coverage vs audited financials',
+                            color: STATUS_COLORS[reconciliationDetail.tier ?? ''] ?? '#CBD5E1',
+                          });
+                          const cash = reconciliationDetail.cash_position;
+                          if (cash && cash.status !== 'SKIPPED' && cash.status !== 'ERROR') {
+                            detailRows.push({
+                              check: 'Cash Position (FY-end)',
+                              result: cash.status ?? '—',
+                              basis: `Bank ${fmtKes(cash.total_bank_kes)} vs Declared ${fmtKes(cash.total_declared_kes)}${cash.variance_pct != null ? ` · variance ${fmtPct(cash.variance_pct)}` : ''}`,
+                              color: STATUS_COLORS[cash.status ?? ''] ?? '#CBD5E1',
+                            });
+                          } else if (cash?.reason) {
+                            detailRows.push({ check: 'Cash Position (FY-end)', result: cash.status ?? '—', basis: String(cash.reason), color: '#4A5568' });
+                          }
+                          const revenue = reconciliationDetail.revenue;
+                          if (revenue && revenue.status !== 'SKIPPED' && revenue.status !== 'ERROR') {
+                            detailRows.push({
+                              check: 'Revenue (FY)',
+                              result: fmtPct(revenue.gap_pct),
+                              basis: revenue.assessment ?? '—',
+                            });
+                          } else if (revenue?.reason) {
+                            detailRows.push({ check: 'Revenue (FY)', result: 'SKIPPED', basis: String(revenue.reason), color: '#4A5568' });
+                          }
+                          const expenses = reconciliationDetail.expenses;
+                          if (expenses && expenses.status !== 'SKIPPED' && expenses.status !== 'ERROR') {
+                            detailRows.push({
+                              check: 'Expenses (FY)',
+                              result: fmtPct(expenses.gap_pct),
+                              basis: expenses.explanation ?? '—',
+                            });
+                          } else if (expenses?.reason) {
+                            detailRows.push({ check: 'Expenses (FY)', result: 'SKIPPED', basis: String(expenses.reason), color: '#4A5568' });
+                          }
+                          const loans = reconciliationDetail.loan_activity;
+                          if (loans && loans.status !== 'SKIPPED' && loans.status !== 'ERROR') {
+                            detailRows.push({
+                              check: 'Loan Activity (FY)',
+                              result: loans.status ?? '—',
+                              basis: loans.variance_pct != null ? `Variance: ${fmtPct(loans.variance_pct)}` : '—',
+                              color: STATUS_COLORS[loans.status ?? ''] ?? '#CBD5E1',
+                            });
+                          } else if (loans?.reason) {
+                            detailRows.push({ check: 'Loan Activity (FY)', result: 'SKIPPED', basis: String(loans.reason), color: '#4A5568' });
+                          }
+                          const coverage = reconciliationDetail.account_coverage;
+                          if (coverage && coverage.status !== 'SKIPPED' && coverage.status !== 'ERROR') {
+                            detailRows.push({
+                              check: 'Account Coverage',
+                              result: coverage.coverage_pct != null ? `${coverage.coverage_pct}%` : '—',
+                              basis: coverage.advisory_tier ? `Advisory: ${coverage.advisory_tier}` : '—',
+                              color: coverage.advisory_tier === 'CRITICAL' ? '#F87171' : coverage.advisory_tier === 'NEGLIGIBLE' ? '#4ADE80' : '#F59E0B',
+                            });
+                          } else if (coverage?.reason) {
+                            detailRows.push({ check: 'Account Coverage', result: 'SKIPPED', basis: String(coverage.reason), color: '#4A5568' });
+                          }
+                        }
+
+                        return (
+                          <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid #1A2235', borderLeft: `3px solid ${reconColor}` }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>03 · RECONCILIATION</span>
+                              <span style={{ fontSize: 10, color: reconColor, background: `${reconColor}18`, border: `1px solid ${reconColor}33`, padding: '2px 8px', borderRadius: 3, letterSpacing: '0.06em' }}>{run.reconciliation_status}</span>
+                            </div>
+                            <div style={{ padding: '0 20px' }}>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px 1fr', gap: 12, padding: '10px 0', borderBottom: '1px solid #1A2235' }}>
+                                {['CHECK', 'RESULT', 'BASIS'].map((h) => <span key={h} style={{ fontSize: 10, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>{h}</span>)}
+                              </div>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px 1fr', gap: 12, padding: '11px 0', borderBottom: '1px solid #1A2235', alignItems: 'center' }}>
+                                <span style={{ fontSize: 13, color: '#CBD5E1' }}>Accrual Revenue vs Bank Inflow</span>
+                                <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, color: run.reconciliation_pct_bp != null ? '#4ADE80' : '#4A5568' }}>
+                                  {run.reconciliation_pct_bp != null ? `${(run.reconciliation_pct_bp / 100).toFixed(1)}%` : '—'}
+                                </span>
+                                <span style={{ fontSize: 12, color: '#4A5568' }}>{RECON_BASIS[run.reconciliation_status] ?? '—'}</span>
+                              </div>
+                              {detailRows.map((row) => (
+                                <div key={row.check} style={{ display: 'grid', gridTemplateColumns: '1fr 140px 1fr', gap: 12, padding: '11px 0', borderBottom: '1px solid #1A2235', alignItems: 'center' }}>
+                                  <span style={{ fontSize: 13, color: '#CBD5E1' }}>{row.check}</span>
+                                  <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, color: row.color ?? '#CBD5E1' }}>{row.result}</span>
+                                  <span style={{ fontSize: 12, color: '#4A5568' }}>{row.basis}</span>
+                                </div>
+                              ))}
+                              {!reconciliationDetail && auditedFinancialsList.length === 0 && (
+                                <div style={{ padding: '11px 0', fontSize: 12, color: '#4A5568' }}>
+                                  Upload audited or management financials to unlock the fiscal-year reconciliation breakdown (cash position, revenue, expenses, loan activity, account coverage).
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {/* Entity Breakdown + Needs Review */}
                       <div style={{ display: 'grid', gridTemplateColumns: needsReviewItems.length > 0 ? '1fr 1fr' : '1fr', gap: 16, marginBottom: 16 }}>
