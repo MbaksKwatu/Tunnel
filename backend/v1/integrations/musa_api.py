@@ -30,7 +30,7 @@ import os
 from datetime import datetime, timezone
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from pydantic import BaseModel
 
 from ..db.supabase_client import get_supabase
@@ -114,10 +114,12 @@ def _to_iso(value: Optional[str]) -> Optional[str]:
 
 def _build_session_response(
     session_data: dict,
-    deal_id: Optional[str] = None
+    deal_id: Optional[str] = None,
+    base_url: Optional[str] = None,
 ) -> SessionResponse:
     """Build SessionResponse from database row"""
-    base_url = os.getenv("API_BASE_URL", "https://parity-ingestion.onrender.com")
+    if base_url is None:
+        base_url = os.getenv("API_BASE_URL", "https://parity-ingestion.onrender.com")
     session_id = session_data["session_id"]
     status = session_data["status"]
 
@@ -148,6 +150,7 @@ def _build_session_response(
 
 @router.post("/sessions", response_model=SessionResponse)
 async def create_session(
+    request: Request,
     body: CreateSessionRequest,
     background_tasks: BackgroundTasks,
     _: bool = Depends(require_musa_api_key),
@@ -209,8 +212,9 @@ async def create_session(
         logger.exception("Failed to insert musa_session %s", session_id)
         raise HTTPException(status_code=500, detail="Failed to create session")
 
-    # 3. Build status URL
-    base_url = os.getenv("API_BASE_URL", "https://parity-ingestion.onrender.com")
+    # 3. Build status URL — derive from the incoming request so status_url always
+    #    points to the server that received this POST, not a hardcoded fallback.
+    base_url = str(request.base_url).rstrip("/")
     status_url = f"{base_url}/api/musa/sessions/{session_id}/status"
 
     # 4. Trigger background processing
@@ -241,6 +245,7 @@ async def create_session(
 
 @router.get("/sessions/{session_id}/status", response_model=SessionResponse)
 def get_session_status(
+    request: Request,
     session_id: str,
     _: bool = Depends(require_musa_api_key),
 ) -> SessionResponse:
@@ -268,11 +273,16 @@ def get_session_status(
         raise HTTPException(status_code=404, detail="Session not found")
 
     session_data = rows[0]
-    return _build_session_response(session_data, session_data.get("deal_id"))
+    return _build_session_response(
+        session_data,
+        session_data.get("deal_id"),
+        base_url=str(request.base_url).rstrip("/"),
+    )
 
 
 @router.get("/sessions/{session_id}/results")
 def get_session_results(
+    request: Request,
     session_id: str,
     _: bool = Depends(require_musa_api_key),
 ):
@@ -306,4 +316,8 @@ def get_session_results(
     deal_id = session.get("deal_id")
 
     # Return the SessionResponse (works for both complete and failed)
-    return _build_session_response(session, deal_id)
+    return _build_session_response(
+        session,
+        deal_id,
+        base_url=str(request.base_url).rstrip("/"),
+    )
