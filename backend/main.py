@@ -31,7 +31,6 @@ app = FastAPI(
 
 _CORS_ORIGINS = os.getenv("CORS_ORIGINS", "").split(",")
 _EXPLICIT_ORIGINS = [
-    "https://paritytunnel-w7d2.onrender.com",
     "https://parityfinance.vercel.app",
     "https://parity-sme-staging.vercel.app",
     "https://parity-ingestion-gmkewhxbha-uc.a.run.app",

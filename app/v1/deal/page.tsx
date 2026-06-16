@@ -23,6 +23,7 @@ import {
   exportTransactionsCsv,
   getNeedsReview,
   listDeals,
+  getMonthlyCashflow,
 } from '@/lib/v1-api';
 import type { DealListItem } from '@/lib/v1-api';
 import { BatchUpload } from '@/components/BatchUpload';
@@ -509,6 +510,12 @@ function V1DealPageInner() {
       await refreshBatchUploadCount(activeDeal.id);
       const txRes = await listDealTransactions(activeDeal.id);
       setRawTransactions(txRes.transactions as unknown as Array<Record<string, unknown>>);
+      try {
+        const mcRes = await getMonthlyCashflow(activeDeal.id);
+        setMonthlyCashflow(mcRes.monthly_cashflow as unknown as Array<Record<string, unknown>>);
+      } catch (e) {
+        console.error('getMonthlyCashflow failed after export:', e);
+      }
       setAnalysisState('done');
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : 'Analysis failed');
@@ -575,6 +582,12 @@ function V1DealPageInner() {
       const data = await exportSnapshot(deal.id);
       setExportData(data);
       setLastExportedAt(new Date());
+      try {
+        const mcRes = await getMonthlyCashflow(deal.id);
+        setMonthlyCashflow(mcRes.monthly_cashflow as unknown as Array<Record<string, unknown>>);
+      } catch (e) {
+        console.error('getMonthlyCashflow failed after re-export:', e);
+      }
       setAnalysisState('done');
 
       // Build entity breakdown from the freshly returned data to pass to PDF (same logic as entityBreakdownByCategory)
@@ -687,6 +700,11 @@ function V1DealPageInner() {
   useEffect(() => {
     if (analysisState === 'done' && deal?.id) {
       getNeedsReview(deal.id).then((res) => setNeedsReviewItems(res.transactions as unknown as Array<Record<string, unknown>>)).catch(() => {});
+      if (monthlyCashflow.length === 0) {
+        getMonthlyCashflow(deal.id)
+          .then((r) => setMonthlyCashflow(r.monthly_cashflow as unknown as Array<Record<string, unknown>>))
+          .catch((e) => console.error('useEffect getMonthlyCashflow failed:', e));
+      }
     }
   }, [analysisState, deal?.id]);
 
@@ -1115,13 +1133,13 @@ function V1DealPageInner() {
               <span style={{ fontSize: 9, background: '#0D1220', color: '#2D3748', padding: '1px 4px', borderRadius: 2 }}>SOON</span>
             </div>
           ))}
-          <div style={{ margin: '12px 0 4px', padding: '0 16px', fontSize: 9, color: '#2D3748', letterSpacing: '0.1em' }}>SUPPORT</div>
+          <div style={{ margin: '12px 0 4px', padding: '0 16px', fontSize: 9, color: '#2D3748', letterSpacing: '0.1em' }}>FORMAT DESK</div>
           <button
             onClick={() => router.push('/parsers/request')}
             style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '9px 16px', background: 'transparent', borderLeft: '2px solid transparent', border: 'none', color: '#4A5568', fontSize: 13, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left', gap: 6 }}
           >
             <span style={{ fontSize: 11, lineHeight: 1, fontFamily: "'IBM Plex Mono', monospace", color: '#374151' }}>//</span>
-            Request Parser
+            New Bank Format
           </button>
         </nav>
         <div style={{ padding: '12px 16px', borderTop: '1px solid #1A2235' }}>

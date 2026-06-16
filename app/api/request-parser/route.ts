@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Resend } from 'resend';
+import { createClient } from '@supabase/supabase-js';
 
 const NOTIFY_EMAIL = 'mbakayaweever@gmail.com';
 
@@ -100,19 +101,38 @@ export async function POST(request: NextRequest) {
       await resend.emails.send({
         from: 'Parity <onboarding@resend.dev>',
         to: [contactEmail],
-        subject: 'Parser Request Received — Parity',
+        subject: 'Bank Format Received — Parity',
         html: `
-          <h2 style="font-family:monospace;color:#6366F1">Parser Request Received</h2>
+          <h2 style="font-family:monospace;color:#6366F1">Bank Format Received</h2>
           <p style="font-family:sans-serif;font-size:14px">
-            Thanks! We're building a custom parser for <strong>${bankName}</strong>.
+            Thanks! We're onboarding the <strong>${bankName}</strong> format now.
           </p>
           <p style="font-family:sans-serif;font-size:14px">
-            <strong>Typical turnaround:</strong> 4–7 hours.<br/>
-            We'll email you at ${contactEmail} when the parser is ready so you can re-run your analysis.
+            We'll email you at ${contactEmail} as soon as this format is ready so you can continue your analysis.
           </p>
           <hr style="margin:20px 0;border:none;border-top:1px solid #e5e7eb"/>
           <p style="font-family:sans-serif;font-size:12px;color:#9ca3af">Questions? Reply to this email.</p>
         `,
+      });
+    }
+
+    // ── Log request to Supabase ────────────────────────────────────────────
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.STAGING_SUPABASE_SERVICE_ROLE_KEY;
+    if (!serviceRoleKey) {
+      console.warn('[api/request-parser] No service role key — skipping DB insert');
+    } else {
+      const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        serviceRoleKey
+      );
+      await supabase.from('pds_parser_requests').insert({
+        bank_name: bankName,
+        country: country || null,
+        account_type: accountType || null,
+        notes: notes || null,
+        deal_id: dealId || null,
+        document_id: documentId || null,
+        original_filename: originalFilename || fileName || null,
       });
     }
 

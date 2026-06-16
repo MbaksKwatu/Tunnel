@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import io
 from pathlib import Path
 
@@ -12,52 +13,11 @@ from v1.parsing.xlsx_parser import (
     parse_xlsx,
     scan_equity_excel_header,
 )
-import datetime
 
-JAN_XLSX = Path(
-    "/Users/mbakswatu/Desktop/parity/sayuni/2025/Excel/"
-    "Sassy Cosmetics - Equity Bank - 1180279761781 - Jan 2025.xlsx"
-)
-FEB_XLSX = Path(
-    "/Users/mbakswatu/Desktop/parity/sayuni/2025/Excel/"
-    "Sassy Cosmetics - Equity Bank - 1180279761781 - Feb 2025.xlsx"
-)
-
-
-def _load_header(path: Path):
-    wb = load_workbook(path, data_only=True)
-    ws = wb.worksheets[0]
-    return [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
-
-
-@pytest.mark.skipif(not JAN_XLSX.exists(), reason="January Equity Excel fixture missing")
-def test_equity_jan_detection_and_parse():
-    header = _load_header(JAN_XLSX)
-    assert _is_equity_excel(header) is True
-    mapping = _normalise_equity_excel_columns(header)
-    for col in ("date", "description", "debit", "credit", "balance"):
-        assert col in mapping
-
-    rows, _, _ = parse_xlsx(JAN_XLSX.read_bytes(), "doc-jan", "KES")
-    # Fixture currently yields 2677 transaction rows after skipping footer rows.
-    assert len(rows) == 2677
-
-    signed = [r["signed_amount_cents"] for r in rows]
-    assert any(v > 0 for v in signed)
-    assert any(v < 0 for v in signed)
-    assert all("txn_date" in r and "normalized_descriptor" in r for r in rows[:3])
-
-
-@pytest.mark.skipif(not FEB_XLSX.exists(), reason="February Equity Excel fixture missing")
-def test_equity_feb_detection_and_parse():
-    header = _load_header(FEB_XLSX)
-    assert _is_equity_excel(header) is True
-    mapping = _normalise_equity_excel_columns(header)
-    for col in ("date", "description", "debit", "credit", "balance"):
-        assert col in mapping
-
-    rows, _, _ = parse_xlsx(FEB_XLSX.read_bytes(), "doc-feb", "KES")
-    assert len(rows) > 0
+# Real-file Jan/Feb tests were removed: the committed synthetic fixtures in
+# tests_v1/fixtures/ (test_equity_jan_fixture.xlsx, test_equity_feb_fixture.xlsx)
+# cover the same column-mapping and sign logic in test_parsers.py::TestDeterministicParsers.
+# Add a real large-scale file test here only if you commit the XLSX to tests_v1/fixtures/.
 
 
 def _december_2025_layout_workbook_bytes() -> bytes:
@@ -105,43 +65,8 @@ def _december_2025_layout_workbook_bytes() -> bytes:
                 "",
             ]
         )
-    # Bank footer summary rows after last transaction — no date column; must not be parsed as txns.
-    ws.append(
-        [
-            None,
-            "",
-            "",
-            "Total Credits",
-            "",
-            "",
-            None,
-            "999999.00",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-        ]
-    )
-    ws.append(
-        [
-            None,
-            "",
-            "",
-            "Total Debits",
-            "",
-            "",
-            "888888.00",
-            None,
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-        ]
-    )
+    ws.append([None, "", "", "Total Credits", "", "", None, "999999.00", "", "", "", "", "", ""])
+    ws.append([None, "", "", "Total Debits", "", "", "888888.00", None, "", "", "", "", "", ""])
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -171,3 +96,12 @@ def test_december_2025_equity_layout_preamble_header_and_parse():
 
     rows, _, _ = parse_xlsx(raw, "doc-dec-2025", "KES")
     assert len(rows) == 3030
+
+
+def test_december_2025_idempotent_parse():
+    """Same workbook bytes parsed twice must yield identical rows — determinism guard."""
+    raw = _december_2025_layout_workbook_bytes()
+    rows_a, hash_a, _ = parse_xlsx(raw, "doc-dec-2025", "KES")
+    rows_b, hash_b, _ = parse_xlsx(raw, "doc-dec-2025", "KES")
+    assert hash_a == hash_b
+    assert rows_a == rows_b

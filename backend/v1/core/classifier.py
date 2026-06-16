@@ -21,14 +21,24 @@ _CLOSING_BALANCE_KEYWORDS = frozenset({
 _LOAN_KEYWORDS = frozenset({
     "loan", "facility", "disbursement", "loan repayment",
     "fuliza", "tala", "branch loan", "zenka", "timia", "okolea",
-    "kcb loop", "equity loan", "ncba loop"
+    "kcb loop", "equity loan", "ncba loop",
+    # Digital lenders / mobile credit products
+    "stawi", "zidisha", "mshwari", "kcb m-pesa",
+    # Equity Bank credit products
+    "jiinue", "jiendeleze",
+    # OD facility term — "facility" already catches "od facility"; this covers bare "od limit"
+    "od limit",
 })
 
 # Known microfinance and bank paybill patterns for loan repayment detection
 _LOAN_REPAYMENT_PATTERNS = frozenset({
     "choice microfinance", "faulu", "kwft", "smep", "sumac",
     "rafiki microfinance", "century microfinance", "uwezo",
-    "oda collection"
+    "oda collection",
+    # Overdraft-specific repayment terms (no "loan" substring to catch via _LOAN_KEYWORDS)
+    "overdraft repayment", "od repayment", "od recovery",
+    # Digital lenders identified via statement scan — no "loan" substring in descriptors
+    "tendepay",
 })
 
 # Capital injection (positive only)
@@ -214,6 +224,11 @@ def _keyword_classify(descriptor: str, amount_cents: int) -> Optional[Tuple[str,
     for kw in _CLOSING_BALANCE_KEYWORDS:
         if kw in d:
             return ("closing_balance", f"keyword_match:{kw}:closing_balance")
+
+    # Swift wire charges — always a bank fee; must precede loan keyword check to
+    # prevent lender names in the descriptor (e.g. "jiinue") from firing first.
+    if "swift charge" in d:
+        return ("bank_charge", "keyword_match:swift_charge_fee")
 
     # 2. Loan keywords
     for kw in _LOAN_KEYWORDS:

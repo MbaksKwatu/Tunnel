@@ -689,3 +689,19 @@ export async function deleteDocument(documentId: string): Promise<{ deleted: boo
   }
   return res.json()
 }
+
+export interface MonthlyCashflowRow {
+  month: string
+  inflow_cents: number
+  outflow_cents: number
+  net_cents: number
+}
+
+export async function getMonthlyCashflow(dealId: string): Promise<{ monthly_cashflow: MonthlyCashflowRow[]; count: number }> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/analytics/monthly-cashflow`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to load cashflow' }))
+    throw new Error(err.detail ?? 'Failed to load cashflow')
+  }
+  return res.json()
+}

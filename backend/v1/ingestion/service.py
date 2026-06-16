@@ -268,6 +268,12 @@ class IngestionService:
                 analytics=combined_analytics,
                 currency_detected=currency_detection if currency_detection != "unknown" else None,
             )
+            if currency_detection and currency_detection != "unknown":
+                try:
+                    from ..db.supabase_repositories import DealsRepo
+                    DealsRepo().set_currency_if_unset(deal_id, currency_detection)
+                except Exception as _exc:
+                    logger.warning("[INGEST] currency write to deal failed (non-fatal): %s", _exc)
             stage = STAGE_STATUS_COMPLETED
 
             if self.analysis_repo:

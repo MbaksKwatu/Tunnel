@@ -81,16 +81,16 @@ export default function RequestParserPage() {
           </div>
 
           <h1 style={{ fontSize: 20, fontWeight: 700, color: '#F1F5F9', margin: '0 0 10px' }}>
-            Request Submitted
+            Format Submitted
           </h1>
           <p style={{ fontSize: 13, color: '#64748B', lineHeight: 1.6, margin: '0 0 8px' }}>
-            We&apos;re building a custom parser for{' '}
+            We&apos;re onboarding the format for{' '}
             <span style={{ color: '#A5B4FC', fontWeight: 600 }}>{bankName}</span>.
           </p>
           <p style={{ fontSize: 13, color: '#64748B', lineHeight: 1.6, margin: '0 0 28px' }}>
             We&apos;ll notify you at{' '}
-            <span style={{ color: '#CBD5E1' }}>{contactEmail}</span> when it&apos;s ready
-            — typically within 4–7 hours.
+            <span style={{ color: '#CBD5E1' }}>{contactEmail}</span> as soon as this format is ready
+            — usually within a few hours.
           </p>
 
           <button
@@ -118,13 +118,13 @@ export default function RequestParserPage() {
               P/ PARITY<span style={{ fontSize: 9, verticalAlign: 'super', color: '#4A5568' }}>v2.0</span>
             </div>
             <span style={{ fontSize: 10, color: '#2D3748' }}>·</span>
-            <span style={{ fontSize: 10, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.06em' }}>PARSER REQUEST</span>
+            <span style={{ fontSize: 10, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.06em' }}>FORMAT DESK</span>
           </div>
           <h1 style={{ fontSize: 20, fontWeight: 700, color: '#F1F5F9', margin: '0 0 8px' }}>
-            Request Custom Parser
+            New Bank Format
           </h1>
           <p style={{ fontSize: 13, color: '#4A5568', lineHeight: 1.6, margin: 0 }}>
-            Upload a sample statement and we&apos;ll build a parser for this bank format. Typical turnaround: 4–7 hours.
+            Upload a sample statement and we&apos;ll onboard this bank format. You&apos;ll be notified as soon as it&apos;s ready — usually within a few hours.
           </p>
         </div>
 
@@ -266,11 +266,11 @@ export default function RequestParserPage() {
             disabled={!canSubmit}
             style={{ width: '100%', padding: '11px 0', background: canSubmit ? '#6366F1' : '#1A2235', color: canSubmit ? '#fff' : '#374151', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: canSubmit ? 'pointer' : 'not-allowed', fontFamily: "'IBM Plex Sans', sans-serif", transition: 'background 0.15s' }}
           >
-            {isSubmitting ? 'Submitting…' : 'Submit Parser Request →'}
+            {isSubmitting ? 'Submitting…' : 'Submit Bank Format →'}
           </button>
 
           <p style={{ fontSize: 11, color: '#2D3748', textAlign: 'center', margin: 0 }}>
-            We&apos;ll email you at {contactEmail || 'your address'} when the parser is ready (typically 4–7 hours)
+            We&apos;ll email you at {contactEmail || 'your address'} as soon as this format is ready
           </p>
 
         </form>

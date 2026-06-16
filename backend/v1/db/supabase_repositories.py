@@ -86,6 +86,21 @@ class DealsRepo(DealsRepository, BaseRepo):
     def list_deals(self, created_by: str) -> Sequence[Dict[str, Any]]:
         return self.select_eq("created_by", created_by)
 
+    def set_currency_if_unset(self, deal_id: str, currency: str) -> None:
+        """
+        Sets currency on pds_deals only if currently null or 'USD' (the default fallback).
+        KES takes priority — if any statement is KES, the deal becomes KES even if UGX was set.
+        Never downgrades from KES.
+        """
+        deal = self.get_deal(deal_id)
+        if not deal:
+            return
+        current = deal.get("currency")
+        if current == "KES":
+            return
+        if current is None or current == "USD" or currency == "KES":
+            self.client.table(self.table).update({"currency": currency}).eq("id", deal_id).execute()
+
 
 class DocumentsRepo(DocumentsRepository, BaseRepo):
     def __init__(self):
@@ -403,6 +418,11 @@ class AnalysisRunsRepo(AnalysisRunsRepository, BaseRepo):
         if not rows:
             return None
         return max(rows, key=lambda r: r.get("created_at") or "")
+
+    def update_reconciliation(self, run_id: str, status: str, pct_bp: Optional[int]) -> None:
+        self.client.table(self.table).update(
+            {"reconciliation_status": status, "reconciliation_pct_bp": pct_bp}
+        ).eq("id", run_id).execute()
 
 
 class SnapshotsRepo(SnapshotsRepository, BaseRepo):
