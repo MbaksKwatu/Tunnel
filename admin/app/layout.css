@@ -1,0 +1,14 @@
+.nav-link {
+  display: block;
+  padding: 10px 20px;
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-weight: 400;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.65);
+  transition: color 0.15s, background 0.15s;
+}
+
+.nav-link:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.06);
+}

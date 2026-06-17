@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import './globals.css'
+import './layout.css'
 import Link from 'next/link'
 
 export const metadata: Metadata = {
@@ -52,26 +53,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
           <nav style={{ padding: '12px 0', flex: 1 }}>
             {navItems.map((item) => (
-              <Link key={item.href} href={item.href} style={{
-                display: 'block',
-                padding: '10px 20px',
-                fontFamily: "'IBM Plex Sans', sans-serif",
-                fontWeight: 400,
-                fontSize: 13,
-                color: 'rgba(255,255,255,0.65)',
-                transition: 'color 0.15s, background 0.15s',
-              }}
-                onMouseOver={(e) => {
-                  const el = e.currentTarget as HTMLAnchorElement
-                  el.style.color = '#fff'
-                  el.style.background = 'rgba(255,255,255,0.06)'
-                }}
-                onMouseOut={(e) => {
-                  const el = e.currentTarget as HTMLAnchorElement
-                  el.style.color = 'rgba(255,255,255,0.65)'
-                  el.style.background = 'transparent'
-                }}
-              >
+              <Link key={item.href} href={item.href} className="nav-link">
                 {item.label}
               </Link>
             ))}
