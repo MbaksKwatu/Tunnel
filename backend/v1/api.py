@@ -1908,14 +1908,18 @@ def request_parser(request: Request, body: dict = Body(...)):
 
     try:
         sb = get_supabase()
-        sb.table("parser_requests").insert({
-            "partner": "gbfund",
+        row = {
+            "partner": body.get("partner", "gbfund"),
+            "market": body.get("market"),
+            "bank_name": body.get("bank_name"),
+            "document_url": body.get("document_url"),
             "deal_id": body.get("deal_id"),
-            "document_id": body.get("document_id"),
-            "error_message": "Audited financials parse failed",
+            "error_message": body.get("error_message", "Audited financials parse failed"),
             "status": "pending",
-            "requested_at": body.get("requested_at"),
-        }).execute()
+        }
+        sb.table("parser_requests").insert(
+            {k: v for k, v in row.items() if v is not None}
+        ).execute()
     except Exception as exc:
         logger.error("[API] Failed to log parser request: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to log parser request") from exc
