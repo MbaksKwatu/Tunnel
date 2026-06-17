@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 import './layout.css'
 import Link from 'next/link'
+import { SignOutButton } from '@/components/SignOutButton'
 
 export const metadata: Metadata = {
   title: 'Parity Admin',
@@ -58,6 +59,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </Link>
             ))}
           </nav>
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', padding: '8px 0' }}>
+            <SignOutButton />
+          </div>
         </aside>
         <main style={{
           flex: 1,
