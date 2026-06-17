@@ -1,7 +1,8 @@
-import { supabase } from '@/lib/supabase'
+import { getSupabase } from '@/lib/supabase'
 import { NextResponse } from 'next/server'
 
 export async function GET() {
+  const supabase = getSupabase()
   const { data, error } = await supabase
     .from('pds_deals')
     .select('id, name, company_name, currency, created_at')
