@@ -2,7 +2,7 @@
 
 import { useState, FormEvent, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { supabaseBrowser } from '@/lib/supabase-browser'
+import { getSupabaseBrowser } from '@/lib/supabase-browser'
 
 import { ALLOWED_EMAILS } from '@/lib/allowed-emails'
 
@@ -28,7 +28,7 @@ function LoginForm() {
     }
 
     setLoading(true)
-    const { error: otpError } = await supabaseBrowser.auth.signInWithOtp({
+    const { error: otpError } = await getSupabaseBrowser().auth.signInWithOtp({
       email: normalized,
       options: {
         shouldCreateUser: false,
@@ -51,7 +51,7 @@ function LoginForm() {
     setError('')
     setLoading(true)
 
-    const { error: verifyError } = await supabaseBrowser.auth.verifyOtp({
+    const { error: verifyError } = await getSupabaseBrowser().auth.verifyOtp({
       email,
       token: otp.trim(),
       type: 'email',
