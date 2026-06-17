@@ -34,7 +34,10 @@ function LoginForm() {
     setLoading(true)
     const { error: otpError } = await supabaseBrowser.auth.signInWithOtp({
       email: normalized,
-      options: { shouldCreateUser: false },
+      options: {
+        shouldCreateUser: false,
+        emailRedirectTo: 'https://parity-admin-three.vercel.app/auth/callback',
+      },
     })
     setLoading(false)
 
