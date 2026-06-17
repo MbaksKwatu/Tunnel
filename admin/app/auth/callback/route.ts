@@ -1,12 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
-
-const ALLOWED_EMAILS = [
-  'emdeechege@gmail.com',
-  'mbakayaweever@gmail.com',
-  'samwelchegeh09@gmail.com',
-]
+import { ALLOWED_EMAILS } from '@/lib/allowed-emails'
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)

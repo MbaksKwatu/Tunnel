@@ -4,11 +4,7 @@ import { useState, FormEvent, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabaseBrowser } from '@/lib/supabase-browser'
 
-const ALLOWED_EMAILS = [
-  'emdeechege@gmail.com',
-  'mbakayaweever@gmail.com',
-  'samwelchegeh09@gmail.com',
-]
+import { ALLOWED_EMAILS } from '@/lib/allowed-emails'
 
 function LoginForm() {
   const router = useRouter()

@@ -1,12 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-
-const ALLOWED_EMAILS = [
-  'emdeechege@gmail.com',
-  'mbakayaweever@gmail.com',
-  'samwelchegeh09@gmail.com',
-]
+import { ALLOWED_EMAILS } from '@/lib/allowed-emails'
 
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
