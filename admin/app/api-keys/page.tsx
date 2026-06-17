@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { supabase } from '@/lib/supabase'
 import { DataTable, Column } from '@/components/DataTable'
 import { StatusBadge } from '@/components/StatusBadge'
 import { PageHeader } from '@/components/PageHeader'
@@ -27,11 +26,9 @@ export default function ApiKeysPage() {
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
-    const { data } = await supabase
-      .from('api_keys')
-      .select('id, partner_name, active, created_at')
-      .order('created_at', { ascending: false })
-    setRows((data as ApiKey[]) ?? [])
+    const res = await fetch('/api/data/api-keys')
+    const data = await res.json()
+    setRows(data ?? [])
     setLoading(false)
   }, [])
 
@@ -52,7 +49,7 @@ export default function ApiKeysPage() {
   ]
 
   return (
-    <div style={{ padding: '40px 40px' }}>
+    <div style={{ padding: '40px' }}>
       <PageHeader
         title="API Keys"
         subtitle={loading ? 'Loading…' : `${rows.length} keys — hashes not shown`}

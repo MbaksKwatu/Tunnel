@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
 import { DataTable, Column } from '@/components/DataTable'
 import { PageHeader } from '@/components/PageHeader'
 
@@ -29,12 +28,9 @@ export default function DealsPage() {
   const router = useRouter()
 
   const load = useCallback(async () => {
-    const { data } = await supabase
-      .from('pds_deals')
-      .select('id, name, company_name, currency, created_at')
-      .order('created_at', { ascending: false })
-      .limit(100)
-    setRows((data as Deal[]) ?? [])
+    const res = await fetch('/api/data/deals')
+    const data = await res.json()
+    setRows(data ?? [])
     setLoading(false)
   }, [])
 
@@ -57,7 +53,7 @@ export default function DealsPage() {
   ]
 
   return (
-    <div style={{ padding: '40px 40px' }}>
+    <div style={{ padding: '40px' }}>
       <PageHeader
         title="Deal Pipeline"
         subtitle={loading ? 'Loading…' : `${rows.length} deals (last 100)`}

@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { supabase } from '@/lib/supabase'
 import { DataTable, Column } from '@/components/DataTable'
 import { StatusBadge } from '@/components/StatusBadge'
 import { PageHeader } from '@/components/PageHeader'
@@ -39,11 +38,9 @@ export default function ParserRequestsPage() {
   const [updating, setUpdating] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    const { data } = await supabase
-      .from('parser_requests')
-      .select('*')
-      .order('requested_at', { ascending: false })
-    setRows((data as ParserRequest[]) ?? [])
+    const res = await fetch('/api/data/parser-requests')
+    const data = await res.json()
+    setRows(data ?? [])
     setLoading(false)
   }, [])
 
@@ -52,7 +49,11 @@ export default function ParserRequestsPage() {
   async function cycleStatus(row: ParserRequest) {
     const next = nextStatus(row.status)
     setUpdating(row.id)
-    await supabase.from('parser_requests').update({ status: next }).eq('id', row.id)
+    await fetch('/api/data/parser-requests', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: row.id, status: next }),
+    })
     setRows((prev) => prev.map((r) => r.id === row.id ? { ...r, status: next } : r))
     setUpdating(null)
   }
@@ -84,12 +85,14 @@ export default function ParserRequestsPage() {
       key: 'error_message',
       label: 'Error',
       truncate: true,
-      render: (val) => val ? <span style={{ color: 'var(--red)', fontSize: 12 }}>{val as string}</span> : <span style={{ color: 'var(--t3)' }}>—</span>,
+      render: (val) => val
+        ? <span style={{ color: 'var(--red)', fontSize: 12 }}>{val as string}</span>
+        : <span style={{ color: 'var(--t3)' }}>—</span>,
     },
   ]
 
   return (
-    <div style={{ padding: '40px 40px' }}>
+    <div style={{ padding: '40px' }}>
       <PageHeader
         title="Parser Requests"
         subtitle={loading ? 'Loading…' : `${rows.length} requests`}
