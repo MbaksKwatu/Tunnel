@@ -1,7 +1,8 @@
-import { supabase } from '@/lib/supabase'
+import { getSupabase } from '@/lib/supabase'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET() {
+  const supabase = getSupabase()
   const { data, error } = await supabase
     .from('parser_requests')
     .select('*')
@@ -11,6 +12,7 @@ export async function GET() {
 }
 
 export async function PATCH(request: NextRequest) {
+  const supabase = getSupabase()
   const { id, status } = await request.json()
   const { error } = await supabase
     .from('parser_requests')

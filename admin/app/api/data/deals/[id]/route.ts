@@ -1,7 +1,8 @@
-import { supabase } from '@/lib/supabase'
+import { getSupabase } from '@/lib/supabase'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const supabase = getSupabase()
   const { id } = await params
   const [dealRes, docsRes, runsRes] = await Promise.all([
     supabase.from('pds_deals').select('*').eq('id', id).single(),
