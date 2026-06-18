@@ -374,6 +374,20 @@ async def process_musa_session(
             # For unexpected errors, still include the original for debugging
             error_message = f"Processing failed: {exc}"
 
+        if "no transactions" in error_str or "unsupported" in error_str:
+            try:
+                _doc_url = documents[0].get("url") if documents else None
+                get_supabase().table("parser_requests").insert({
+                    "partner": "musa",
+                    "market": venture_country,
+                    "document_url": _doc_url,
+                    "session_id": str(session_id),
+                    "error_message": str(exc),
+                    "status": "pending",
+                }).execute()
+            except Exception:
+                pass  # never let parser_requests insert block the main flow
+
         try:
             supabase.table("musa_sessions").update(
                 {
