@@ -1215,6 +1215,20 @@ def get_enriched_pdf(request: Request, deal_id: str, enrichment_id: Optional[str
     )
 
 
+@router.get("/deals/{deal_id}/report")
+def get_deal_report(request: Request, deal_id: str):
+    from .analysis.snapshot_html_renderer import render_snapshot_html
+    import weasyprint
+    from fastapi.responses import Response
+    html = render_snapshot_html(deal_id)
+    pdf_bytes = weasyprint.HTML(string=html).write_pdf()
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=parity-snapshot-{deal_id[:8]}.pdf"},
+    )
+
+
 # ===================================================================
 # Analyst Enrichment
 # ===================================================================
@@ -1900,6 +1914,34 @@ def patch_audited_financials(request: Request, deal_id: str, financial_year: int
     }
     saved = af_repo.upsert(row)
     return saved
+
+
+@router.post("/api/request-parser")
+def request_parser(request: Request, body: dict = Body(...)):
+    """Request parsing for a document (typically when audited financials extraction fails)."""
+    from .db.supabase_client import get_supabase
+
+    user_id = _extract_user_id_from_request(request)
+
+    try:
+        sb = get_supabase()
+        row = {
+            "partner": body.get("partner", "gbfund"),
+            "market": body.get("market"),
+            "bank_name": body.get("bank_name"),
+            "document_url": body.get("document_url"),
+            "deal_id": body.get("deal_id"),
+            "error_message": body.get("error_message", "Audited financials parse failed"),
+            "status": "pending",
+        }
+        sb.table("parser_requests").insert(
+            {k: v for k, v in row.items() if v is not None}
+        ).execute()
+    except Exception as exc:
+        logger.error("[API] Failed to log parser request: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to log parser request") from exc
+
+    return {"status": "received"}
 
 
 _VALID_SECTION_KEYS = frozenset({

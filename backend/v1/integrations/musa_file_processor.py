@@ -299,7 +299,8 @@ async def process_musa_session(
 
             ext = _infer_extension(url, file_type_hint)
             hint_label = file_type_hint or "doc"
-            file_name = f"musa_{hint_label}_{i + 1}{ext}"
+            original_name = Path(url.split("?")[0]).name
+            file_name = original_name if original_name and len(original_name) > 4 else f"musa_{hint_label}_{i + 1}{ext}"
             file_type = ext.lstrip(".")
 
             # Create pds_documents row before calling process_document_background
@@ -373,6 +374,20 @@ async def process_musa_session(
         else:
             # For unexpected errors, still include the original for debugging
             error_message = f"Processing failed: {exc}"
+
+        if "no transactions" in error_str or "unsupported" in error_str:
+            try:
+                _doc_url = documents[0].get("url") if documents else None
+                get_supabase().table("parser_requests").insert({
+                    "partner": "musa",
+                    "market": venture_country,
+                    "document_url": _doc_url,
+                    "session_id": str(session_id),
+                    "error_message": str(exc),
+                    "status": "pending",
+                }).execute()
+            except Exception:
+                pass  # never let parser_requests insert block the main flow
 
         try:
             supabase.table("musa_sessions").update(

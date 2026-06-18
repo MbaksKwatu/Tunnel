@@ -1,0 +1,11 @@
+name: Deploy to staging
+on:
+  push:
+    branches:
+      - paritystaging
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Vercel staging deploy
+        run: curl -X POST "https://api.vercel.com/v1/integrations/deploy/prj_tFcVwlw0XAJMP0zH8QfmMmG2WLkf/KQqrFUW0tG"
