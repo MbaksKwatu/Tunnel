@@ -34,6 +34,36 @@ from .errors import InvalidSchemaError
 
 PARITY_INGESTION_URL = os.getenv("PARITY_INGESTION_URL", "").rstrip("/")
 
+import io
+import re as _re
+
+_INLINE_CURRENCY_PAT = _re.compile(
+    r'(?:Currency|Account\s+Currency)[:\s]+([A-Z]{3})\b'
+    r'|Available\s+Balance:\s+([A-Z]{3})\b'
+    r'|\b(KES|UGX|RWF|TZS|NGN|GHS|ETB|ZAR|USD|EUR|GBP)\s+[\d,]+',
+    _re.IGNORECASE,
+)
+_KNOWN_CURRENCIES = {'KES', 'UGX', 'RWF', 'TZS', 'NGN', 'GHS', 'ETB', 'ZAR', 'USD', 'EUR', 'GBP'}
+
+
+def _detect_currency_from_bytes(file_bytes: bytes) -> Optional[str]:
+    """
+    Detect ISO 4217 currency code from first 2 pages of a PDF given as raw bytes.
+    Returns None if undetermined. Never raises.
+    """
+    try:
+        import pdfplumber
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            text = ' '.join(p.extract_text() or '' for p in pdf.pages[:2])
+        m = _INLINE_CURRENCY_PAT.search(text[:2000])
+        if m:
+            code = next(g for g in m.groups() if g).upper()
+            if code in _KNOWN_CURRENCIES:
+                return code
+    except Exception:
+        pass
+    return None
+
 
 def _mime_for_upload(file_name: str) -> str:
     n = (file_name or "").lower()
@@ -149,7 +179,8 @@ def parse_via_parity_ingestion(
                 )
                 rows_sorted = sort_rows(inline_rows)
                 raw_hash = canonical_hash(rows_sorted)
-                return rows_sorted, raw_hash, "KES", {}
+                detected_currency = _detect_currency_from_bytes(file_bytes)
+                return rows_sorted, raw_hash, detected_currency, {}
 
             try:
                 detail = resp.json().get("detail", "Bank format not recognised by parity-ingestion.")

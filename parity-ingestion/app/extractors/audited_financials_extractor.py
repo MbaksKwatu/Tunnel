@@ -26,6 +26,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pdfplumber
 
+from app.extractors.currency_detector import detect as detect_currency
+
 logger = logging.getLogger(__name__)
 
 
@@ -471,7 +473,8 @@ def _extract_notes(pdf) -> Dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _extract_metadata(pdf) -> Dict[str, Any]:
-    text = (pdf.pages[0].extract_text() or "").upper()
+    raw_text = pdf.pages[0].extract_text() or ""
+    text = raw_text.upper()
 
     # Company name — first ALL-CAPS line that contains "LIMITED" or "LTD"
     company_name = "Unknown Company"
@@ -509,7 +512,7 @@ def _extract_metadata(pdf) -> Dict[str, Any]:
         "financial_year": financial_year,
         "financial_year_start": _date(financial_year, 1, 1).isoformat(),
         "financial_year_end": financial_year_end.isoformat(),
-        "currency": "KES",
+        "currency": detect_currency(raw_text),
         "auditor_name": None,
     }
 
@@ -753,7 +756,7 @@ def extract_audited_financials_from_ocr(pdf_path: str) -> Dict[str, Any]:
         "financial_year": financial_year,
         "financial_year_start": financial_year_start,
         "financial_year_end": financial_year_end,
-        "currency": "KES",
+        "currency": detect_currency(text),
         # Income Statement
         "turnover_cents": _ocr_find_amount(
             text,
