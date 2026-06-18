@@ -299,7 +299,8 @@ async def process_musa_session(
 
             ext = _infer_extension(url, file_type_hint)
             hint_label = file_type_hint or "doc"
-            file_name = f"musa_{hint_label}_{i + 1}{ext}"
+            original_name = Path(url.split("?")[0]).name
+            file_name = original_name if original_name and len(original_name) > 4 else f"musa_{hint_label}_{i + 1}{ext}"
             file_type = ext.lstrip(".")
 
             # Create pds_documents row before calling process_document_background
