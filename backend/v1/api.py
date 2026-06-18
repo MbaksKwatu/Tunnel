@@ -1215,6 +1215,20 @@ def get_enriched_pdf(request: Request, deal_id: str, enrichment_id: Optional[str
     )
 
 
+@router.get("/deals/{deal_id}/report")
+def get_deal_report(request: Request, deal_id: str):
+    from .analysis.snapshot_html_renderer import render_snapshot_html
+    import weasyprint
+    from fastapi.responses import Response
+    html = render_snapshot_html(deal_id)
+    pdf_bytes = weasyprint.HTML(string=html).write_pdf()
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=parity-snapshot-{deal_id[:8]}.pdf"},
+    )
+
+
 # ===================================================================
 # Analyst Enrichment
 # ===================================================================
