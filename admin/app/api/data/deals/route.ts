@@ -6,7 +6,7 @@ export async function GET(request: NextRequest) {
   const supabase = getSupabaseAdmin(env)
   const { data, error } = await supabase
     .from('pds_deals')
-    .select('id, company_name, currency, created_at, analyst_initials')
+    .select('id, name, company_name, currency, created_at, analyst_initials')
     .order('created_at', { ascending: false })
     .limit(100)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
