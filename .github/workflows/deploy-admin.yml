@@ -1,0 +1,11 @@
+name: Deploy admin dashboard
+on:
+  push:
+    branches:
+      - admin
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Vercel admin deploy
+        run: curl -X POST "https://api.vercel.com/v1/integrations/deploy/prj_Bc3VKhNYUKYSlYmfvPQOilt1ZWuY/thjCutwumZ"
