@@ -110,13 +110,13 @@ function V1DealPageInner() {
   useEffect(() => {
     const urlDealId = searchParams.get('deal_id');
     if (!urlDealId || deal) return;
-    setDeal({ id: urlDealId, currency: 'USD' });
+    setDeal({ id: urlDealId });
     void refreshBatchUploadCount(urlDealId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
   const [file, setFile] = useState<File | null>(null);
-  const [currency, setCurrency] = useState('USD');
+  const [currency, setCurrency] = useState<string | null>(null);
   const [dealName, setDealName] = useState('');
   const [accrualRevenueCents, setAccrualRevenueCents] = useState('');
   const [accrualPeriodStart, setAccrualPeriodStart] = useState('');
@@ -172,6 +172,14 @@ function V1DealPageInner() {
   });
   const [showDealList, setShowDealList] = useState(false);
   const [userInitials, setUserInitials] = useState('AN');
+
+  // Derive real currency from the already-loaded deal list (no separate fetch needed)
+  useEffect(() => {
+    const urlDealId = searchParams.get('deal_id');
+    if (!urlDealId || currency !== null) return;
+    const match = sidebarDeals.find((d) => d.id === urlDealId);
+    if (match?.currency) setCurrency(match.currency);
+  }, [searchParams, sidebarDeals, currency]);
 
   const togglePinDeal = useCallback((dealId: string) => {
     setPinnedDealIds(prev => {
@@ -441,7 +449,7 @@ function V1DealPageInner() {
               }
             : undefined;
 
-        const { deal: createdDeal } = await createDeal(currency, dealName || undefined, accrual);
+        const { deal: createdDeal } = await createDeal(currency ?? 'KES', dealName || undefined, accrual);
         setDeal(createdDeal);
         activeDeal = createdDeal;
 
@@ -678,7 +686,7 @@ function V1DealPageInner() {
         entityBreakdown: pdfBreakdown,
         overridesList,
         txCount: rawTransactions.length,
-        currency,
+        currency: currency ?? deal?.currency ?? 'KES',
         topSuppliers: pdfTopSuppliers,
         topRevenue: pdfTopRevenue,
         totalOutflow: pdfTotalOutflow,
@@ -872,7 +880,7 @@ function V1DealPageInner() {
   const formatCents = (c: number) =>
     new Intl.NumberFormat('en-US', {
       style: 'currency',
-      currency: currency,
+      currency: currency ?? deal?.currency ?? 'KES',
       minimumFractionDigits: 2,
     }).format(c / 100);
 
@@ -1203,7 +1211,7 @@ function V1DealPageInner() {
               <div style={{ marginTop: 6, fontSize: 12, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace", display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                 <span>{dealShortId}</span>
                 <span style={{ color: '#1E2A3A' }}>·</span>
-                <span>{currency}</span>
+                <span>{currency ?? deal?.currency ?? 'KES'}</span>
                 {statementQueue.length > 0 && <><span style={{ color: '#1E2A3A' }}>·</span><span>{statementQueue.length} document{statementQueue.length !== 1 ? 's' : ''}</span></>}
                 {rawTransactions.length > 0 && <><span style={{ color: '#1E2A3A' }}>·</span><span>{rawTransactions.length} transactions</span></>}
               </div>
@@ -1592,7 +1600,7 @@ function V1DealPageInner() {
                             {['SCORING METRIC', 'VALUE', 'BASIS'].map((h) => <span key={h} style={{ fontSize: 10, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>{h}</span>)}
                           </div>
                           {(() => {
-                            const fmt = (cents: unknown) => cents != null ? new Intl.NumberFormat('en-KE', { style: 'currency', currency: currency, minimumFractionDigits: 2 }).format(Number(cents) / 100) : '—';
+                            const fmt = (cents: unknown) => cents != null ? new Intl.NumberFormat('en-KE', { style: 'currency', currency: currency ?? deal?.currency ?? 'KES', minimumFractionDigits: 2 }).format(Number(cents) / 100) : '—';
                             const fmtBps = (bps: unknown) => bps != null ? `${(Number(bps) / 100).toFixed(1)}%` : '—';
                             const rows = [
                               { label: 'Average Monthly Inflow', value: csi ? fmt(csi.average_monthly_inflow_cents) : (monthlyCashflow.length > 0 ? fmt(monthlyCashflow.reduce((s: number, m: any) => s + (m.inflow_cents || 0), 0) / monthlyCashflow.length) : '—'), basis: '12-month arithmetic mean', positive: true },
@@ -1669,7 +1677,7 @@ function V1DealPageInner() {
                           LOW: 'Fiscal-year reconciliation ran with LOW_CONFIDENCE tier — see breakdown below',
                         };
                         const fmtKes = (v: unknown) =>
-                          v != null ? new Intl.NumberFormat('en-KE', { style: 'currency', currency, minimumFractionDigits: 2 }).format(Number(v)) : '—';
+                          v != null ? new Intl.NumberFormat('en-KE', { style: 'currency', currency: currency ?? deal?.currency ?? 'KES', minimumFractionDigits: 2 }).format(Number(v)) : '—';
                         const fmtPct = (v: unknown) => v != null ? `${Number(v)}%` : '—';
 
                         type ReconRow = { check: string; result: string; basis: string; color?: string };
