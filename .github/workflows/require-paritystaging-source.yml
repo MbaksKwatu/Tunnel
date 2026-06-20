@@ -1,0 +1,19 @@
+name: Require paritystaging source
+
+on:
+  pull_request:
+    branches:
+      - admin
+      - main
+
+jobs:
+  check-source-branch:
+    name: Verify PR source branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify PR originates from paritystaging
+        run: |
+          if [ "${{ github.head_ref }}" != "paritystaging" ]; then
+            echo "PRs into ${{ github.base_ref }} must come from paritystaging (got '${{ github.head_ref }}')."
+            exit 1
+          fi
