@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { DataTable, Column } from '@/components/DataTable'
 import { StatusBadge } from '@/components/StatusBadge'
 import { PageHeader } from '@/components/PageHeader'
+import { toEAT, refreshedLabel } from './utils'
 
 interface ApiKey {
   id: string
@@ -13,26 +14,33 @@ interface ApiKey {
   [key: string]: unknown
 }
 
-function formatDate(iso: string) {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleString('en-GB', {
-    day: '2-digit', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  })
-}
-
 export default function ApiKeysPage() {
   const [rows, setRows] = useState<ApiKey[]>([])
   const [loading, setLoading] = useState(true)
+  const [lastFetched, setLastFetched] = useState<string | null>(null)
+  const [refreshedText, setRefreshedText] = useState('')
 
   const load = useCallback(async () => {
     const res = await fetch('/api/data/api-keys')
     const data = await res.json()
-    setRows(data ?? [])
+    const list = Array.isArray(data) ? data : (data?.keys ?? [])
+    setRows(list)
     setLoading(false)
+    setLastFetched(new Date().toISOString())
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+    const interval = setInterval(load, 60000)
+    return () => clearInterval(interval)
+  }, [load])
+
+  useEffect(() => {
+    if (!lastFetched) return
+    setRefreshedText(refreshedLabel(lastFetched))
+    const tick = setInterval(() => setRefreshedText(refreshedLabel(lastFetched)), 1000)
+    return () => clearInterval(tick)
+  }, [lastFetched])
 
   const columns: Column<ApiKey>[] = [
     { key: 'partner_name', label: 'Partner' },
@@ -44,16 +52,41 @@ export default function ApiKeysPage() {
     {
       key: 'created_at',
       label: 'Created At',
-      render: (val) => formatDate(val as string),
+      render: (val) => toEAT(val as string),
     },
   ]
 
   return (
     <div style={{ padding: '40px' }}>
-      <PageHeader
-        title="API Keys"
-        subtitle={loading ? 'Loading…' : `${rows.length} keys — hashes not shown`}
-      />
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+        <PageHeader
+          title="API Keys"
+          subtitle={loading ? 'Loading…' : `${rows.length} keys — key values never shown`}
+        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+          {refreshedText && (
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: 'var(--t1)' }}>
+              {refreshedText}
+            </span>
+          )}
+          <button
+            onClick={load}
+            aria-label="Refresh"
+            style={{
+              border: '1px solid var(--border)',
+              background: 'var(--paper)',
+              borderRadius: 6,
+              width: 28,
+              height: 28,
+              cursor: 'pointer',
+              fontSize: 14,
+              lineHeight: 1,
+            }}
+          >
+            ↻
+          </button>
+        </div>
+      </div>
       <div style={{ background: 'var(--paper)', borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
         <DataTable columns={columns} rows={rows} />
       </div>
