@@ -3,6 +3,7 @@ Parity Backend — PDS v1 API only.
 All legacy routes decommissioned. Use /v1/* exclusively.
 """
 import traceback
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +13,7 @@ import os
 from dotenv import load_dotenv
 
 from v1 import api as v1_api
+from v1.db.migrator import run_pending_migrations
 from v1.ingestion.service import register_ingestion_startup
 from v1.integrations.musa_api import router as musa_router
 
@@ -23,10 +25,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    run_pending_migrations()
+    yield
+
+
 app = FastAPI(
     title="Parity PDS API",
     description="Deterministic v1 API for deal analysis and snapshots",
     version="2.0.0",
+    lifespan=lifespan,
 )
 
 _CORS_ORIGINS = os.getenv("CORS_ORIGINS", "").split(",")

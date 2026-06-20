@@ -126,7 +126,18 @@ def _make_qr_svg(url: str) -> str:
 # Public entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_snapshot_html(deal_id: str) -> str:
+def render_snapshot_html(
+    deal_id: str,
+    view: str = "observed_recon",
+    partner_name: Optional[str] = None,
+) -> str:
+    """
+    view: observed_recon (default, existing 3-page flow — branches internally on
+          recon_available) | verify (standalone sealed summary page).
+    partner_name: when set, the page header shows the partner's name with
+          "Intelligence by P/ Parity" credit instead of the plain Parity header.
+          Content and figures are identical — only the header branding changes.
+    """
     sb = _get_supabase()
 
     # 1. Deal metadata
@@ -766,12 +777,23 @@ def render_snapshot_html(deal_id: str) -> str:
     loan_var_raw          = loans_r.get("variance_pct")
     loan_variance_str     = f"{loan_var_raw:.1f}%" if loan_var_raw is not None else "0%"
 
+    # ── Verify-page summary (reuses figures already computed above) ──────────
+    if recon_available:
+        loan_recon_label = (loans_r.get("status") or "VARIANCE").replace("_", " ").title()
+    else:
+        loan_recon_label = "Not reconciled"
+    vp_confidence_color = "g" if recon_tier == "HIGH_CONFIDENCE" else (
+        "w" if recon_tier in ("MEDIUM_CONFIDENCE", "LOW_CONFIDENCE") else ""
+    )
+
     # ── Render template ───────────────────────────────────────────────────────
     templates_dir = os.path.join(os.path.dirname(__file__), "..", "templates")
     env = Environment(loader=FileSystemLoader(os.path.abspath(templates_dir)))
     template = env.get_template("snapshot.html")
 
     context: Dict[str, Any] = {
+        "view":               view,
+        "partner_name":       partner_name,
         "company_name":       company_name,
         "sector":             "--",
         "period_label":       period_label,
@@ -780,9 +802,12 @@ def render_snapshot_html(deal_id: str) -> str:
         "report_id":          report_id,
         "sha256_hash":        sha256_hash,
         "qr_svg":             qr_svg,
+        "verify_url":         verify_url,
         "currency":           currency,
         "recon_available":    recon_available,
         "recon_tier":         recon_tier,
+        "vp_confidence_color": vp_confidence_color,
+        "loan_recon_label":   loan_recon_label,
         "tier_badge_class":   tier_badge_class,
         "tier_badge_text":    tier_badge_text,
         "data_source_pills":  data_source_pills,

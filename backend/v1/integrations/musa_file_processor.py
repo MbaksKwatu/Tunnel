@@ -38,30 +38,16 @@ from ..db.supabase_repositories import (
     TxnEntityMapRepo,
 )
 from ..ingestion.service import IngestionService
+from .currency_utils import country_to_currency
 
 logger = logging.getLogger(__name__)
 
 _ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".pdf"}
 
-_COUNTRY_CURRENCY = {
-    "kenya": "KES",
-    "uganda": "UGX",
-    "tanzania": "TZS",
-    "rwanda": "RWF",
-    "nigeria": "NGN",
-    "ghana": "GHS",
-    "ethiopia": "ETB",
-    "south africa": "ZAR",
-}
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _currency_for_country(country: str) -> str:
-    return _COUNTRY_CURRENCY.get(country.lower().strip(), "KES")
-
 
 def _infer_extension(url: str, file_type_hint: Optional[str]) -> str:
     """
@@ -274,7 +260,14 @@ async def process_musa_session(
     )
 
     supabase = get_supabase()
-    deal_currency = _currency_for_country(venture_country)
+    try:
+        deal_currency = country_to_currency(venture_country)
+    except ValueError as exc:
+        logger.error(
+            "[MUSA] Cannot resolve currency for country=%r session=%s: %s",
+            venture_country, session_id, exc,
+        )
+        raise RuntimeError(str(exc)) from exc
     service_uuid = "00000000-0000-0000-0000-000000000001"  # Musa system user
 
     docs_repo = DocumentsRepo()
