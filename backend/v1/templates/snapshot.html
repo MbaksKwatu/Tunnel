@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Parity Intelligence Snapshot — {{ company_name | default('--') }}</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#0A0F1E;--ink2:#1C2135;--paper:#F7F8FC;--paper2:#EDEEF4;--rule:#D0D3E3;--rule2:#B8BCE0;
+  --teal:#0D9488;--teal-d:rgba(13,148,136,.08);--teal-b:rgba(13,148,136,.22);
+  --amber:#B45309;--amber-d:rgba(180,83,9,.07);--amber-b:rgba(180,83,9,.22);
+  --red:#B91C1C;--red-d:rgba(185,28,28,.07);--red-b:rgba(185,28,28,.22);
+  --ind:#4338CA;--ind-d:rgba(67,56,202,.07);--ind-b:rgba(67,56,202,.22);
+  --grey:#6B7280;--green:#166534;--green-d:rgba(22,101,52,.08);--green-b:rgba(22,101,52,.25);
+  --mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:#94A3B8;font-family:var(--sans);-webkit-font-smoothing:antialiased;padding:32px 16px 80px;color:var(--ink)}
+.page{background:#fff;border:1px solid #CBD5E1;margin-bottom:3px;position:relative;max-width:860px;margin-left:auto;margin-right:auto;page-break-after:always}
+.page:last-child{margin-bottom:0;page-break-after:avoid}
+.page-num{position:absolute;right:24px;top:14px;font-family:var(--mono);font-size:8px;color:var(--rule2)}
+.ph{padding:16px 24px 14px;border-bottom:2px solid var(--ink);display:flex;justify-content:space-between;align-items:flex-start}
+.ph-logo{font-size:14px;font-weight:700;letter-spacing:.03em}.ph-logo span{color:var(--teal)}
+.ph-sub{font-family:var(--mono);font-size:7.5px;color:var(--grey);letter-spacing:.14em;margin-top:2px}
+.ph-meta{text-align:right;font-family:var(--mono);font-size:8.5px;color:var(--grey);line-height:1.9}
+.ph-meta b{color:var(--ink);font-weight:500}
+.tier{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:8.5px;font-weight:600;letter-spacing:.08em;padding:3px 8px;border-radius:3px;text-transform:uppercase;margin-top:4px}
+.tier-obs{background:var(--ind-d);border:1px solid var(--ind-b);color:var(--ind)}
+.tier-high{background:var(--green-d);border:1px solid var(--green-b);color:var(--green)}
+.tier-med{background:var(--amber-d);border:1px solid var(--amber-b);color:var(--amber)}
+.tier-low{background:var(--red-d);border:1px solid var(--red-b);color:var(--red)}
+.sec{padding:14px 24px;border-bottom:1px solid var(--rule)}
+.sec:last-of-type{border-bottom:none}
+.sec-lbl{font-family:var(--mono);font-size:8px;letter-spacing:.13em;text-transform:uppercase;color:var(--grey);margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.sec-lbl::after{content:'';flex:1;height:1px;background:var(--rule)}
+.src{font-family:var(--mono);font-size:7.5px;padding:2px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}
+.src-obs{background:var(--ind-d);color:var(--ind);border:1px solid var(--ind-b)}
+.src-dec{background:var(--teal-d);color:var(--teal);border:1px solid var(--teal-b)}
+.src-locked{background:rgba(107,114,128,.07);color:var(--grey);border:1px solid var(--rule2)}
+.ds{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.ds-pill{display:flex;align-items:center;gap:4px;font-family:var(--mono);font-size:8.5px;padding:3px 9px;border-radius:3px;border:1px solid var(--rule);color:var(--grey);background:var(--paper)}
+.ds-pill.on{border-color:var(--teal-b);color:var(--teal);background:var(--teal-d)}
+.ds-pill.off{opacity:.55}
+.ds-dot{width:5px;height:5px;border-radius:50%;background:currentColor;flex-shrink:0}
+.ds-note{font-family:var(--mono);font-size:8px;color:var(--grey);line-height:1.6}
+.kms{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--rule);border-radius:3px;overflow:hidden}
+.km{padding:11px 13px;border-right:1px solid var(--rule)}
+.km:last-child{border-right:none}
+.km-lbl{font-size:8.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--grey);margin-bottom:5px}
+.km-val{font-family:var(--mono);font-size:18px;font-weight:500;line-height:1.1}
+.km-sub{font-size:8.5px;color:var(--grey);margin-top:3px;font-family:var(--mono)}
+.g{color:var(--teal)}.w{color:var(--amber)}.r{color:var(--red)}
+.cf{display:flex;flex-direction:column;gap:3px}
+.cf-row{display:flex;align-items:center;gap:7px}
+.cf-mo{font-family:var(--mono);font-size:8.5px;color:var(--grey);width:26px;flex-shrink:0}
+.cf-track{flex:1;height:9px;position:relative;display:flex}
+.cf-mid{position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:var(--rule2)}
+.cf-l{width:50%;display:flex;justify-content:flex-end}
+.cf-r{width:50%}
+.cf-bar{height:100%;border-radius:1px}
+.cf-v{font-family:var(--mono);font-size:8.5px;width:76px;text-align:right;flex-shrink:0}
+.cf-foot{font-size:9px;color:var(--grey);margin-top:7px;padding-top:7px;border-top:1px solid var(--rule);line-height:1.6}
+.comp-wrap{margin-bottom:6px}
+.comp-bar{display:flex;height:7px;border-radius:3px;overflow:hidden;margin:8px 0 5px}
+.comp-seg{height:100%}
+.comp-leg{display:flex;gap:10px;flex-wrap:wrap}
+.comp-item{display:flex;align-items:center;gap:4px;font-size:8.5px;color:var(--grey)}
+.comp-dot{width:7px;height:7px;border-radius:1px;flex-shrink:0}
+.comp-warn{font-family:var(--mono);font-size:8px;color:var(--amber);background:var(--amber-d);border:1px solid var(--amber-b);border-radius:3px;padding:4px 9px;margin-top:6px;line-height:1.5}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.mt{width:100%;font-size:9px;border-collapse:collapse}
+.mt td{padding:4px 0;border-bottom:1px solid var(--paper2)}
+.mt tr:last-child td{border-bottom:none}
+.mt-k{color:var(--grey)}.mt-v{font-family:var(--mono);font-size:9.5px;text-align:right;font-weight:500}
+.mt-v.g{color:var(--teal)}.mt-v.w{color:var(--amber)}.mt-v.r{color:var(--red)}
+.lt{width:100%;border-collapse:collapse;font-size:9px}
+.lt th{background:var(--paper2);padding:5px 9px;text-align:left;font-family:var(--mono);font-size:8px;letter-spacing:.06em;color:var(--grey);border-bottom:1px solid var(--rule);font-weight:500}
+.lt td{padding:7px 9px;border-bottom:1px solid var(--paper2);font-family:var(--mono);font-size:8.5px}
+.lt tr:last-child td{border-bottom:none}
+.ls{display:inline-block;font-size:7.5px;padding:1px 5px;border-radius:2px;text-transform:uppercase;letter-spacing:.05em}
+.ls-a{background:var(--teal-d);color:var(--teal);border:1px solid var(--teal-b)}
+.ls-c{background:rgba(107,114,128,.07);color:var(--grey);border:1px solid var(--rule2)}
+.ls-w{background:var(--amber-d);color:var(--amber);border:1px solid var(--amber-b)}
+.rt{width:100%;border-collapse:collapse;font-size:9.5px}
+.rt th{background:var(--ink);color:#fff;padding:6px 9px;text-align:left;font-family:var(--mono);font-size:8px;letter-spacing:.05em;font-weight:500}
+.rt td{padding:9px 9px;border-bottom:1px solid var(--rule);vertical-align:top}
+.rt tr:last-child td{border-bottom:none}
+.rt-check{font-weight:600;font-size:10px}
+.rt-mono{font-family:var(--mono);font-size:8.5px}
+.rt-sub{font-size:8px;color:var(--grey);margin-top:1px}
+.rt-badge{display:inline-flex;font-family:var(--mono);font-size:7.5px;letter-spacing:.05em;padding:2px 6px;border-radius:2px;text-transform:uppercase;margin-top:3px}
+.b-exact{background:var(--green-d);color:var(--green);border:1px solid var(--green-b)}
+.b-ok{background:var(--teal-d);color:var(--teal);border:1px solid var(--teal-b)}
+.b-watch{background:var(--amber-d);color:var(--amber);border:1px solid var(--amber-b)}
+.rt-assess{font-size:8.5px;color:var(--grey);line-height:1.55}
+.op-item{padding:9px 12px;border-left:2px solid var(--rule);margin-bottom:6px;background:var(--paper)}
+.op-item:last-child{margin-bottom:0}
+.op-item.pattern{border-left-color:var(--ind)}
+.op-item.check{border-left-color:var(--teal)}
+.op-item.watch{border-left-color:var(--amber)}
+.op-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px;gap:8px}
+.op-name{font-size:10px;font-weight:600;color:var(--ink)}
+.op-tag{font-family:var(--mono);font-size:7.5px;letter-spacing:.05em;padding:2px 6px;border-radius:3px;flex-shrink:0}
+.t-pat{background:var(--ind-d);color:var(--ind);border:1px solid var(--ind-b)}
+.t-chk{background:var(--teal-d);color:var(--teal);border:1px solid var(--teal-b)}
+.t-wat{background:var(--amber-d);color:var(--amber);border:1px solid var(--amber-b)}
+.op-data{font-size:9px;color:var(--ink);font-family:var(--mono);margin-bottom:3px}
+.op-check{font-size:9px;color:var(--grey);font-style:italic}
+.locked{border:1px dashed var(--rule2);border-radius:3px;padding:18px;text-align:center;background:var(--paper)}
+.locked-title{font-size:11px;font-weight:600;color:var(--grey);margin-bottom:4px}
+.locked-desc{font-size:9.5px;color:var(--grey);max-width:340px;margin:0 auto 10px;line-height:1.6}
+.locked-items{display:flex;flex-wrap:wrap;gap:5px;justify-content:center;margin-bottom:12px}
+.locked-item{font-family:var(--mono);font-size:8px;padding:3px 8px;border-radius:2px;background:var(--paper2);border:1px solid var(--rule);color:var(--grey)}
+.an{border:1px dashed var(--rule2);border-radius:3px;padding:10px;background:var(--paper);min-height:42px}
+.an-lbl{font-family:var(--mono);font-size:7.5px;color:var(--grey);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px}
+.an-text{font-size:9.5px;color:var(--grey);font-style:italic;line-height:1.6}
+.pf{padding:7px 24px 7px 10px;border-top:1px solid var(--rule);display:flex;align-items:center;gap:0;background:var(--paper)}
+.pf-qr{width:44px;height:44px;flex-shrink:0;margin-right:10px}
+.pf-qr svg{width:44px;height:44px;display:block}
+.pf-id{display:flex;flex-direction:column;gap:1px;margin-right:14px;flex-shrink:0}
+.pf-id-label{font-family:var(--mono);font-size:7px;color:var(--grey);letter-spacing:.1em;text-transform:uppercase}
+.pf-id-val{font-family:var(--mono);font-size:9px;font-weight:600;color:var(--ink)}
+.pf-seal{font-family:var(--mono);font-size:7px;color:var(--rule2);word-break:break-all;flex:1;line-height:1.5}
+.pf-seal b{color:var(--grey);display:block;margin-bottom:1px;letter-spacing:.08em;text-transform:uppercase}
+.pf-pg{font-family:var(--mono);font-size:8px;color:var(--rule2);margin-left:10px;flex-shrink:0}
+.lt-foot{font-family:var(--mono);font-size:8px;color:var(--grey);margin-top:6px;display:flex;gap:16px;flex-wrap:wrap}
+.lt-foot b{color:var(--ink)}
+.ph-partner{font-size:14px;font-weight:700;letter-spacing:.03em}
+.ph-partner-credit{font-family:var(--mono);font-size:7.5px;color:var(--grey);letter-spacing:.06em;margin-top:3px;display:flex;align-items:center;gap:4px}
+.ph-partner-credit span{color:var(--teal);font-weight:700}
+.vpage{background:#0A0F1E;color:#fff;padding:28px 24px 22px;max-width:860px;margin:0 auto}
+.vp-hd{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px}
+.vp-logo{font-size:15px;font-weight:700;letter-spacing:.03em}.vp-logo span{color:var(--teal)}
+.vp-logo-sub{font-family:var(--mono);font-size:7.5px;color:#4B5563;letter-spacing:.14em;margin-top:2px}
+.seal-ok{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:8.5px;color:var(--teal);background:rgba(13,148,136,.1);border:1px solid rgba(13,148,136,.25);padding:4px 10px;border-radius:3px}
+.vp-title{font-size:20px;font-weight:300;margin-bottom:3px}
+.vp-sub{font-family:var(--mono);font-size:9px;color:#6B7280;letter-spacing:.05em;margin-bottom:18px}
+.vp-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+.vp-cell{border:1px solid #1F2937;border-radius:3px;padding:12px}
+.vp-lbl{font-family:var(--mono);font-size:7.5px;color:#6B7280;letter-spacing:.1em;text-transform:uppercase;margin-bottom:5px}
+.vp-val{font-family:var(--mono);font-size:16px;font-weight:500}
+.vp-val.g{color:var(--teal)}.vp-val.w{color:var(--amber)}
+.vp-note{font-size:9px;color:#6B7280;margin-top:3px}
+.vp-seal-box{font-family:var(--mono);font-size:8px;color:#374151;word-break:break-all;padding:8px 11px;border:1px solid #1F2937;border-radius:3px;background:#111827;margin-bottom:14px;line-height:1.5}
+.vp-seal-lbl{font-size:7.5px;color:#4B5563;letter-spacing:.1em;text-transform:uppercase;margin-bottom:3px}
+.vp-cta{border:1px solid #1F2937;border-radius:3px;padding:16px;text-align:center;background:#111827}
+.vp-cta-t{font-size:12px;font-weight:600;margin-bottom:4px}
+.vp-cta-d{font-size:9.5px;color:#9CA3AF;margin-bottom:12px;line-height:1.6}
+.vp-btn{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:9.5px;font-weight:600;letter-spacing:.06em;padding:9px 20px;border-radius:3px;background:var(--teal);color:#fff;border:none;cursor:pointer}
+.vp-free{font-family:var(--mono);font-size:8px;color:#4B5563;margin-top:6px}
+</style>
+</head>
+<body>
+
+{% if view == 'verify' %}
+<!-- ═══ VERIFY PAGE ═══ -->
+<div class="page" style="border:none">
+  <div class="vpage">
+    <div class="vp-hd">
+      <div><div class="vp-logo"><span>P/</span> PARITY</div><div class="vp-logo-sub">DETERMINISTIC FINANCIAL INTELLIGENCE</div></div>
+      <div class="seal-ok">✓ SHA256 verified · document authentic</div>
+    </div>
+    <div class="vp-title">Parity Intelligence Snapshot</div>
+    <div class="vp-sub">{{ (company_name | default('--')) | upper }} · {{ period_label | default('--') }} · REPORT {{ report_id | default('--') }}</div>
+    <div class="vp-grid">
+      <div class="vp-cell">
+        <div class="vp-lbl">Confidence tier</div>
+        <div class="vp-val {{ vp_confidence_color | default('') }}">{{ recon_tier | default('OBSERVED') }}</div>
+        <div class="vp-note">{{ 'Bank + audited · reconciled' if recon_available else 'Bank data only' }}</div>
+      </div>
+      <div class="vp-cell">
+        <div class="vp-lbl">Transactions</div>
+        <div class="vp-val">{{ total_txn_count | default(0) }}</div>
+        <div class="vp-note">{{ period_label | default('--') }}</div>
+      </div>
+      <div class="vp-cell">
+        <div class="vp-lbl">Avg monthly revenue</div>
+        <div class="vp-val g">{{ (kms | default([{}]))[0].value | default('--') }}</div>
+        <div class="vp-note">Operational inflows</div>
+      </div>
+      <div class="vp-cell">
+        <div class="vp-lbl">Loan reconciliation</div>
+        <div class="vp-val {{ vp_confidence_color | default('') }}">{{ loan_recon_label | default('--') }}</div>
+        <div class="vp-note">{{ loan_variance_str | default('--') }} variance</div>
+      </div>
+    </div>
+    <div class="vp-seal-box">
+      <div class="vp-seal-lbl">SHA256 — report integrity seal</div>
+      {{ sha256_hash | default('--') }}
+    </div>
+    <div class="vp-cta">
+      <div class="vp-cta-t">Run your own Parity analysis</div>
+      <div class="vp-cta-d">This report was generated on Parity — deterministic SME financial intelligence for Pan-African lenders. Upload any bank statement and get a classified, reconciled intelligence snapshot referenced to the exact transactions that produced it.</div>
+      <button class="vp-btn">Create a free account →</button>
+      <div class="vp-free">Free tier · one analysis · no card required · your data stays yours · paritytunnel.com</div>
+    </div>
+  </div>
+</div>
+{% else %}
+
+<!-- ═══ PAGE 1 ═══ -->
+<div class="page">
+  <div class="page-num">1 / 3</div>
+  <div class="ph">
+    <div>
+      {% if partner_name %}
+      <div class="ph-partner">{{ partner_name }}</div>
+      <div class="ph-partner-credit">Intelligence by <span>P/</span> Parity</div>
+      {% else %}
+      <div class="ph-logo"><span>P/</span> PARITY</div>
+      <div class="ph-sub">DETERMINISTIC FINANCIAL INTELLIGENCE</div>
+      {% endif %}
+    </div>
+    <div class="ph-meta">
+      <div><b>Company:</b> {{ company_name | default('--') }}</div>
+      <div><b>Sector:</b> {{ sector | default('--') }}</div>
+      <div><b>Period:</b> {{ period_label | default('--') }}</div>
+      <div><b>Generated:</b> {{ generated_date | default('--') }}</div>
+      <span class="tier {{ tier_badge_class | default('tier-obs') }}">{{ tier_badge_text | default('● Observed · bank data only') }}</span>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-lbl">Data submitted
+      {% if recon_available %}<span class="src src-dec">Reconciliation active</span>{% else %}<span class="src src-obs">Coverage</span>{% endif %}
+    </div>
+    <div class="ds">
+      {% for pill in data_source_pills | default([]) %}
+      <div class="ds-pill {{ 'on' if pill.active else 'off' }}">
+        <span class="ds-dot" {% if not pill.active %}style="background:var(--rule2)"{% endif %}></span>{{ pill.label | default('--') }}
+      </div>
+      {% endfor %}
+    </div>
+    <div class="ds-note">{{ data_source_note | default('') }}</div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-lbl">Key metrics <span class="src src-obs">Observed · {{ total_txn_count | default(0) }} classified transactions</span></div>
+    <div class="kms">
+      {% for km in kms | default([]) %}
+      <div class="km">
+        <div class="km-lbl">{{ km.label | default('--') }}</div>
+        <div class="km-val {{ km.color_class | default('') }}">{{ km.value | default('--') }}</div>
+        <div class="km-sub">{{ km.sub | default('') }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-lbl">Monthly cashflow · bank operating accounts <span class="src src-obs">Observed</span></div>
+    <div class="cf">
+      {% for row in cashflow_rows | default([]) %}
+      <div class="cf-row">
+        <span class="cf-mo">{{ row.month_label | default('') }}</span>
+        <div class="cf-track">
+          <div class="cf-mid"></div>
+          {% if row.positive %}
+          <div class="cf-l"></div>
+          <div class="cf-r"><div class="cf-bar" style="width:{{ row.bar_pct | default(0) }}%;background:#0D9488"></div></div>
+          {% else %}
+          <div class="cf-l"><div class="cf-bar" style="width:{{ row.bar_pct | default(0) }}%;background:#B91C1C"></div></div>
+          <div class="cf-r"></div>
+          {% endif %}
+        </div>
+        <span class="cf-v {{ row.net_color_class | default('') }}">{{ row.net_str | default('--') }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="cf-foot">{{ cashflow_note | default('') }}</div>
+  </div>
+
+  <div class="pf">
+    <div class="pf-qr">{{ qr_svg | safe }}</div>
+    <div class="pf-id"><span class="pf-id-label">Report ID</span><span class="pf-id-val">{{ report_id | default('--') }}</span></div>
+    <div class="pf-seal"><b>SHA256</b>{{ sha256_hash | default('--') }}</div>
+    <div class="pf-pg">1 / 3</div>
+  </div>
+</div>
+
+
+<!-- ═══ PAGE 2 ═══ -->
+<div class="page">
+  <div class="page-num">2 / 3</div>
+  <div class="ph">
+    <div>
+      {% if partner_name %}
+      <div class="ph-partner">{{ partner_name }}</div>
+      <div class="ph-partner-credit">Intelligence by <span>P/</span> Parity</div>
+      {% else %}
+      <div class="ph-logo"><span>P/</span> PARITY</div><div class="ph-sub">DETERMINISTIC FINANCIAL INTELLIGENCE</div>
+      {% endif %}
+    </div>
+    <div class="ph-meta">
+      <div><b>Report:</b> {{ report_id | default('--') }}</div>
+      <div><b>{{ company_name | default('--') }} · {{ period_label | default('--') }}</b></div>
+      <span class="tier {{ tier_badge_class | default('tier-obs') }}">{{ tier_badge_text | default('● Observed') }}</span>
+    </div>
+  </div>
+
+  {% if recon_available %}
+  <!-- RECONCILED STATE: 4-point recon table first -->
+  <div class="sec">
+    <div class="sec-lbl">4-point reconciliation — declared vs observed
+      <span class="src src-dec">Observed + audited financials · {{ recon_fiscal_note | default('') }}</span>
+    </div>
+    <table class="rt">
+      <thead>
+        <tr>
+          <th>Check</th><th>Observed (bank)</th><th>Declared (audit)</th><th>Variance</th><th>Assessment</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in recon_rows | default([]) %}
+        <tr>
+          <td class="rt-check">{{ row.check | default('--') }}</td>
+          <td>
+            <span class="rt-mono">{{ row.observed_str | default('--') }}</span>
+            <div class="rt-sub">{{ row.observed_sub | default('') }}</div>
+          </td>
+          <td>
+            <span class="rt-mono">{{ row.declared_str | default('--') }}</span>
+            <div class="rt-sub">{{ row.declared_sub | default('') }}</div>
+          </td>
+          <td>
+            <span class="rt-mono {{ 'g' if row.badge_class == 'b-exact' or row.badge_class == 'b-ok' else 'w' }}">{{ row.variance_str | default('--') }}</span><br>
+            <span class="rt-badge {{ row.badge_class | default('b-watch') }}">{{ row.badge_label | default('--') }}</span>
+          </td>
+          <td class="rt-assess">{{ row.assessment | default('--') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+      <div style="font-family:var(--mono);font-size:8px;color:var(--grey)">{{ recon_fiscal_note | default('') }}</div>
+      <span class="tier {{ tier_badge_class | default('tier-obs') }}" style="font-size:9px">{{ tier_badge_text | default('') }}</span>
+    </div>
+  </div>
+
+  <!-- RECONCILED STATE: compact composition bars -->
+  <div class="sec">
+    <div class="sec-lbl">Inflow + Outflow composition <span class="src src-obs">Observed · classified</span></div>
+    <div class="g2">
+      <div>
+        <div style="font-family:var(--mono);font-size:8px;color:var(--grey);margin-bottom:4px;text-transform:uppercase;letter-spacing:.08em">Inflows · {{ inflow_total_str | default('--') }}</div>
+        <div class="comp-bar" style="height:6px">
+          {% for seg in inflow_segments | default([]) %}<div class="comp-seg" style="width:{{ seg.pct | default(0) }}%;background:{{ seg.color | default('#D1D5DB') }}"></div>{% endfor %}
+        </div>
+        <div class="comp-leg" style="margin-top:4px">
+          {% for seg in inflow_segments | default([]) %}
+          <div class="comp-item"><div class="comp-dot" style="background:{{ seg.color | default('#D1D5DB') }}"></div>{{ seg.label | default('--') }} · {{ seg.pct | default(0) }}%</div>
+          {% endfor %}
+        </div>
+      </div>
+      <div>
+        <div style="font-family:var(--mono);font-size:8px;color:var(--grey);margin-bottom:4px;text-transform:uppercase;letter-spacing:.08em">Outflows · {{ outflow_total_str | default('--') }}</div>
+        <div class="comp-bar" style="height:6px">
+          {% for seg in outflow_segments | default([]) %}<div class="comp-seg" style="width:{{ seg.pct | default(0) }}%;background:{{ seg.color | default('#D1D5DB') }}"></div>{% endfor %}
+        </div>
+        <div class="comp-leg" style="margin-top:4px">
+          {% for seg in outflow_segments | default([]) %}
+          <div class="comp-item"><div class="comp-dot" style="background:{{ seg.color | default('#D1D5DB') }}"></div>{{ seg.label | default('--') }} · {{ seg.pct | default(0) }}%</div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RECONCILED STATE: loan facilities table -->
+  <div class="sec">
+    <div class="sec-lbl">Loan facilities — declared vs bank
+      <span class="src src-dec">Reconciled · Note 14 {{ loan_recon_status | default('') }}</span>
+    </div>
+    <table class="lt">
+      <thead>
+        <tr><th>Facility</th><th>Declared (Note 14)</th><th>Match</th></tr>
+      </thead>
+      <tbody>
+        {% for fac in loan_facilities | default([]) %}
+        <tr>
+          <td>{{ fac.name | default('--') }}</td>
+          <td>{{ fac.amount_str | default('--') }}</td>
+          <td><span class="ls {{ fac.match_class | default('ls-c') }}">{{ fac.match_label | default('--') }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="lt-foot">
+      <span>Bank net borrowing: <b>{{ loan_bank_net_str | default('--') }}</b></span>
+      <span>Declared net borrowing: <b>{{ loan_declared_net_str | default('--') }}</b></span>
+      <span>Variance: <b>{{ loan_variance_str | default('--') }}</b></span>
+    </div>
+  </div>
+
+  {% else %}
+  <!-- OBSERVED STATE: full composition bars -->
+  <div class="sec">
+    <div class="sec-lbl">Inflow composition <span class="src src-obs">Observed · classified</span></div>
+    <div class="comp-wrap">
+      <div class="comp-bar">
+        {% for seg in inflow_segments | default([]) %}<div class="comp-seg" style="width:{{ seg.pct | default(0) }}%;background:{{ seg.color | default('#D1D5DB') }}"></div>{% endfor %}
+      </div>
+      <div class="comp-leg">
+        {% for seg in inflow_segments | default([]) %}
+        <div class="comp-item"><div class="comp-dot" style="background:{{ seg.color | default('#D1D5DB') }}"></div>{{ seg.label | default('--') }} · {{ seg.pct | default(0) }}% · {{ seg.amount_str | default('') }}</div>
+        {% endfor %}
+      </div>
+      {% if inflow_warn %}<div class="comp-warn">⚠ {{ inflow_warn }}</div>{% endif %}
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-lbl">Outflow composition <span class="src src-obs">Observed · classified</span></div>
+    <div class="comp-wrap">
+      <div class="comp-bar">
+        {% for seg in outflow_segments | default([]) %}<div class="comp-seg" style="width:{{ seg.pct | default(0) }}%;background:{{ seg.color | default('#D1D5DB') }}"></div>{% endfor %}
+      </div>
+      <div class="comp-leg">
+        {% for seg in outflow_segments | default([]) %}
+        <div class="comp-item"><div class="comp-dot" style="background:{{ seg.color | default('#D1D5DB') }}"></div>{{ seg.label | default('--') }} · {{ seg.pct | default(0) }}% · {{ seg.amount_str | default('') }}</div>
+        {% endfor %}
+      </div>
+      {% if outflow_warn %}<div class="comp-warn">⚠ {{ outflow_warn }}</div>{% endif %}
+    </div>
+  </div>
+
+  <!-- OBSERVED STATE: bank-detected loan activity -->
+  <div class="sec">
+    <div class="sec-lbl">Loan activity detected <span class="src src-obs">Observed · transaction pattern recognition</span></div>
+    <div class="lt-foot" style="margin-bottom:8px">
+      <span>Detected disbursements: <b>{{ loan_disbursed_str | default('--') }}</b></span>
+      <span>Detected repayments: <b>{{ loan_repaid_str | default('--') }}</b></span>
+      <span>Net: <b>{{ loan_net_str | default('--') }}</b></span>
+      <span>Repayment frequency: <b>{{ loan_freq_str | default('--') }}</b></span>
+    </div>
+    <div class="ds-note">{{ loan_facility_count | default(0) }} loan-related transaction patterns detected · Submit audited financials to see declared facility breakdown and reconcile Note 14</div>
+  </div>
+
+  <!-- OBSERVED STATE: tax pattern -->
+  <div class="sec">
+    <div class="sec-lbl">Tax payment pattern <span class="src src-obs">Observed</span></div>
+    <div class="g2">
+      <div>
+        <table class="mt">
+          <tr><td class="mt-k">KRA payments detected</td><td class="mt-v g">{{ tax_count | default(0) }} transactions</td></tr>
+          <tr><td class="mt-k">Avg frequency</td><td class="mt-v">{{ tax_freq_str | default('--') }}</td></tr>
+          <tr><td class="mt-k">Late payments / penalties detected</td><td class="mt-v {{ 'r' if (tax_penalty_count | default(0)) > 0 else 'g' }}">{{ tax_penalty_count | default(0) }}</td></tr>
+          {% if tax_jan_spike_str %}<tr><td class="mt-k">January spike</td><td class="mt-v w">{{ tax_jan_spike_str }}</td></tr>{% endif %}
+          <tr><td class="mt-k">Total KRA payments</td><td class="mt-v">{{ tax_total_str | default('--') }}</td></tr>
+        </table>
+      </div>
+      <div style="font-size:9px;color:var(--grey);line-height:1.65;padding:4px 0">{{ tax_note | default('') }}</div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="pf">
+    <div class="pf-qr">{{ qr_svg | safe }}</div>
+    <div class="pf-id"><span class="pf-id-label">Report ID</span><span class="pf-id-val">{{ report_id | default('--') }}</span></div>
+    <div class="pf-seal"><b>SHA256</b>{{ sha256_hash | default('--') }}</div>
+    <div class="pf-pg">2 / 3</div>
+  </div>
+</div>
+
+
+<!-- ═══ PAGE 3 ═══ -->
+<div class="page">
+  <div class="page-num">3 / 3</div>
+  <div class="ph">
+    <div>
+      {% if partner_name %}
+      <div class="ph-partner">{{ partner_name }}</div>
+      <div class="ph-partner-credit">Intelligence by <span>P/</span> Parity</div>
+      {% else %}
+      <div class="ph-logo"><span>P/</span> PARITY</div><div class="ph-sub">DETERMINISTIC FINANCIAL INTELLIGENCE</div>
+      {% endif %}
+    </div>
+    <div class="ph-meta">
+      <div><b>Report:</b> {{ report_id | default('--') }}</div>
+      <div><b>{{ company_name | default('--') }} · {{ period_label | default('--') }}</b></div>
+      <span class="tier {{ tier_badge_class | default('tier-obs') }}">{{ tier_badge_text | default('') }}</span>
+    </div>
+  </div>
+
+  {% if not recon_available %}
+  <!-- OBSERVED STATE: locked reconciliation section -->
+  <div class="sec">
+    <div class="sec-lbl">Reconciliation <span class="src src-locked">Locked · submit audited financials to unlock</span></div>
+    <div class="locked">
+      <div class="locked-title">Submit audited financials or management accounts to run reconciliation</div>
+      <div class="locked-desc">Parity will compare what is observed in the bank data against what has been declared — producing a 4-point reconciliation with confidence tier and gap explanations.</div>
+      <div class="locked-items">
+        <span class="locked-item">Cash position vs Note 11</span>
+        <span class="locked-item">Revenue vs declared turnover</span>
+        <span class="locked-item">Expenses vs cost of sales</span>
+        <span class="locked-item">Loan activity vs Note 14</span>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="sec">
+    <div class="sec-lbl">Observed patterns — for analyst review <span class="src src-obs">Named · not concluded</span></div>
+    {% if patterns | default([]) %}
+    {% for pat in patterns %}
+    <div class="op-item {{ pat.item_class | default('pattern') }}">
+      <div class="op-top">
+        <span class="op-name">{{ pat.name | default('--') }}</span>
+        <span class="op-tag {{ pat.tag_class | default('t-pat') }}">{{ pat.tag | default('--') }}</span>
+      </div>
+      <div class="op-data">{{ pat.data_statement | default('') }}</div>
+      <div class="op-check">{{ pat.check_prompt | default('') }}</div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div style="font-size:9px;color:var(--grey);padding:8px 0">No patterns flagged.</div>
+    {% endif %}
+  </div>
+
+  <div class="sec">
+    <div class="sec-lbl">Analyst notes
+      <span class="src" style="background:rgba(107,114,128,.07);color:var(--grey);border:1px solid var(--rule2)">Field intelligence · analyst context</span>
+    </div>
+    <div class="an">
+      <div class="an-lbl">Context not derivable from bank or audited data</div>
+      {% if analyst_notes | default('') %}
+      <div class="an-text">{{ analyst_notes }}</div>
+      {% else %}
+      <div class="an-text">No notes added. Add site visit observations, business model context, field intelligence — clearly separated from system-observed patterns above.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="pf">
+    <div class="pf-qr">{{ qr_svg | safe }}</div>
+    <div class="pf-id"><span class="pf-id-label">Report ID</span><span class="pf-id-val">{{ report_id | default('--') }}</span></div>
+    <div class="pf-seal"><b>SHA256</b>{{ sha256_hash | default('--') }}</div>
+    <div class="pf-pg">3 / 3</div>
+  </div>
+</div>
+{% endif %}
+
+</body>
+</html>

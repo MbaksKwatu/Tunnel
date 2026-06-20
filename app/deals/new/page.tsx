@@ -9,7 +9,6 @@ export default function NewDealPage() {
   const router = useRouter()
   const [dealName, setDealName] = useState('')
   const [companyName, setCompanyName] = useState('')
-  const [analystInitials, setAnalystInitials] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [authChecked, setAuthChecked] = useState(false)
@@ -25,14 +24,14 @@ export default function NewDealPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!dealName.trim() || !companyName.trim() || !analystInitials.trim()) {
+    if (!dealName.trim() || !companyName.trim()) {
       setError('All fields are required.')
       return
     }
     setLoading(true)
     setError('')
     try {
-      const { deal } = await createDeal('USD', dealName.trim(), undefined, companyName.trim(), analystInitials.trim().toUpperCase())
+      const { deal } = await createDeal('USD', dealName.trim(), undefined, companyName.trim())
       router.push(`/v1/deal?deal_id=${deal.id}`)
     } catch (err: any) {
       setError(err?.message || 'Failed to create deal. Please try again.')
@@ -102,23 +101,6 @@ export default function NewDealPage() {
                 className="w-full px-3 py-2.5 rounded-lg text-sm outline-none transition-colors"
                 style={{ background: '#131929', border: '1px solid rgba(99,102,241,0.25)', color: '#F1F5F9' }}
               />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: '#94A3B8' }}>
-                Analyst initials <span style={{ color: '#EF4444' }}>*</span>
-              </label>
-              <input
-                type="text"
-                value={analystInitials}
-                onChange={(e) => setAnalystInitials(e.target.value.slice(0, 3))}
-                required
-                maxLength={3}
-                placeholder="AM"
-                className="w-full px-3 py-2.5 rounded-lg text-sm outline-none transition-colors uppercase"
-                style={{ background: '#131929', border: '1px solid rgba(99,102,241,0.25)', color: '#F1F5F9' }}
-              />
-              <p className="text-xs mt-1" style={{ color: '#475569' }}>2–3 characters</p>
             </div>
 
             <button

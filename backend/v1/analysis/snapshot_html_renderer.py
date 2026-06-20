@@ -1,0 +1,846 @@
+"""
+Snapshot HTML renderer — 3-page Jinja2 HTML snapshot from live deal data.
+"""
+from __future__ import annotations
+
+import io
+import json
+import logging
+import os
+import uuid
+from collections import defaultdict
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+import qrcode
+from jinja2 import Environment, FileSystemLoader
+from qrcode.image.svg import SvgImage
+
+from ..core.snapshot_engine import decompress_canonical_json_if_needed
+from .snapshot_generator import generate_reconciliation_section
+
+logger = logging.getLogger(__name__)
+
+PAGE_SIZE = 1000
+
+MONTH_ABBR = {
+    "01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr",
+    "05": "May", "06": "Jun", "07": "Jul", "08": "Aug",
+    "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec",
+}
+
+REVENUE_ROLES = {"revenue_operational", "mpesa_inflow", "pesalink_inflow"}
+EXCL_CREDIT = {
+    "opening_balance", "closing_balance", "reversal_credit",
+    "reversal_debit", "transfer",
+}
+EXCL_DEBIT = {
+    "opening_balance", "closing_balance", "reversal_debit",
+    "reversal_credit", "transfer",
+}
+
+_BANK_ALIASES = [
+    ("KCB",         ["kcb", "kenya commercial bank"]),
+    ("Equity",      ["equity"]),
+    ("Absa",        ["absa", "barclays"]),
+    ("Zemo",        ["zemo"]),
+    ("NCBA",        ["ncba", "nic bank", "commercial bank of africa"]),
+    ("Co-op",       ["co-operative bank", "coop bank", "co-op"]),
+    ("DTB",         ["dtb", "diamond trust"]),
+    ("Stanbic",     ["stanbic"]),
+    ("IM Bank",     ["im bank", "imperial bank"]),
+    ("Family Bank", ["family bank"]),
+    ("Prime Bank",  ["prime bank"]),
+]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Internal helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _get_supabase():
+    from ..db.supabase_client import get_supabase
+    return get_supabase()
+
+
+def _paginate(sb, table: str, select_cols: str, deal_id: str) -> List[Dict]:
+    rows, offset = [], 0
+    while True:
+        chunk = (
+            sb.table(table)
+            .select(select_cols)
+            .eq("deal_id", deal_id)
+            .range(offset, offset + PAGE_SIZE - 1)
+            .execute()
+            .data or []
+        )
+        rows.extend(chunk)
+        if len(chunk) < PAGE_SIZE:
+            break
+        offset += PAGE_SIZE
+    return rows
+
+
+def _bank_label(url: str) -> Optional[str]:
+    n = (url or "").lower()
+    for key, aliases in _BANK_ALIASES:
+        if any(a in n for a in aliases):
+            return key
+    return None
+
+
+def _fmt_kes(cents: int) -> str:
+    return f"KES {cents / 100:,.0f}"
+
+
+def _fmt_kes_compact(cents: int) -> str:
+    kes = cents / 100
+    if kes >= 1_000_000:
+        return f"{kes / 1_000_000:.1f}M"
+    if kes >= 1_000:
+        return f"{kes / 1_000:.0f}K"
+    return f"{kes:,.0f}"
+
+
+def _fmt_kes_millions(cents: int) -> str:
+    return f"KES {cents / 100 / 1_000_000:.1f}M"
+
+
+def _status_to_badge(status: str):
+    if status == "EXACT_MATCH":
+        return ("b-exact", "Exact match")
+    if status in ("ACCEPTABLE", "ACCEPTABLE_VARIANCE", "HEALTHY"):
+        return ("b-ok", "Acceptable")
+    return ("b-watch", "Variance")
+
+
+def _make_qr_svg(url: str) -> str:
+    qr = qrcode.make(url, image_factory=SvgImage)
+    buf = io.BytesIO()
+    qr.save(buf)
+    svg = buf.getvalue().decode("utf-8")
+    return svg[svg.find("<svg"):]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Public entry point
+# ─────────────────────────────────────────────────────────────────────────────
+
+def render_snapshot_html(
+    deal_id: str,
+    view: str = "observed_recon",
+    partner_name: Optional[str] = None,
+) -> str:
+    """
+    view: observed_recon (default, existing 3-page flow — branches internally on
+          recon_available) | verify (standalone sealed summary page).
+    partner_name: when set, the page header shows the partner's name with
+          "Intelligence by P/ Parity" credit instead of the plain Parity header.
+          Content and figures are identical — only the header branding changes.
+    """
+    sb = _get_supabase()
+
+    # 1. Deal metadata
+    deal = (
+        sb.table("pds_deals")
+        .select("company_name, currency, analyst_notes")
+        .eq("id", deal_id)
+        .single()
+        .execute()
+        .data
+    ) or {}
+    company_name: str = deal.get("company_name") or "--"
+    currency: str     = deal.get("currency") or "KES"
+    analyst_notes: str = deal.get("analyst_notes") or ""
+
+    # 2. Snapshot — decode canonical_json
+    snap_res = (
+        sb.table("pds_snapshots")
+        .select("sha256_hash, created_at, canonical_json")
+        .eq("deal_id", deal_id)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    snap: Dict = snap_res.data[0] if snap_res.data else {}
+    sha256_hash: str = snap.get("sha256_hash") or ""
+    raw_cj = snap.get("canonical_json") or ""
+    canonical_str = decompress_canonical_json_if_needed(raw_cj)
+    canonical: Dict = json.loads(canonical_str) if canonical_str else {}
+
+    # 3. Documents — merge monthly_cashflow + credit_scoring_inputs + doc pills
+    docs = (
+        sb.table("pds_documents")
+        .select("id, analytics, storage_url, source_files")
+        .eq("deal_id", deal_id)
+        .execute()
+        .data or []
+    )
+    monthly_merged: Dict[str, Dict[str, int]] = {}
+    credit_scoring_inputs_list: List[Dict] = []
+    doc_pills: List[Dict] = []
+
+    for doc in docs:
+        analytics = doc.get("analytics") or {}
+        summary   = analytics.get("summary") or {}
+        txn_count = summary.get("total_transactions") or 0
+        url       = doc.get("storage_url") or ""
+        sf_list   = doc.get("source_files") or []
+
+        bank_name = _bank_label(url)
+        if not bank_name:
+            for sf in sf_list:
+                bank_name = _bank_label(str(sf))
+                if bank_name:
+                    break
+        label = f"{bank_name or 'Bank'} · {txn_count:,} txns"
+        doc_pills.append({"label": label, "active": True})
+
+        for row in analytics.get("monthly_cashflow") or []:
+            m = row.get("month") or ""
+            if not m:
+                continue
+            if m not in monthly_merged:
+                monthly_merged[m] = {"inflow_cents": 0, "outflow_cents": 0}
+            monthly_merged[m]["inflow_cents"]  += row.get("inflow_cents") or 0
+            monthly_merged[m]["outflow_cents"] += row.get("outflow_cents") or 0
+
+        cs = analytics.get("credit_scoring_inputs") or {}
+        if cs:
+            credit_scoring_inputs_list.append(cs)
+
+    # 4. Audited financials (optional — sets recon_available)
+    af_result = (
+        sb.table("pds_audited_financials")
+        .select("loan_breakdown, turnover_cents, profit_before_tax_cents, financial_year")
+        .eq("deal_id", deal_id)
+        .execute()
+        .data or []
+    )
+    recon_available = len(af_result) > 0
+    af: Dict = af_result[0] if recon_available else {}
+
+    # 5. Paginated transactions + roles
+    txn_rows = _paginate(
+        sb, "pds_raw_transactions",
+        "id, txn_date, signed_amount_cents, abs_amount_cents, normalized_descriptor, balance_cents",
+        deal_id,
+    )
+    map_rows   = _paginate(sb, "pds_txn_entity_map", "txn_id, role", deal_id)
+    role_by_txn = {r["txn_id"]: r["role"] for r in map_rows}
+
+    txns = [{
+        "txn_date": t["txn_date"],
+        "signed":   t["signed_amount_cents"] or 0,
+        "abs":      t["abs_amount_cents"] or 0,
+        "desc":     t["normalized_descriptor"] or "",
+        "balance":  t["balance_cents"],
+        "role":     role_by_txn.get(t["id"], "other"),
+    } for t in txn_rows]
+
+    # 6. Reconciliation engine (only when audited financials present)
+    recon_section: Dict = {}
+    if recon_available:
+        recon_section = generate_reconciliation_section(deal_id)
+
+    # ── Computed metrics ──────────────────────────────────────────────────────
+
+    # Avg monthly revenue
+    by_month_rev: Dict[str, int] = defaultdict(int)
+    for t in txns:
+        if t["signed"] > 0 and t["role"] in REVENUE_ROLES:
+            m = (t["txn_date"] or "")[:7]
+            if m.startswith("2025-"):
+                by_month_rev[m] += t["signed"]
+    avg_rev_cents = (
+        int(sum(by_month_rev.values()) / len(by_month_rev)) if by_month_rev else 0
+    )
+
+    # Inflow composition
+    by_role_in: Dict[str, int] = defaultdict(int)
+    total_in = 0
+    for t in txns:
+        if t["signed"] > 0 and t["role"] not in EXCL_CREDIT:
+            by_role_in[t["role"]] += t["signed"]
+            total_in += t["signed"]
+
+    # Outflow composition
+    by_role_out: Dict[str, int] = defaultdict(int)
+    total_out = 0
+    for t in txns:
+        if t["signed"] < 0 and t["role"] not in EXCL_DEBIT:
+            by_role_out[t["role"]] += t["abs"]
+            total_out += t["abs"]
+
+    # Income quality
+    op_in = sum(v for k, v in by_role_in.items() if k in REVENUE_ROLES)
+    income_quality_pct = (op_in / total_in * 100) if total_in else 0
+
+    # Loan repayment frequency (2025)
+    repay_months: Dict[str, int] = defaultdict(int)
+    for t in txns:
+        if t["role"] == "loan_repayment" and t["signed"] < 0:
+            m = (t["txn_date"] or "")[:7]
+            if m.startswith("2025-"):
+                repay_months[m] += 1
+    loan_freq = (
+        sum(repay_months.values()) / len(repay_months) if repay_months else 0
+    )
+    loan_repayment_txn_count = sum(1 for t in txns if t["role"] == "loan_repayment" and t["signed"] < 0)
+
+    # Aggregate loan cashflows
+    loan_disbursed_cents = sum(
+        t["signed"] for t in txns if t["role"] == "loan_disbursement" and t["signed"] > 0
+    )
+    loan_repaid_cents = sum(
+        t["abs"] for t in txns if t["role"] == "loan_repayment" and t["signed"] < 0
+    )
+    loan_net_cents = loan_disbursed_cents - loan_repaid_cents
+
+    # Cash trend (null-safe — balance_cents may be null for pre-migration rows)
+    bal_txns = sorted(
+        [t for t in txns if t["balance"] is not None],
+        key=lambda x: x["txn_date"] or "",
+    )
+    if bal_txns:
+        first_bal = bal_txns[0]["balance"]
+        last_bal  = bal_txns[-1]["balance"]
+        yoy_pct   = ((last_bal - first_bal) / abs(first_bal) * 100) if first_bal else None
+        cash_trend_str = f"{yoy_pct:+.1f}%" if yoy_pct is not None else "--"
+        cash_trend_sub = f"{currency} {first_bal/100:,.0f} → {last_bal/100:,.0f} YoY"
+    else:
+        cash_trend_str = "--"
+        cash_trend_sub = "balance data unavailable"
+
+    # Needs-review count
+    needs_review_count = sum(1 for t in txns if t["role"] == "needs_review")
+
+    # Tax
+    tax_txns = [t for t in txns if t["role"] == "tax_payment" and t["signed"] < 0]
+    tax_by_month: Dict[str, Dict] = defaultdict(lambda: {"count": 0, "total": 0})
+    for t in tax_txns:
+        m = (t["txn_date"] or "")[:7]
+        tax_by_month[m]["count"] += 1
+        tax_by_month[m]["total"] += t["abs"]
+    jan_spike = any(m.endswith("-01") for m in tax_by_month)
+    penalty_count = sum(
+        1 for t in tax_txns
+        if any(k in (t["desc"] or "").upper() for k in ("PENALTY", "PENALT", "SURCHARGE", "FINE"))
+    )
+    tax_total_cents = sum(t["abs"] for t in tax_txns)
+    tax_months_count = len(tax_by_month)
+    jan_month = next((m for m in tax_by_month if m.endswith("-01")), None)
+    jan_total = tax_by_month[jan_month]["total"] if jan_month else 0
+
+    # Cashflow net-negative months
+    neg_months = sorted(
+        m for m, v in monthly_merged.items()
+        if m.startswith("2025-") and (v["inflow_cents"] - v["outflow_cents"]) < 0
+    )
+    if neg_months:
+        worst = min(
+            neg_months,
+            key=lambda m: monthly_merged[m]["inflow_cents"] - monthly_merged[m]["outflow_cents"],
+        )
+        cashflow_note = (
+            f"{len(neg_months)} of 12 months net-negative. "
+            f"Largest deficit in {MONTH_ABBR.get(worst[5:7], worst[5:7])} {worst[:4]}."
+        )
+    else:
+        cashflow_note = "All 12 months net-positive."
+
+    # ── Period label ────────────────────────────────────────────────────────
+    fy = str(af.get("financial_year") or "") if recon_available else ""
+    if fy:
+        period_label = f"FY{fy} · Jan 1 – Dec 31 {fy}"
+    elif txns:
+        dates = sorted(t["txn_date"] for t in txns if t["txn_date"])
+        period_label = f"FY{dates[-1][:4]} · {dates[0]} – {dates[-1]}"
+    else:
+        period_label = "--"
+
+    # ── Report ID + QR ──────────────────────────────────────────────────────
+    report_id = (
+        f"PR-{sha256_hash[:8].upper()}" if sha256_hash
+        else f"PR-{uuid.uuid4().hex[:8].upper()}"
+    )
+    verify_url = f"https://paritytunnel.com/verify/{report_id}"
+    qr_svg     = _make_qr_svg(verify_url)
+    generated_date = datetime.utcnow().strftime("%B %-d, %Y")
+
+    # ── Tier badge ───────────────────────────────────────────────────────────
+    _tier_map = {
+        "HIGH_CONFIDENCE":   ("tier-high", "● HIGH_CONFIDENCE · reconciled"),
+        "MEDIUM_CONFIDENCE": ("tier-med",  "● MEDIUM_CONFIDENCE · reconciled"),
+        "LOW_CONFIDENCE":    ("tier-low",  "● LOW_CONFIDENCE · reconciled"),
+    }
+    if recon_available:
+        recon_tier = recon_section.get("tier") or "LOW_CONFIDENCE"
+        tier_badge_class, tier_badge_text = _tier_map.get(
+            recon_tier, ("tier-low", f"● {recon_tier}")
+        )
+    else:
+        recon_tier       = "OBSERVED"
+        tier_badge_class = "tier-obs"
+        tier_badge_text  = "● Observed · bank data only"
+
+    # ── Data source pills ────────────────────────────────────────────────────
+    data_source_pills = list(doc_pills)
+    if recon_available:
+        fy_label = f"Audited financials · FY{fy}" if fy else "Audited financials"
+        data_source_pills.append({"label": fy_label, "active": True})
+        data_source_note = (
+            "Bank statements + audited financials reconciled · "
+            "4-point reconciliation complete"
+        )
+    else:
+        data_source_pills.append({"label": "Audited financials · not submitted", "active": False})
+        data_source_note = (
+            "Report covers bank-observed data only · "
+            "Submit audited financials to unlock reconciliation"
+        )
+    data_source_pills.append({"label": "CRB · not submitted", "active": False})
+    data_source_pills.append({"label": "Identity · not submitted", "active": False})
+
+    total_txn_count = len(txns)
+
+    # ── Key metrics (4 cells, different per state) ───────────────────────────
+    if recon_available:
+        turnover_cents = int(af.get("turnover_cents") or 0)
+        pbt_cents      = int(af.get("profit_before_tax_cents") or 0)
+        pbt_margin     = (pbt_cents / turnover_cents * 100) if turnover_cents > 0 else 0
+
+        loans_r = recon_section.get("loan_activity") or {}
+        loan_var_pct = loans_r.get("variance_pct")
+        loan_var_str = (
+            f"{abs(loan_var_pct):.1f}% var" if loan_var_pct is not None else "0% var"
+        )
+
+        rev_r    = recon_section.get("revenue") or {}
+        rev_gap  = rev_r.get("gap_pct")
+        rev_gap_str = f"{rev_gap:.1f}%" if rev_gap is not None else "--"
+
+        kms = [
+            {
+                "label": "Avg monthly revenue",
+                "value": _fmt_kes_compact(avg_rev_cents),
+                "sub":   f"{currency} · operational inflows",
+                "color_class": "g",
+            },
+            {
+                "label": "PBT margin",
+                "value": f"{pbt_margin:.2f}%",
+                "sub":   f"vs declared turnover · FY{fy}",
+                "color_class": "w" if pbt_margin < 5 else "g",
+            },
+            {
+                "label": "Loan reconciliation",
+                "value": loan_var_str,
+                "sub":   f"{loans_r.get('status', '')} · Note 14",
+                "color_class": "g" if (loan_var_pct or 0) < 5 else "w",
+            },
+            {
+                "label": "Revenue gap",
+                "value": rev_gap_str,
+                "sub":   "observed vs declared · accrual basis",
+                "color_class": "g" if (rev_gap or 0) <= 15 else "w",
+            },
+        ]
+    else:
+        kms = [
+            {
+                "label": "Avg monthly revenue",
+                "value": _fmt_kes_compact(avg_rev_cents),
+                "sub":   f"{currency} · operational inflows",
+                "color_class": "g",
+            },
+            {
+                "label": "Income quality",
+                "value": f"{income_quality_pct:.1f}%",
+                "sub":   "operational vs total inflows",
+                "color_class": "g" if income_quality_pct >= 70 else "w",
+            },
+            {
+                "label": "Loan obligations",
+                "value": f"{loan_freq:.1f}/mo",
+                "sub":   f"repayments · {loan_repayment_txn_count} txns detected",
+                "color_class": "w",
+            },
+            {
+                "label": "Cash trend",
+                "value": cash_trend_str,
+                "sub":   cash_trend_sub,
+                "color_class": "g" if cash_trend_str.startswith("+") else "w",
+            },
+        ]
+
+    # ── Monthly cashflow chart rows ──────────────────────────────────────────
+    months_2025 = sorted(m for m in monthly_merged if m.startswith("2025-"))
+    max_abs_net = (
+        max(abs(monthly_merged[m]["inflow_cents"] - monthly_merged[m]["outflow_cents"])
+            for m in months_2025)
+        if months_2025 else 1
+    ) or 1
+
+    cashflow_rows_ctx = []
+    for m in months_2025:
+        v = monthly_merged[m]
+        net     = v["inflow_cents"] - v["outflow_cents"]
+        abs_net = abs(net)
+        bar_pct = min(int(abs_net / max_abs_net * 100), 100)
+        net_m   = abs_net / 100 / 1_000_000
+        sign    = "+" if net >= 0 else "−"
+        cashflow_rows_ctx.append({
+            "month_label":    MONTH_ABBR.get(m[5:7], m[5:7]),
+            "net_str":        f"{sign}{net_m:.2f}M",
+            "net_color_class": "g" if net >= 0 else "r",
+            "positive":       net >= 0,
+            "bar_pct":        bar_pct,
+        })
+
+    # ── Composition segments ─────────────────────────────────────────────────
+    _in_groups  = [("revenue_operational", "pesalink_inflow"), ("mpesa_inflow",), ("transfer",)]
+    _in_labels  = ["Bank transfers / invoiced", "M-Pesa channel", "Inter-account"]
+    _in_colors  = ["#0D9488", "#6366F1", "#F59E0B"]
+
+    inflow_segments = []
+    in_accounted = 0
+    for roles, label, color in zip(_in_groups, _in_labels, _in_colors):
+        total = sum(by_role_in.get(r, 0) for r in roles)
+        if total > 0 and total_in > 0:
+            pct = max(1, int(total / total_in * 100))
+            in_accounted += pct
+            inflow_segments.append({
+                "label": label, "pct": pct, "color": color,
+                "amount_str": _fmt_kes_millions(total),
+            })
+    other_in = total_in - sum(by_role_in.get(r, 0) for grp in _in_groups for r in grp)
+    if other_in > 0 and total_in > 0:
+        inflow_segments.append({
+            "label": "Other / unclassified",
+            "pct": max(0, 100 - in_accounted),
+            "color": "#D1D5DB",
+            "amount_str": _fmt_kes_millions(other_in),
+        })
+
+    _out_groups = [
+        ("supplier", "supplier_payment"),
+        ("operational", "operational_payment"),
+        ("payroll",),
+        ("loan_repayment",),
+        ("tax_payment",),
+    ]
+    _out_labels = ["Procurement / COGS", "Operational", "Payroll", "Loan repayments", "Tax (KRA)"]
+    _out_colors = ["#1C2135", "#B45309", "#4338CA", "#0D9488", "#B91C1C"]
+
+    outflow_segments = []
+    out_accounted = 0
+    for roles, label, color in zip(_out_groups, _out_labels, _out_colors):
+        total = sum(by_role_out.get(r, 0) for r in roles)
+        if total > 0 and total_out > 0:
+            pct = max(1, int(total / total_out * 100))
+            out_accounted += pct
+            outflow_segments.append({
+                "label": label, "pct": pct, "color": color,
+                "amount_str": _fmt_kes_millions(total),
+            })
+    other_out = total_out - sum(by_role_out.get(r, 0) for grp in _out_groups for r in grp)
+    if other_out > 0 and total_out > 0:
+        outflow_segments.append({
+            "label": "Finance charges / other",
+            "pct": max(0, 100 - out_accounted),
+            "color": "#D1D5DB",
+            "amount_str": _fmt_kes_millions(other_out),
+        })
+
+    # Composition warn strings
+    mpesa_cents = by_role_in.get("mpesa_inflow", 0)
+    mpesa_pct   = (mpesa_cents / total_in * 100) if total_in else 0
+    mpesa_txn_count = sum(1 for t in txns if t["role"] == "mpesa_inflow" and t["signed"] > 0)
+    mpesa_avg = (mpesa_cents / mpesa_txn_count / 100) if mpesa_txn_count > 0 else 0
+    inflow_warn = (
+        f"M-Pesa at {mpesa_txn_count:,} transactions (avg {currency} {mpesa_avg:,.0f} per txn) · "
+        "verify consistency with declared business model and customer type · pattern observed, not concluded"
+    ) if mpesa_pct > 25 else ""
+
+    procurement_cents = sum(by_role_out.get(r, 0) for r in ("supplier", "supplier_payment"))
+    procurement_pct   = (procurement_cents / total_out * 100) if total_out else 0
+    outflow_warn = (
+        f"Procurement outflows ({procurement_pct:.0f}%) — cash procurement controls and cross-border "
+        "documentation should be verified · observed supplier payments represent partial COGS visibility"
+    ) if procurement_pct > 50 else ""
+
+    # ── Tax ───────────────────────────────────────────────────────────────────
+    tax_freq_str  = (
+        f"{len(tax_txns) / tax_months_count:.1f} / month" if tax_months_count > 0 else "--"
+    )
+    tax_jan_spike_str = _fmt_kes(jan_total) if jan_total > 0 else ""
+    if jan_spike and penalty_count == 0:
+        tax_note = (
+            "Consistent KRA cadence observed across all months. "
+            "January spike consistent with prior-year settlement — not a penalty indicator. "
+            "Regular PAYE + VAT cadence maintained. "
+            "Note: Bank payment regularity observed, not compliance status. Verify certificate independently."
+        )
+    elif penalty_count > 0:
+        tax_note = (
+            f"{penalty_count} potential penalty transaction(s) detected — "
+            "verify KRA compliance certificate independently."
+        )
+    else:
+        tax_note = (
+            "Regular KRA payment pattern observed. "
+            "Note: Bank regularity only — verify compliance certificate independently."
+        )
+
+    # ── Pattern cards ─────────────────────────────────────────────────────────
+    _TAG_CLASS  = {"Watch": "t-wat", "Observed": "t-chk", "Pattern": "t-pat", "Coverage": "t-chk"}
+    _ITEM_CLASS = {"Watch": "watch", "Observed": "check", "Pattern": "pattern", "Coverage": "check"}
+
+    patterns: List[Dict] = []
+
+    if mpesa_pct > 40:
+        tag = "Watch"
+        patterns.append({
+            "name": "M-Pesa concentration",
+            "tag": tag, "tag_class": _TAG_CLASS[tag], "item_class": _ITEM_CLASS[tag],
+            "data_statement": f"M-Pesa inflows represent {mpesa_pct:.1f}% of total observed inflows",
+            "check_prompt": "→ Review: consistent with declared customer mix and B2B model?",
+        })
+
+    for cs in credit_scoring_inputs_list:
+        if cs.get("kra_compliance") == "GAPS_DETECTED":
+            tag = "Observed"
+            patterns.append({
+                "name": "Tax payment gap",
+                "tag": tag, "tag_class": _TAG_CLASS[tag], "item_class": _ITEM_CLASS[tag],
+                "data_statement": cs.get("kra_note") or "Tax payment gaps detected",
+                "check_prompt": "→ Review: gap months explained by filing schedule or missed payments?",
+            })
+            break
+
+    for cs in credit_scoring_inputs_list:
+        if cs.get("payroll_stability") == "IRREGULAR":
+            m_det = cs.get("payroll_months_detected") or 0
+            tag   = "Pattern"
+            patterns.append({
+                "name": "Irregular payroll",
+                "tag": tag, "tag_class": _TAG_CLASS[tag], "item_class": _ITEM_CLASS[tag],
+                "data_statement": f"Payroll detected in {m_det} of 12 months",
+                "check_prompt": "→ Review: casual workforce or payroll routed off-statement?",
+            })
+            break
+
+    if len(neg_months) > 2:
+        label_months = ", ".join(
+            MONTH_ABBR.get(m[5:7], m[5:7]) for m in neg_months[:3]
+        ) + ("..." if len(neg_months) > 3 else "")
+        tag = "Pattern"
+        patterns.append({
+            "name": "Net-negative months",
+            "tag": tag, "tag_class": _TAG_CLASS[tag], "item_class": _ITEM_CLASS[tag],
+            "data_statement": f"{len(neg_months)} of 12 months net-negative: {label_months}",
+            "check_prompt": "→ Review: seasonal pattern or sustained cash drain?",
+        })
+
+    if needs_review_count > 100:
+        tag = "Coverage"
+        patterns.append({
+            "name": "Analyst classification pending",
+            "tag": tag, "tag_class": _TAG_CLASS[tag], "item_class": _ITEM_CLASS[tag],
+            "data_statement": f"{needs_review_count} transactions flagged needs_review",
+            "check_prompt": "→ Review: resolve in Parity dashboard before finalising snapshot.",
+        })
+
+    patterns = patterns[:5]
+
+    # ── Reconciliation rows (recon state only) ───────────────────────────────
+    recon_rows: List[Dict] = []
+    recon_fiscal_note = ""
+
+    if recon_available:
+        cash_r = recon_section.get("cash_position") or {}
+        rev_r  = recon_section.get("revenue") or {}
+        exp_r  = recon_section.get("expenses") or {}
+        loan_r = recon_section.get("loan_activity") or {}
+
+        # Derive fiscal note from sub-section
+        fp = rev_r.get("fiscal_period") or ""
+        if " to " in fp:
+            end_date = fp.split(" to ")[-1]
+            recon_fiscal_note = f"All checks at fiscal year-end {end_date}"
+        elif fy:
+            recon_fiscal_note = f"All checks at fiscal year-end Dec 31 {fy}"
+
+        # Cash position
+        cash_var    = cash_r.get("variance_pct")
+        cash_status = cash_r.get("status") or "SKIPPED"
+        cash_badge  = _status_to_badge(cash_status)
+        if cash_status == "EXACT_MATCH":
+            cash_assessment = "On submitted accounts: KES 0 variance."
+        elif cash_var is not None:
+            cash_assessment = f"{abs(cash_var):.1f}% variance on submitted accounts."
+        else:
+            cash_assessment = cash_r.get("reason") or "Insufficient data."
+        recon_rows.append({
+            "check":          "Cash position",
+            "observed_str":   _fmt_kes(int(cash_r.get("total_bank_kes", 0) * 100)),
+            "observed_sub":   "Bank accounts at fiscal year-end",
+            "declared_str":   _fmt_kes(int(cash_r.get("total_declared_kes", 0) * 100)),
+            "declared_sub":   "Note 11 · cash and equivalents",
+            "variance_str":   f"{cash_var:.1f}%" if cash_var is not None else "--",
+            "badge_class":    cash_badge[0],
+            "badge_label":    cash_badge[1],
+            "assessment":     cash_assessment,
+        })
+
+        # Revenue
+        rev_gap  = rev_r.get("gap_pct")
+        rev_text = rev_r.get("assessment") or ""
+        rev_status = (
+            "HEALTHY" if "HEALTHY" in rev_text
+            else ("ACCEPTABLE" if "WARNING" not in rev_text and "RISK" not in rev_text else "VARIANCE")
+        )
+        rev_badge = _status_to_badge(rev_status)
+        recon_rows.append({
+            "check":        "Revenue",
+            "observed_str": _fmt_kes(int(rev_r.get("bank_inflows_kes", 0) * 100)),
+            "observed_sub": "Net operational inflows",
+            "declared_str": _fmt_kes(int(rev_r.get("declared_revenue_kes", 0) * 100)),
+            "declared_sub": "Declared turnover",
+            "variance_str": f"{rev_gap:.1f}% gap" if rev_gap is not None else "--",
+            "badge_class":  rev_badge[0],
+            "badge_label":  rev_badge[1],
+            "assessment":   rev_text or "--",
+        })
+
+        # Expenses
+        exp_gap   = exp_r.get("gap_pct")
+        exp_badge = _status_to_badge("ACCEPTABLE" if (exp_gap or 0) <= 15 else "VARIANCE")
+        recon_rows.append({
+            "check":        "Expenses",
+            "observed_str": _fmt_kes(int(exp_r.get("bank_outflows_kes", 0) * 100)),
+            "observed_sub": "Net operational outflows",
+            "declared_str": _fmt_kes(int(exp_r.get("declared_expenses_kes", 0) * 100)),
+            "declared_sub": "Total declared expenses",
+            "variance_str": f"{exp_gap:.1f}% gap" if exp_gap is not None else "--",
+            "badge_class":  exp_badge[0],
+            "badge_label":  exp_badge[1],
+            "assessment":   exp_r.get("explanation") or "--",
+        })
+
+        # Loan activity
+        loan_var    = loan_r.get("variance_pct")
+        loan_status = loan_r.get("status") or "VARIANCE"
+        loan_badge  = _status_to_badge(loan_status)
+        if loan_status == "EXACT_MATCH":
+            loan_assessment = "Net borrowing matches cashflow statement exactly."
+        elif loan_var is not None:
+            loan_assessment = f"{abs(loan_var):.1f}% variance — review facility discrepancy."
+        else:
+            loan_assessment = loan_r.get("reason") or "Insufficient data."
+        recon_rows.append({
+            "check":        "Loan activity",
+            "observed_str": _fmt_kes(int(loan_r.get("bank_net_borrowing_kes", 0) * 100)),
+            "observed_sub": "Net borrowings · bank-detected",
+            "declared_str": _fmt_kes(int(loan_r.get("declared_net_borrowing_kes", 0) * 100)),
+            "declared_sub": "Cashflow statement · Note 14",
+            "variance_str": f"{loan_var:.1f}%" if loan_var is not None else "0%",
+            "badge_class":  loan_badge[0],
+            "badge_label":  loan_badge[1],
+            "assessment":   loan_assessment,
+        })
+
+    # ── Loan facilities table (recon state) ──────────────────────────────────
+    loans_r        = (recon_section.get("loan_activity") or {}) if recon_available else {}
+    loan_recon_status = loans_r.get("status") or ""
+    fac_match_class = (
+        "ls-a" if loan_recon_status == "EXACT_MATCH"
+        else ("ls-w" if loan_recon_status == "VARIANCE" else "ls-c")
+    )
+    fac_match_label = (
+        "✓ Match" if loan_recon_status == "EXACT_MATCH"
+        else ("Variance" if loan_recon_status == "VARIANCE" else "Acceptable")
+    )
+    loan_facilities = [
+        {
+            "name":        fac.get("name") or "--",
+            "amount_str":  _fmt_kes(fac.get("amount_cents") or 0),
+            "match_class": fac_match_class,
+            "match_label": fac_match_label,
+        }
+        for fac in (af.get("loan_breakdown") or [])
+    ]
+
+    loan_bank_net_str     = _fmt_kes(int(loans_r.get("bank_net_borrowing_kes", 0) * 100))
+    loan_declared_net_str = _fmt_kes(int(loans_r.get("declared_net_borrowing_kes", 0) * 100))
+    loan_var_raw          = loans_r.get("variance_pct")
+    loan_variance_str     = f"{loan_var_raw:.1f}%" if loan_var_raw is not None else "0%"
+
+    # ── Verify-page summary (reuses figures already computed above) ──────────
+    if recon_available:
+        loan_recon_label = (loans_r.get("status") or "VARIANCE").replace("_", " ").title()
+    else:
+        loan_recon_label = "Not reconciled"
+    vp_confidence_color = "g" if recon_tier == "HIGH_CONFIDENCE" else (
+        "w" if recon_tier in ("MEDIUM_CONFIDENCE", "LOW_CONFIDENCE") else ""
+    )
+
+    # ── Render template ───────────────────────────────────────────────────────
+    templates_dir = os.path.join(os.path.dirname(__file__), "..", "templates")
+    env = Environment(loader=FileSystemLoader(os.path.abspath(templates_dir)))
+    template = env.get_template("snapshot.html")
+
+    context: Dict[str, Any] = {
+        "view":               view,
+        "partner_name":       partner_name,
+        "company_name":       company_name,
+        "sector":             "--",
+        "period_label":       period_label,
+        "generated_date":     generated_date,
+        "analyst_notes":      analyst_notes,
+        "report_id":          report_id,
+        "sha256_hash":        sha256_hash,
+        "qr_svg":             qr_svg,
+        "verify_url":         verify_url,
+        "currency":           currency,
+        "recon_available":    recon_available,
+        "recon_tier":         recon_tier,
+        "vp_confidence_color": vp_confidence_color,
+        "loan_recon_label":   loan_recon_label,
+        "tier_badge_class":   tier_badge_class,
+        "tier_badge_text":    tier_badge_text,
+        "data_source_pills":  data_source_pills,
+        "data_source_note":   data_source_note,
+        "total_txn_count":    total_txn_count,
+        "kms":                kms,
+        "cashflow_rows":      cashflow_rows_ctx,
+        "cashflow_note":      cashflow_note,
+        "inflow_total_str":   _fmt_kes_millions(total_in),
+        "inflow_segments":    inflow_segments,
+        "inflow_warn":        inflow_warn,
+        "outflow_total_str":  _fmt_kes_millions(total_out),
+        "outflow_segments":   outflow_segments,
+        "outflow_warn":       outflow_warn,
+        "tax_count":          len(tax_txns),
+        "tax_freq_str":       tax_freq_str,
+        "tax_penalty_count":  penalty_count,
+        "tax_jan_spike_str":  tax_jan_spike_str,
+        "tax_total_str":      _fmt_kes(tax_total_cents),
+        "tax_note":           tax_note,
+        "loan_disbursed_str": _fmt_kes(loan_disbursed_cents),
+        "loan_repaid_str":    _fmt_kes(loan_repaid_cents),
+        "loan_net_str":       _fmt_kes(abs(loan_net_cents)),
+        "loan_freq_str":      f"{loan_freq:.1f} txns / month",
+        "loan_facility_count": loan_repayment_txn_count,
+        "loan_facilities":    loan_facilities,
+        "loan_recon_status":  loan_recon_status,
+        "loan_bank_net_str":  loan_bank_net_str,
+        "loan_declared_net_str": loan_declared_net_str,
+        "loan_variance_str":  loan_variance_str,
+        "recon_rows":         recon_rows,
+        "recon_fiscal_note":  recon_fiscal_note,
+        "patterns":           patterns,
+    }
+
+    return template.render(**context)
