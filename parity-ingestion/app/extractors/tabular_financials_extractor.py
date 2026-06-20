@@ -209,12 +209,20 @@ def _confidence(data: Dict[str, Any], base: int) -> Decimal:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def extract_audited_financials_from_csv(csv_path: str) -> Dict[str, Any]:
+def extract_audited_financials_from_csv(
+    csv_path: str,
+    currency_hint: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Extract financial statement fields from a CSV file.
 
     Returns the same dict shape as ``extract_audited_financials`` with
     ``extraction_method='csv_tabular'`` and confidence capped at 60.
+
+    Args:
+        csv_path: Path to the CSV file.
+        currency_hint: ISO 4217 code if known from the deal/session context;
+            None when currency could not be determined.
     """
     try:
         df = pd.read_csv(csv_path, header=None, dtype=str)
@@ -230,7 +238,7 @@ def extract_audited_financials_from_csv(csv_path: str) -> Dict[str, Any]:
         "financial_year": year,
         "financial_year_start": f"{year - 1}-01-01" if year else None,
         "financial_year_end": f"{year}-12-31" if year else None,
-        "currency": "KES",
+        "currency": currency_hint,
         **fields,
         "extraction_method": "csv_tabular",
     }
@@ -247,13 +255,21 @@ def extract_audited_financials_from_csv(csv_path: str) -> Dict[str, Any]:
     return result
 
 
-def extract_audited_financials_from_excel(excel_path: str) -> Dict[str, Any]:
+def extract_audited_financials_from_excel(
+    excel_path: str,
+    currency_hint: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Extract financial statement fields from an Excel (.xlsx / .xls) file.
 
     Handles single-sheet and multi-sheet workbooks by merging all sheets.
     Returns the same dict shape as ``extract_audited_financials`` with
     ``extraction_method='excel_tabular'`` and confidence capped at 65.
+
+    Args:
+        excel_path: Path to the Excel file.
+        currency_hint: ISO 4217 code if known from the deal/session context;
+            None when currency could not be determined.
     """
     try:
         xls = pd.ExcelFile(excel_path)
@@ -270,7 +286,7 @@ def extract_audited_financials_from_excel(excel_path: str) -> Dict[str, Any]:
         "financial_year": year,
         "financial_year_start": f"{year - 1}-01-01" if year else None,
         "financial_year_end": f"{year}-12-31" if year else None,
-        "currency": "KES",
+        "currency": currency_hint,
         **fields,
         "extraction_method": "excel_tabular",
     }

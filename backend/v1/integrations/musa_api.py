@@ -37,6 +37,7 @@ from ..db.supabase_client import get_supabase
 from ..db.supabase_repositories import DealsRepo, SnapshotsRepo
 from ..core.snapshot_engine import decompress_canonical_json_if_needed
 from .auth import require_musa_api_key
+from .currency_utils import country_to_currency
 from .musa_file_processor import process_musa_session
 
 logger = logging.getLogger(__name__)
@@ -84,22 +85,6 @@ class SessionResponse(BaseModel):
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
-
-_COUNTRY_CURRENCY = {
-    "kenya": "KES",
-    "uganda": "UGX",
-    "tanzania": "TZS",
-    "rwanda": "RWF",
-    "nigeria": "NGN",
-    "ghana": "GHS",
-    "ethiopia": "ETB",
-    "south africa": "ZAR",
-}
-
-
-def _currency_for_country(country: str) -> str:
-    return _COUNTRY_CURRENCY.get(country.lower().strip(), "KES")
-
 
 def _to_iso(value: Optional[str]) -> Optional[str]:
     """Convert various datetime formats to ISO 8601 UTC"""
@@ -167,11 +152,17 @@ async def create_session(
     """
     session_id = str(uuid.uuid4())
 
+    # Resolve currency from country — raises 422 immediately if unrecognised
+    try:
+        deal_currency = country_to_currency(body.venture_country)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
     # 1. Create deal
     try:
         deal = DealsRepo().create_deal({
             "id": str(uuid.uuid4()),
-            "currency": _currency_for_country(body.venture_country),
+            "currency": deal_currency,
             "name": body.venture_name,
             "created_by": "00000000-0000-0000-0000-000000000001",  # Musa system user
         })

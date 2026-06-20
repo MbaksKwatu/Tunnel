@@ -97,18 +97,21 @@ def _fake_session_row(
 
 class TestCurrencyMapping:
     def test_known_countries(self):
-        from v1.integrations.musa_api import _currency_for_country
-        assert _currency_for_country("Kenya")        == "KES"
-        assert _currency_for_country("kenya")        == "KES"
-        assert _currency_for_country("Uganda")       == "UGX"
-        assert _currency_for_country("Tanzania")     == "TZS"
-        assert _currency_for_country("Nigeria")      == "NGN"
-        assert _currency_for_country("Rwanda")       == "RWF"
+        from v1.integrations.currency_utils import country_to_currency
+        assert country_to_currency("Kenya")        == "KES"
+        assert country_to_currency("kenya")        == "KES"
+        assert country_to_currency("Uganda")       == "UGX"
+        assert country_to_currency("Tanzania")     == "TZS"
+        assert country_to_currency("Nigeria")      == "NGN"
+        assert country_to_currency("Rwanda")       == "RWF"
 
-    def test_unknown_country_defaults_to_kes(self):
-        from v1.integrations.musa_api import _currency_for_country
-        assert _currency_for_country("Wakanda")      == "KES"
-        assert _currency_for_country("")             == "KES"
+    def test_unknown_country_raises(self):
+        import pytest
+        from v1.integrations.currency_utils import country_to_currency
+        with pytest.raises(ValueError, match="Cannot resolve country"):
+            country_to_currency("Wakanda")
+        with pytest.raises(ValueError, match="Cannot resolve country"):
+            country_to_currency("")
 
 
 # ===========================================================================
