@@ -14,7 +14,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request, BackgroundTasks, Body
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 from pypdf import PdfWriter
 
 from .utils.pdf_merge import validate_pdf_count
@@ -1227,6 +1227,19 @@ def get_deal_report(request: Request, deal_id: str):
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=parity-snapshot-{deal_id[:8]}.pdf"},
     )
+
+
+@router.get("/deals/{deal_id}/snapshot/html")
+def get_deal_snapshot_html(deal_id: str, view: str = "observed_recon", partner_name: str | None = None):
+    """
+    Returns the rendered HTML snapshot for web viewing.
+    view: observed_recon (default — branches internally on recon_available) | verify
+    partner_name: optional co-branding label (e.g. "Musa Ventures") — content is
+    identical, only the header branding changes.
+    """
+    from .analysis.snapshot_html_renderer import render_snapshot_html
+    html = render_snapshot_html(deal_id, view=view, partner_name=partner_name)
+    return HTMLResponse(content=html)
 
 
 # ===================================================================

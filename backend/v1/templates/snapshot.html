@@ -126,17 +126,91 @@ body{background:#94A3B8;font-family:var(--sans);-webkit-font-smoothing:antialias
 .pf-pg{font-family:var(--mono);font-size:8px;color:var(--rule2);margin-left:10px;flex-shrink:0}
 .lt-foot{font-family:var(--mono);font-size:8px;color:var(--grey);margin-top:6px;display:flex;gap:16px;flex-wrap:wrap}
 .lt-foot b{color:var(--ink)}
+.ph-partner{font-size:14px;font-weight:700;letter-spacing:.03em}
+.ph-partner-credit{font-family:var(--mono);font-size:7.5px;color:var(--grey);letter-spacing:.06em;margin-top:3px;display:flex;align-items:center;gap:4px}
+.ph-partner-credit span{color:var(--teal);font-weight:700}
+.vpage{background:#0A0F1E;color:#fff;padding:28px 24px 22px;max-width:860px;margin:0 auto}
+.vp-hd{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px}
+.vp-logo{font-size:15px;font-weight:700;letter-spacing:.03em}.vp-logo span{color:var(--teal)}
+.vp-logo-sub{font-family:var(--mono);font-size:7.5px;color:#4B5563;letter-spacing:.14em;margin-top:2px}
+.seal-ok{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:8.5px;color:var(--teal);background:rgba(13,148,136,.1);border:1px solid rgba(13,148,136,.25);padding:4px 10px;border-radius:3px}
+.vp-title{font-size:20px;font-weight:300;margin-bottom:3px}
+.vp-sub{font-family:var(--mono);font-size:9px;color:#6B7280;letter-spacing:.05em;margin-bottom:18px}
+.vp-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+.vp-cell{border:1px solid #1F2937;border-radius:3px;padding:12px}
+.vp-lbl{font-family:var(--mono);font-size:7.5px;color:#6B7280;letter-spacing:.1em;text-transform:uppercase;margin-bottom:5px}
+.vp-val{font-family:var(--mono);font-size:16px;font-weight:500}
+.vp-val.g{color:var(--teal)}.vp-val.w{color:var(--amber)}
+.vp-note{font-size:9px;color:#6B7280;margin-top:3px}
+.vp-seal-box{font-family:var(--mono);font-size:8px;color:#374151;word-break:break-all;padding:8px 11px;border:1px solid #1F2937;border-radius:3px;background:#111827;margin-bottom:14px;line-height:1.5}
+.vp-seal-lbl{font-size:7.5px;color:#4B5563;letter-spacing:.1em;text-transform:uppercase;margin-bottom:3px}
+.vp-cta{border:1px solid #1F2937;border-radius:3px;padding:16px;text-align:center;background:#111827}
+.vp-cta-t{font-size:12px;font-weight:600;margin-bottom:4px}
+.vp-cta-d{font-size:9.5px;color:#9CA3AF;margin-bottom:12px;line-height:1.6}
+.vp-btn{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:9.5px;font-weight:600;letter-spacing:.06em;padding:9px 20px;border-radius:3px;background:var(--teal);color:#fff;border:none;cursor:pointer}
+.vp-free{font-family:var(--mono);font-size:8px;color:#4B5563;margin-top:6px}
 </style>
 </head>
 <body>
+
+{% if view == 'verify' %}
+<!-- ═══ VERIFY PAGE ═══ -->
+<div class="page" style="border:none">
+  <div class="vpage">
+    <div class="vp-hd">
+      <div><div class="vp-logo"><span>P/</span> PARITY</div><div class="vp-logo-sub">DETERMINISTIC FINANCIAL INTELLIGENCE</div></div>
+      <div class="seal-ok">✓ SHA256 verified · document authentic</div>
+    </div>
+    <div class="vp-title">Parity Intelligence Snapshot</div>
+    <div class="vp-sub">{{ (company_name | default('--')) | upper }} · {{ period_label | default('--') }} · REPORT {{ report_id | default('--') }}</div>
+    <div class="vp-grid">
+      <div class="vp-cell">
+        <div class="vp-lbl">Confidence tier</div>
+        <div class="vp-val {{ vp_confidence_color | default('') }}">{{ recon_tier | default('OBSERVED') }}</div>
+        <div class="vp-note">{{ 'Bank + audited · reconciled' if recon_available else 'Bank data only' }}</div>
+      </div>
+      <div class="vp-cell">
+        <div class="vp-lbl">Transactions</div>
+        <div class="vp-val">{{ total_txn_count | default(0) }}</div>
+        <div class="vp-note">{{ period_label | default('--') }}</div>
+      </div>
+      <div class="vp-cell">
+        <div class="vp-lbl">Avg monthly revenue</div>
+        <div class="vp-val g">{{ (kms | default([{}]))[0].value | default('--') }}</div>
+        <div class="vp-note">Operational inflows</div>
+      </div>
+      <div class="vp-cell">
+        <div class="vp-lbl">Loan reconciliation</div>
+        <div class="vp-val {{ vp_confidence_color | default('') }}">{{ loan_recon_label | default('--') }}</div>
+        <div class="vp-note">{{ loan_variance_str | default('--') }} variance</div>
+      </div>
+    </div>
+    <div class="vp-seal-box">
+      <div class="vp-seal-lbl">SHA256 — report integrity seal</div>
+      {{ sha256_hash | default('--') }}
+    </div>
+    <div class="vp-cta">
+      <div class="vp-cta-t">Run your own Parity analysis</div>
+      <div class="vp-cta-d">This report was generated on Parity — deterministic SME financial intelligence for Pan-African lenders. Upload any bank statement and get a classified, reconciled intelligence snapshot referenced to the exact transactions that produced it.</div>
+      <button class="vp-btn">Create a free account →</button>
+      <div class="vp-free">Free tier · one analysis · no card required · your data stays yours · paritytunnel.com</div>
+    </div>
+  </div>
+</div>
+{% else %}
 
 <!-- ═══ PAGE 1 ═══ -->
 <div class="page">
   <div class="page-num">1 / 3</div>
   <div class="ph">
     <div>
+      {% if partner_name %}
+      <div class="ph-partner">{{ partner_name }}</div>
+      <div class="ph-partner-credit">Intelligence by <span>P/</span> Parity</div>
+      {% else %}
       <div class="ph-logo"><span>P/</span> PARITY</div>
       <div class="ph-sub">DETERMINISTIC FINANCIAL INTELLIGENCE</div>
+      {% endif %}
     </div>
     <div class="ph-meta">
       <div><b>Company:</b> {{ company_name | default('--') }}</div>
@@ -210,7 +284,14 @@ body{background:#94A3B8;font-family:var(--sans);-webkit-font-smoothing:antialias
 <div class="page">
   <div class="page-num">2 / 3</div>
   <div class="ph">
-    <div><div class="ph-logo"><span>P/</span> PARITY</div><div class="ph-sub">DETERMINISTIC FINANCIAL INTELLIGENCE</div></div>
+    <div>
+      {% if partner_name %}
+      <div class="ph-partner">{{ partner_name }}</div>
+      <div class="ph-partner-credit">Intelligence by <span>P/</span> Parity</div>
+      {% else %}
+      <div class="ph-logo"><span>P/</span> PARITY</div><div class="ph-sub">DETERMINISTIC FINANCIAL INTELLIGENCE</div>
+      {% endif %}
+    </div>
     <div class="ph-meta">
       <div><b>Report:</b> {{ report_id | default('--') }}</div>
       <div><b>{{ company_name | default('--') }} · {{ period_label | default('--') }}</b></div>
@@ -387,7 +468,14 @@ body{background:#94A3B8;font-family:var(--sans);-webkit-font-smoothing:antialias
 <div class="page">
   <div class="page-num">3 / 3</div>
   <div class="ph">
-    <div><div class="ph-logo"><span>P/</span> PARITY</div><div class="ph-sub">DETERMINISTIC FINANCIAL INTELLIGENCE</div></div>
+    <div>
+      {% if partner_name %}
+      <div class="ph-partner">{{ partner_name }}</div>
+      <div class="ph-partner-credit">Intelligence by <span>P/</span> Parity</div>
+      {% else %}
+      <div class="ph-logo"><span>P/</span> PARITY</div><div class="ph-sub">DETERMINISTIC FINANCIAL INTELLIGENCE</div>
+      {% endif %}
+    </div>
     <div class="ph-meta">
       <div><b>Report:</b> {{ report_id | default('--') }}</div>
       <div><b>{{ company_name | default('--') }} · {{ period_label | default('--') }}</b></div>
@@ -451,6 +539,7 @@ body{background:#94A3B8;font-family:var(--sans);-webkit-font-smoothing:antialias
     <div class="pf-pg">3 / 3</div>
   </div>
 </div>
+{% endif %}
 
 </body>
 </html>
