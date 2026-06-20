@@ -88,18 +88,20 @@ class DealsRepo(DealsRepository, BaseRepo):
 
     def set_currency_if_unset(self, deal_id: str, currency: str) -> None:
         """
-        Sets currency on pds_deals only if currently null or 'USD' (the default fallback).
-        KES takes priority — if any statement is KES, the deal becomes KES even if UGX was set.
-        Never downgrades from KES.
+        Sets currency on pds_deals from the first real document detection.
+        currency_source distinguishes a creation-time placeholder ('default') from
+        a confirmed detection ('detected') — once 'detected', never auto-corrected
+        again, regardless of which currency code is sitting in the column.
         """
         deal = self.get_deal(deal_id)
         if not deal:
             return
-        current = deal.get("currency")
-        if current == "KES":
+        if deal.get("currency_source", "default") == "detected":
             return
-        if current is None or current == "USD" or currency == "KES":
-            self.client.table(self.table).update({"currency": currency}).eq("id", deal_id).execute()
+        self.client.table(self.table).update({
+            "currency": currency,
+            "currency_source": "detected",
+        }).eq("id", deal_id).execute()
 
 
 class DocumentsRepo(DocumentsRepository, BaseRepo):
