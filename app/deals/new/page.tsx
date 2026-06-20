@@ -31,7 +31,7 @@ export default function NewDealPage() {
     setLoading(true)
     setError('')
     try {
-      const { deal } = await createDeal('USD', dealName.trim(), undefined, companyName.trim())
+      const { deal } = await createDeal('KES', dealName.trim(), undefined, companyName.trim())
       router.push(`/v1/deal?deal_id=${deal.id}`)
     } catch (err: any) {
       setError(err?.message || 'Failed to create deal. Please try again.')
