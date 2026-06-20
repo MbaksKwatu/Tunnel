@@ -56,7 +56,7 @@ export interface AccrualInput {
 
 export interface Deal {
   id: string
-  currency: string
+  currency?: string
   name?: string
   created_by?: string
   accrual_revenue_cents?: number
