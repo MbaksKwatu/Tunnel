@@ -622,6 +622,10 @@ export async function downloadSnapshotPdf(dealId: string): Promise<Response> {
   return fetchApi(`${BASE}/deals/${dealId}/snapshot/pdf`)
 }
 
+export async function downloadReport(dealId: string): Promise<Response> {
+  return fetchApi(`${BASE}/deals/${dealId}/report`)
+}
+
 export async function exportTransactionsCsvBlob(dealId: string): Promise<Response> {
   return fetchApi(`${BASE}/deals/${dealId}/export/transactions`)
 }
