@@ -1125,7 +1125,7 @@ function V1DealPageInner() {
           {/* Deal header */}
           <div style={{ marginBottom: 24 }}>
             <h1 style={{ fontSize: 22, fontWeight: 700, color: '#F1F5F9', margin: 0, letterSpacing: '-0.01em' }}>
-              {dealName || 'New Deal'}
+              {deal?.name || dealName || 'New Deal'}
             </h1>
             {dealId && (
               <div style={{ marginTop: 6, fontSize: 12, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace", display: 'flex', gap: 12, flexWrap: 'wrap' }}>
