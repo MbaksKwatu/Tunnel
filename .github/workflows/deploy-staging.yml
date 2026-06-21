@@ -7,5 +7,20 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Vercel staging deploy
-        run: curl -X POST "https://api.vercel.com/v1/integrations/deploy/prj_tFcVwlw0XAJMP0zH8QfmMmG2WLkf/KQqrFUW0tG"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # The deploy-hook curl this replaced created a deployment correctly
+      # classified target=production (productionBranch is "paritystaging"),
+      # but a deploy hook isn't a git-push webhook — it never actually
+      # promoted that build to parity-sme-staging.vercel.app. Builds piled
+      # up as individual "production-target" deployments while the real
+      # alias sat on a build from 2026-06-20 (PR #7) for over a week.
+      # `vercel deploy --prod` does the build AND the promotion in one
+      # deterministic step, same as the manual command that fixed this
+      # once already — now it runs on every push instead of by hand.
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+      - name: Deploy to Vercel production (staging project)
+        run: vercel deploy --prod --yes --token=${{ secrets.VERCEL_TOKEN }}
