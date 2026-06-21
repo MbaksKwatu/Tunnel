@@ -25,6 +25,7 @@ import {
   listDeals,
   getMonthlyCashflow,
   getReconciliation,
+  getDeal,
 } from '@/lib/v1-api';
 import type { DealListItem } from '@/lib/v1-api';
 import { BatchUpload } from '@/components/BatchUpload';
@@ -112,6 +113,12 @@ function V1DealPageInner() {
     if (!urlDealId || deal) return;
     setDeal({ id: urlDealId });
     void refreshBatchUploadCount(urlDealId);
+    // Initial setDeal above only has `id` (from the URL param) — rehydrate the
+    // rest of the row (name, currency, etc.) from the backend so an existing
+    // deal opened by URL isn't missing fields a freshly-created deal already has.
+    getDeal(urlDealId)
+      .then(({ deal: fullDeal }) => setDeal((prev) => (prev ? { ...prev, ...fullDeal } : fullDeal)))
+      .catch((e) => console.error('getDeal failed:', e));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
