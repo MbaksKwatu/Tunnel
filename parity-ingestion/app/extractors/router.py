@@ -15,7 +15,9 @@ from typing import Optional, Union
 from app.extractors.kcb_extractor import detect_kcb, extract_kcb_pdf, detect_kcb_online, extract_kcb_online_pdf
 from app.extractors.ncba_extractor import detect_ncba, extract_ncba_pdf
 from app.extractors.equity_extractor import detect_equity, extract_equity_pdf, detect_equity_clms, extract_equity_clms_pdf
-from app.extractors.absa_extractor import detect_absa, extract_absa_pdf
+from app.extractors.absa_extractor import detect_absa
+from app.extractors.layout_config import LayoutConfig, detect_by_config, extract_pdf_by_config
+from app.extractors.configs import ABSA_CONFIG
 from app.extractors.coop_extractor import detect_coop, extract_coop_pdf
 from app.extractors.mpesa_pdf_extractor import detect_mpesa_pdf, extract_mpesa_pdf
 from app.extractors.stanbic_extractor import detect_stanbic, extract_stanbic_pdf
@@ -80,7 +82,7 @@ def route_extract(file_path: str) -> Union[ExtractionResult, dict]:
     if detect_equity(file_path):
         return extract_equity_pdf(file_path)
     if detect_absa(file_path):
-        return extract_absa_pdf(file_path)
+        return extract_pdf_by_config(file_path, ABSA_CONFIG)
     if detect_coop(file_path):
         return extract_coop_pdf(file_path)
     if detect_mpesa_pdf(file_path):

@@ -1,0 +1,19 @@
+{
+  "bank_name": "ABSA Bank Kenya",
+  "extractor_type": "absa_pdf",
+  "detection_text_markers": ["Absa Bank Kenya", "absa.kenya@absa.africa"],
+  "date_format": "%d/%m/%Y",
+  "column_bounds": [
+    {"field": "date", "x_max": 120.0},
+    {"field": "description", "x_max": 400.0},
+    {"field": "debit", "x_max": 465.0},
+    {"field": "credit", "x_max": 515.0},
+    {"field": "balance", "x_max": 1.0e308}
+  ],
+  "header_skip_phrases": ["TXN DATE", "DATE", "DESCRIPTION"],
+  "footer_skip_phrases": [
+    ["PAGE", "OF"], "CONTINUED", "MARKETING",
+    "absa.kenya@absa.africa", "KEEP THIS STATEMENT"
+  ],
+  "row_tolerance": 5.0
+}
