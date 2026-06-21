@@ -20,7 +20,14 @@ jobs:
       # `vercel deploy --prod` does the build AND the promotion in one
       # deterministic step, same as the manual command that fixed this
       # once already — now it runs on every push instead of by hand.
+      # Pinned, not @latest: 54.14.5 added multi-service monorepo
+      # auto-detection that saw this repo's Next.js root + backend/
+      # FastAPI app and tried to derive a composite service name
+      # containing "---", which Vercel rejects outright (400,
+      # "cannot contain the sequence '---'"). 52.0.0 is what was
+      # actually tested manually against this exact project/repo
+      # before this workflow was written — use what was verified.
       - name: Install Vercel CLI
-        run: npm install -g vercel@latest
+        run: npm install -g vercel@52.0.0
       - name: Deploy to Vercel production (staging project)
         run: vercel deploy --prod --yes --token=${{ secrets.VERCEL_TOKEN }}
