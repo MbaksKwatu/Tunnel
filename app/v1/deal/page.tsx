@@ -25,6 +25,8 @@ import {
   listDeals,
   getMonthlyCashflow,
   getReconciliation,
+  getDeal,
+  downloadReport,
 } from '@/lib/v1-api';
 import type { DealListItem } from '@/lib/v1-api';
 import { BatchUpload } from '@/components/BatchUpload';
@@ -41,10 +43,6 @@ import type {
   AuditedFinancialsRecord,
   ReconciliationSection,
 } from '@/lib/v1-api';
-// generateParityPdf is loaded dynamically at click time so Next.js never
-// evaluates jsPDF's Node.js build during server compilation.
-type GeneratePdfFn = typeof import('@/lib/generate-parity-pdf').generateParityPdf;
-
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'KES', 'NGN'];
 const MAX_STATEMENTS = 20;
 
@@ -112,6 +110,12 @@ function V1DealPageInner() {
     if (!urlDealId || deal) return;
     setDeal({ id: urlDealId });
     void refreshBatchUploadCount(urlDealId);
+    // Initial setDeal above only has `id` (from the URL param) — rehydrate the
+    // rest of the row (name, currency, etc.) from the backend so an existing
+    // deal opened by URL isn't missing fields a freshly-created deal already has.
+    getDeal(urlDealId)
+      .then(({ deal: fullDeal }) => setDeal((prev) => (prev ? { ...prev, ...fullDeal } : fullDeal)))
+      .catch((e) => console.error('getDeal failed:', e));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
@@ -601,101 +605,17 @@ function V1DealPageInner() {
       }
       setAnalysisState('done');
 
-      // Build entity breakdown from the freshly returned data to pass to PDF (same logic as entityBreakdownByCategory)
-      const freshEntities = data.entities ?? [];
-      const freshTxnMap = data.txn_entity_map ?? [];
-      const byEntity: Record<string, { name: string; role: string; totalCents: number; count: number }> = {};
-      const txnById: Record<string, number> = {};
-      for (const t of rawTransactions) {
-        const amt = Math.abs(Number(t.signed_amount_cents ?? 0));
-        const tid = t.txn_id as string;
-        const id = t.id as string | undefined;
-        txnById[tid] = amt;
-        if (id) txnById[id] = amt;
-      }
-      for (const m of freshTxnMap) {
-        const eid = m.entity_id as string;
-        const ent = freshEntities.find((e) => e.entity_id === eid);
-        const absCents = txnById[m.txn_id as string] ?? 0;
-        if (!byEntity[eid]) {
-          byEntity[eid] = {
-            name: ent?.display_name ?? eid,
-            role: (m.role as string) ?? 'other',
-            totalCents: 0,
-            count: 0,
-          };
-        }
-        byEntity[eid].totalCents += absCents;
-        byEntity[eid].count += 1;
-      }
-      const byRole = new Map<string, Array<{ entityId: string; entityName: string; role: string; totalAbsCents: number; txnCount: number }>>();
-      for (const [entityId, v] of Object.entries(byEntity)) {
-        const list = byRole.get(v.role) ?? [];
-        list.push({
-          entityId,
-          entityName: v.name,
-          role: v.role,
-          totalAbsCents: v.totalCents,
-          txnCount: v.count,
-        });
-        byRole.set(v.role, list);
-      }
-      const pdfBreakdown: Array<EntityBreakdownRow & { pctOfTotal: number }> = [];
-      for (const list of Array.from(byRole.values())) {
-        const sorted = list.sort((a, b) => b.totalAbsCents - a.totalAbsCents);
-        const totalCategoryCents = sorted.reduce((s, r) => s + r.totalAbsCents, 0);
-        let pctBpsList: number[];
-        if (totalCategoryCents <= 0) {
-          pctBpsList = sorted.map(() => 0);
-        } else if (sorted.length === 1) {
-          pctBpsList = [10000];
-        } else {
-          const rawBps = sorted.map((r) => pctBpsFromCents(r.totalAbsCents, totalCategoryCents));
-          pctBpsList = normalizePctBpsTo100(sorted.map((r, i) => ({ totalAbsCents: r.totalAbsCents, pctBps: rawBps[i] })));
-        }
-        for (let i = 0; i < sorted.length; i++) {
-          pdfBreakdown.push({
-            ...sorted[i],
-            pctBps: pctBpsList[i],
-            pctOfTotal: pctBpsList[i] / 100,
-          });
-        }
-      }
-      pdfBreakdown.sort((a, b) => b.totalAbsCents - a.totalAbsCents);
-
-      const pdfTotalOutflow = pdfBreakdown
-        .filter((r) => ['supplier', 'payroll'].includes(r.role))
-        .reduce((s, r) => s + r.totalAbsCents, 0);
-      const pdfPayrollTotal = pdfBreakdown
-        .filter((r) => r.role === 'payroll')
-        .reduce((s, r) => s + r.totalAbsCents, 0);
-      const pdfTopSuppliers = pdfBreakdown.filter((r) => r.role === 'supplier').slice(0, 5);
-      const pdfTopRevenue = pdfBreakdown
-        .filter((r) => ['revenue_operational', 'revenue_non_operational'].includes(r.role))
-        .slice(0, 5);
-      const pdfLargestRevenuePct = pdfBreakdown
-        .filter((r) => ['revenue_operational', 'revenue_non_operational'].includes(r.role))
-        .reduce((max, r) => Math.max(max, r.pctOfTotal), 0);
-
-      const { generateParityPdf } = await import('@/lib/generate-parity-pdf') as { generateParityPdf: GeneratePdfFn };
-      generateParityPdf({
-        deal,
-        run: data.analysis_run,
-        snapshot: data.snapshot,
-        entities: freshEntities,
-        entityBreakdown: pdfBreakdown,
-        overridesList,
-        txCount: rawTransactions.length,
-        currency: currency ?? deal?.currency ?? 'KES',
-        topSuppliers: pdfTopSuppliers,
-        topRevenue: pdfTopRevenue,
-        totalOutflow: pdfTotalOutflow,
-        payrollTotal: pdfPayrollTotal,
-        largestRevenuePct: pdfLargestRevenuePct,
-        monthlyCashflow: monthlyCashflow.length > 0 ? (monthlyCashflow as unknown as import('@/lib/generate-parity-pdf').MonthlyCashflowRow[]) : undefined,
-        creditScoringInputs: creditScoringInputs ? (creditScoringInputs as unknown as import('@/lib/generate-parity-pdf').CreditScoringInputs) : undefined,
-        monthlyEntityBreakdown: monthlyEntityBreakdown.length > 0 ? monthlyEntityBreakdown : undefined,
-      });
+      // PDF now comes from the server-rendered snapshot (QR + verify page +
+      // co-branding), not a client-side rebuild — see GET /deals/{id}/report.
+      const res = await downloadReport(deal.id);
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `parity-snapshot-${deal.id.slice(0, 8)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
 
       setExportSuccess('Snapshot saved. PDF downloading.');
       setTimeout(() => setExportSuccess(''), 5000);
