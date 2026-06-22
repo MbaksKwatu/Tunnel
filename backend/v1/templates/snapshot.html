@@ -82,6 +82,7 @@ body{background:#94A3B8;font-family:var(--sans);-webkit-font-smoothing:antialias
 .ls-a{background:var(--teal-d);color:var(--teal);border:1px solid var(--teal-b)}
 .ls-c{background:rgba(107,114,128,.07);color:var(--grey);border:1px solid var(--rule2)}
 .ls-w{background:var(--amber-d);color:var(--amber);border:1px solid var(--amber-b)}
+.ls-r{background:var(--red-d);color:var(--red);border:1px solid var(--red-b)}
 .rt{width:100%;border-collapse:collapse;font-size:9.5px}
 .rt th{background:var(--ink);color:#fff;padding:6px 9px;text-align:left;font-family:var(--mono);font-size:8px;letter-spacing:.05em;font-weight:500}
 .rt td{padding:9px 9px;border-bottom:1px solid var(--rule);vertical-align:top}
@@ -499,6 +500,39 @@ body{background:#94A3B8;font-family:var(--sans);-webkit-font-smoothing:antialias
     </div>
   </div>
   {% endif %}
+
+  <!-- ACCOUNT COVERAGE — renders in both states -->
+  <div class="sec">
+    <div class="sec-lbl">Account coverage — declared accounts vs submitted
+      {% if account_coverage.available %}<span class="src src-dec">Advisory · {{ account_coverage.advisory_tier | default('--') }}</span>{% else %}<span class="src src-locked">Locked · submit audited financials</span>{% endif %}
+    </div>
+    {% if account_coverage.available %}
+    <div class="lt-foot" style="margin-bottom:8px">
+      <span>Coverage: <b>{{ account_coverage.coverage_pct | default('--') }}%</b></span>
+      <span>Accounts submitted: <b>{{ account_coverage.submitted_count | default(0) }} / {{ account_coverage.declared_count | default(0) }}</b></span>
+      <span>Missing balance: <b>{{ account_coverage.missing_balance_str | default('--') }}</b></span>
+      <span>Advisory: <b>{{ account_coverage.advisory_tier | default('--') }}</b></span>
+    </div>
+    <table class="lt">
+      <thead>
+        <tr><th>Declared account (Note 11)</th><th>Declared balance</th><th>Status</th><th>Materiality</th></tr>
+      </thead>
+      <tbody>
+        {% for a in account_coverage.accounts | default([]) %}
+        <tr>
+          <td>{{ a.bank_name | default('--') }}</td>
+          <td>{{ a.declared_str | default('--') }}</td>
+          <td><span class="ls {{ a.status_class | default('ls-c') }}">{{ a.status_label | default('--') }}</span></td>
+          <td>{{ a.materiality | default('--') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="ds-note" style="margin-top:6px">{{ account_coverage.recommendation | default('') }}</div>
+    {% else %}
+    <div class="ds-note">{{ account_coverage.note | default('') }}</div>
+    {% endif %}
+  </div>
 
   <div class="sec">
     <div class="sec-lbl">Observed patterns — for analyst review <span class="src src-obs">Named · not concluded</span></div>

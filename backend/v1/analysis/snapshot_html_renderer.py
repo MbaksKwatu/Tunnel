@@ -243,6 +243,17 @@ def render_snapshot_html(
     if recon_available:
         recon_section = generate_reconciliation_section(deal_id)
 
+    # 6b. Account coverage advisory — declared accounts (audited Note 11 cash
+    #     breakdown) vs submitted statements. Reuse the value already computed
+    #     inside the reconciliation section when present. In observed-only state
+    #     there are no audited financials to declare accounts against, so the
+    #     advisory is unavailable (calculate_account_coverage requires them) —
+    #     leave it empty and the template renders an "awaiting" stub.
+    if recon_available:
+        acct_cov_raw: Dict = recon_section.get("account_coverage") or {}
+    else:
+        acct_cov_raw = {}
+
     # ── Computed metrics ──────────────────────────────────────────────────────
 
     # Avg monthly revenue
@@ -786,6 +797,42 @@ def render_snapshot_html(
         "w" if recon_tier in ("MEDIUM_CONFIDENCE", "LOW_CONFIDENCE") else ""
     )
 
+    # ── Account coverage section context ─────────────────────────────────────
+    _AC_BADGE = {  # advisory tier → existing .ls badge class (ls-r added to template)
+        "NEGLIGIBLE": "ls-a", "MINOR": "ls-w", "MATERIAL": "ls-w", "CRITICAL": "ls-r",
+    }
+    if acct_cov_raw.get("coverage_pct") is not None:
+        account_coverage_ctx: Dict[str, Any] = {
+            "available":        True,
+            "coverage_pct":     f"{acct_cov_raw.get('coverage_pct', 0):.1f}",
+            "declared_count":   acct_cov_raw.get("declared_accounts_count", 0),
+            "submitted_count":  acct_cov_raw.get("submitted_accounts_count", 0),
+            "missing_count":    acct_cov_raw.get("missing_accounts_count", 0),
+            "missing_balance_str": _fmt_kes(int(acct_cov_raw.get("missing_balance_cents") or 0)),
+            "advisory_tier":    acct_cov_raw.get("advisory_tier", "--"),
+            "advisory_class":   _AC_BADGE.get(acct_cov_raw.get("advisory_tier"), "ls-c"),
+            "recommendation":   acct_cov_raw.get("recommendation", ""),
+            "accounts": [
+                {
+                    "bank_name":    a.get("bank_name") or "--",
+                    "declared_str": _fmt_kes(int(a.get("declared_balance_cents") or 0)),
+                    "status_label": "✓ Submitted" if a.get("status") == "SUBMITTED" else "Missing",
+                    "status_class": "ls-a" if a.get("status") == "SUBMITTED" else "ls-w",
+                    "materiality":  a.get("materiality") or "--",
+                }
+                for a in (acct_cov_raw.get("account_details") or [])
+            ],
+        }
+    else:
+        account_coverage_ctx = {
+            "available": False,
+            "note": (
+                "Account coverage compares the bank accounts declared in audited "
+                "financials (Note 11 cash breakdown) against the statements "
+                "submitted. Submit audited financials to populate this advisory."
+            ),
+        }
+
     # ── Render template ───────────────────────────────────────────────────────
     templates_dir = os.path.join(os.path.dirname(__file__), "..", "templates")
     env = Environment(loader=FileSystemLoader(os.path.abspath(templates_dir)))
@@ -841,6 +888,7 @@ def render_snapshot_html(
         "recon_rows":         recon_rows,
         "recon_fiscal_note":  recon_fiscal_note,
         "patterns":           patterns,
+        "account_coverage":   account_coverage_ctx,
     }
 
     return template.render(**context)
