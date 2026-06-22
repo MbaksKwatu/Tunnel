@@ -1848,6 +1848,9 @@ async def upload_audited_financials(
         },
         "extraction_confidence": int(data.get("extraction_confidence") or 0),
         "sha256_hash": data.get("sha256_hash"),
+        # A fresh extraction always overwrites any prior human confirmation —
+        # the Documents-tab navigation gate re-blocks until explicitly re-saved.
+        "confirmed_at": None,
     }
 
     af_repo = AuditedFinancialsRepo()
@@ -1908,6 +1911,10 @@ def patch_audited_financials(request: Request, deal_id: str, financial_year: int
     """
     Manually update / fill in audited financials fields for a given fiscal year.
     Accepts a partial dict of the patchable fields. Creates the record if it doesn't exist.
+
+    This is the only endpoint the "Save financial details" action calls, so a
+    successful PATCH here is by definition an explicit human confirmation —
+    confirmed_at is always stamped server-side, never trusted from the client.
     """
     from .db.supabase_repositories import AuditedFinancialsRepo
 
@@ -1924,6 +1931,7 @@ def patch_audited_financials(request: Request, deal_id: str, financial_year: int
         "deal_id": deal_id,
         "financial_year": financial_year,
         **patch,
+        "confirmed_at": datetime.now(timezone.utc).isoformat(),
     }
     saved = af_repo.upsert(row)
     return saved
