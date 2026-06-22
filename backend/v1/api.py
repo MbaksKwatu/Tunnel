@@ -1154,8 +1154,15 @@ def get_snapshot_pdf(request: Request, deal_id: str):
         "sha256_hash":          snapshot.get("sha256_hash"),
         "financial_state_hash": snapshot.get("financial_state_hash"),
     }
-    account_coverage = repos["account_coverage"].list_by_deal(deal_id)
-    pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta, account_coverage=account_coverage)
+    # Legacy ReportLab path retired — route through the single snapshot renderer
+    # (snapshot_html_renderer + weasyprint), same engine as GET /deals/{id}/report.
+    # Account coverage now renders inside the HTML snapshot itself.
+    #   account_coverage = repos["account_coverage"].list_by_deal(deal_id)
+    #   pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta, account_coverage=account_coverage)
+    from .analysis.snapshot_html_renderer import render_snapshot_html
+    import weasyprint
+    html = render_snapshot_html(deal_id)
+    pdf_bytes = weasyprint.HTML(string=html).write_pdf()
     filename = f"parity_snapshot_{deal_id}.pdf"
     return StreamingResponse(
         iter([pdf_bytes]),
@@ -1204,8 +1211,17 @@ def get_enriched_pdf(request: Request, deal_id: str, enrichment_id: Optional[str
         "financial_state_hash": snapshot.get("financial_state_hash"),
     }
 
-    account_coverage = repos["account_coverage"].list_by_deal(deal_id)
-    pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta, enrichment, account_coverage=account_coverage)
+    # Legacy ReportLab path retired — route through the single snapshot renderer
+    # (snapshot_html_renderer + weasyprint), same engine as GET /deals/{id}/report.
+    # NOTE: the HTML renderer does not yet carry Section B (analyst enrichment);
+    # this endpoint now returns the base sealed snapshot. Section B parity is a
+    # follow-up before pdf_generator.py can be deleted.
+    #   account_coverage = repos["account_coverage"].list_by_deal(deal_id)
+    #   pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta, enrichment, account_coverage=account_coverage)
+    from .analysis.snapshot_html_renderer import render_snapshot_html
+    import weasyprint
+    html = render_snapshot_html(deal_id)
+    pdf_bytes = weasyprint.HTML(string=html).write_pdf()
     suffix = "_enriched" if enrichment else ""
     filename = f"parity_{deal_id}{suffix}.pdf"
     return StreamingResponse(
