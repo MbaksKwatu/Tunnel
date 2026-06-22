@@ -1811,17 +1811,30 @@ async def upload_audited_financials(
     """
     Upload an audited or management financial statements file for a deal.
 
-    Accepts PDF (native or scanned), CSV, and Excel formats.  Sends the file
-    to parity-ingestion for extraction, then stores the structured data in
-    pds_audited_financials.  Idempotent: re-uploading the same financial year
-    overwrites the previous record.
+    Accepts PDF (native or scanned), CSV, and Excel formats.  Extracts via
+    Claude (native PDF/vision input — see
+    Tunnel/docs/AUDITED_FINANCIALS_EXTRACTION_INVESTIGATION.md sections 8-11),
+    then stores the structured data in pds_audited_financials.  Idempotent:
+    re-uploading the same financial year overwrites the previous record.
 
     ``declaration_type`` must be ``'audited'`` (default) or ``'management'``.
     """
+    import hashlib
+
     from .db.supabase_repositories import AuditedFinancialsRepo
-    from .parsing.audited_financials_client import (
-        extract_audited_financials_via_ingestion,
-        AuditedFinancialsExtractionError,
+
+    # OLD EXTRACTOR — retained for reference and rollback.
+    # No longer called from the ingestion hot path as of 2026-06-22
+    # (feat/wire-claude-extractor-ingestion). Do not remove until Phase 4
+    # (full permanence) is complete. See AUDITED_FINANCIALS_EXTRACTION_INVESTIGATION.md
+    # section 8 for why the Claude-based extractor replaced this path.
+    # from .parsing.audited_financials_client import (
+    #     extract_audited_financials_via_ingestion,
+    #     AuditedFinancialsExtractionError,
+    # )
+    from .parsing.audited_financials_claude_extractor import (
+        extract_audited_financials_claude,
+        ClaudeExtractionError,
     )
 
     if declaration_type not in ("audited", "management"):
@@ -1846,12 +1859,28 @@ async def upload_audited_financials(
     file_bytes = await file.read()
 
     try:
-        data = extract_audited_financials_via_ingestion(file_bytes, filename)
-    except AuditedFinancialsExtractionError as exc:
+        data = extract_audited_financials_claude(file_bytes, filename)
+    except ClaudeExtractionError as exc:
         raise HTTPException(
             status_code=422,
             detail={"status": "PARSE_FAILED", "detail": str(exc)},
         ) from exc
+
+    # pds_audited_financials.financial_year/_start/_end are NOT NULL with no
+    # default (migration 014_pds_audited_financials.sql). The old coordinate
+    # extractor guaranteed these via its own required-field ValueError gate
+    # before ever returning; the Claude extractor has no such gate (it's
+    # explicitly told to return null rather than guess) — so a document Claude
+    # can't date must fail the same clean PARSE_FAILED way, not hit the DB's
+    # NOT NULL constraint as an unhandled 500.
+    if not data.get("financial_year") or not data.get("financial_year_start") or not data.get("financial_year_end"):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "status": "PARSE_FAILED",
+                "detail": "Could not determine the financial year for this document.",
+            },
+        )
 
     af_repo = AuditedFinancialsRepo()
 
@@ -1878,17 +1907,51 @@ async def upload_audited_financials(
                 },
             )
 
-    # Attach deal FK and declaration_type; exclude non-column keys
+    # The Claude extractor reports no per-field confidence score by design
+    # (AUDITED_FINANCIALS_EXTRACTION_INVESTIGATION.md section 9.1: "no
+    # confidence score"). Leave the column null rather than fabricate a
+    # number or fall back to a misleading literal 0 — the frontend already
+    # renders null as "manual" (app/v1/deal/page.tsx:1324); the human-confirm
+    # gate (confirmed_at) still forces review regardless of this label.
+    _raw_confidence = data.get("extraction_confidence")
+    extraction_confidence = int(_raw_confidence) if _raw_confidence is not None else None
+
+    # pds_audited_financials.sha256_hash has no reader anywhere in the
+    # codebase (grepped) other than this write — it's a content fingerprint,
+    # not the protected canonical/financial_state_hash. The Claude extractor
+    # doesn't compute one, so reproduce the legacy extractor's exact formula
+    # (parity-ingestion/app/extractors/audited_financials_extractor.py:612-618)
+    # here rather than inside the new module, which stays standalone per its
+    # own docstring.
+    _hash_key = (
+        f"{data.get('company_name')}|{data.get('financial_year')}|"
+        f"{data.get('turnover_cents')}|{data.get('profit_after_tax_cents')}|"
+        f"{data.get('cash_and_equivalents_cents')}"
+    )
+    sha256_hash = hashlib.sha256(_hash_key.encode()).hexdigest()
+
+    # Attach deal FK and declaration_type; exclude non-column keys.
+    # currency has a NOT NULL DEFAULT 'KES' (migration 014) — if Claude found
+    # no currency marker anywhere (returns null, by design — never guesses),
+    # omit the key so the column default applies instead of explicitly
+    # writing NULL into a NOT NULL column.
     row = {
         "deal_id": deal_id,
         "declaration_type": declaration_type,
         **{
             k: v
             for k, v in data.items()
-            if k not in ("sha256_hash", "extraction_method")
+            if k not in ("sha256_hash", "extraction_method", "extraction_confidence", "_usage")
+            and not (k == "currency" and v is None)
         },
-        "extraction_confidence": int(data.get("extraction_confidence") or 0),
-        "sha256_hash": data.get("sha256_hash"),
+        "extraction_confidence": extraction_confidence,
+        "sha256_hash": sha256_hash,
+        # pds_audited_financials.extraction_method DEFAULTs to
+        # 'pdfplumber_coordinate' (migration era when that was the only path).
+        # Write the real method so Claude-extracted rows aren't mislabeled as
+        # the legacy extractor — the column default would otherwise silently
+        # claim pdfplumber provenance for every Claude extraction.
+        "extraction_method": data.get("extraction_method") or "claude_sonnet_4_6",
         # A fresh extraction always overwrites any prior human confirmation —
         # the Documents-tab navigation gate re-blocks until explicitly re-saved.
         "confirmed_at": None,
@@ -1896,12 +1959,11 @@ async def upload_audited_financials(
 
     saved = af_repo.upsert(row)
 
-    _conf = int(data.get("extraction_confidence") or 0)
     logger.info(
-        "[API] Saved audited financials deal_id=%s FY=%s confidence=%d%% type=%s",
+        "[API] Saved audited financials deal_id=%s FY=%s confidence=%s type=%s",
         deal_id,
         data.get("financial_year"),
-        _conf,
+        extraction_confidence,
         declaration_type,
     )
 
@@ -1912,7 +1974,7 @@ async def upload_audited_financials(
         "financial_year": data.get("financial_year"),
         "financial_year_start": data.get("financial_year_start"),
         "financial_year_end": data.get("financial_year_end"),
-        "extraction_confidence": int(data.get("extraction_confidence") or 0),
+        "extraction_confidence": extraction_confidence,
         "declaration_type": declaration_type,
         "turnover_cents": data.get("turnover_cents"),
         "profit_after_tax_cents": data.get("profit_after_tax_cents"),
