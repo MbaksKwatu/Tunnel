@@ -356,6 +356,11 @@ def calculate_expense_reconciliation(deal_id: str) -> Dict[str, Any]:
     fiscal_start: str = af["financial_year_start"]
     fiscal_end: str = af["financial_year_end"]
 
+    # Granular cost sub-categories — retained for the gap-explanation narrative
+    # only, NOT summed as the reconciliation input. Summing them mis-states the
+    # comparison whenever the document's expense breakdown does not partition
+    # cleanly into exactly these five fields (an expense line with no matching
+    # field is dropped; a line that maps to two is double-counted).
     cost_fields = [
         "cost_of_sales_cents",
         "operating_costs_cents",
@@ -363,9 +368,18 @@ def calculate_expense_reconciliation(deal_id: str) -> Dict[str, Any]:
         "staff_costs_cents",
         "finance_costs_cents",
     ]
-    declared_expenses_cents = sum(
-        int(af.get(f) or 0) for f in cost_fields
-    )
+
+    # Authoritative reconciliation input: the income statement's OWN stated
+    # total-expenses figure, transcribed verbatim by the extractor. Fall back to
+    # summing the granular sub-categories only when no stated total is present
+    # (legacy pdfplumber extractor, or rows written before migration 018).
+    stated_total = af.get("total_expenses_cents")
+    if stated_total is not None:
+        declared_expenses_cents = int(stated_total)
+        declared_expenses_source = "stated_total"
+    else:
+        declared_expenses_cents = sum(int(af.get(f) or 0) for f in cost_fields)
+        declared_expenses_source = "subcategory_sum"
 
     txns = _get_fiscal_year_transactions(deal_id, fiscal_start, fiscal_end)
 
@@ -387,6 +401,7 @@ def calculate_expense_reconciliation(deal_id: str) -> Dict[str, Any]:
         "fiscal_period": f"{fiscal_start} to {fiscal_end}",
         "bank_outflows_kes": round(bank_outflow_cents / 100, 2),
         "declared_expenses_kes": round(declared_expenses_cents / 100, 2),
+        "declared_expenses_source": declared_expenses_source,
         "gap_kes": round(gap_cents / 100, 2),
         "gap_pct": gap_pct,
         "explanation": (

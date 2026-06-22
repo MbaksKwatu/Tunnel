@@ -547,6 +547,18 @@ class AuditedFinancialsRepo(BaseRepo):
     def get_by_deal_id(self, deal_id: str) -> List[Dict[str, Any]]:
         return self.select_eq("deal_id", deal_id)
 
+    def get_by_deal_year(self, deal_id: str, financial_year: int) -> Optional[Dict[str, Any]]:
+        """Return the single row for (deal_id, financial_year), or None."""
+        res = (
+            self.client.table(self.table)
+            .select("*")
+            .eq("deal_id", deal_id)
+            .eq("financial_year", financial_year)
+            .limit(1)
+            .execute()
+        )
+        return res.data[0] if res.data else None
+
     def patch_coverage_summary(self, deal_id: str, financial_year: int, summary: Dict[str, Any]) -> None:
         self.client.table(self.table).update(summary).eq("deal_id", deal_id).eq("financial_year", financial_year).execute()
 
