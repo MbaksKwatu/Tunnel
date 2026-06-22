@@ -266,6 +266,7 @@ export interface AuditedFinancialsRecord {
   total_expenses_cents?: number | null
   total_liabilities_cents?: number | null
   extraction_confidence?: number
+  confirmed_at?: string | null
 }
 
 export async function uploadAuditedFinancials(

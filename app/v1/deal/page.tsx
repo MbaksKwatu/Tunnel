@@ -148,10 +148,18 @@ function V1DealPageInner() {
   // Chat state moved to ParityReviewChat component for performance
   const [dealDocuments, setDealDocuments] = useState<DocumentListItem[]>([]);
   const [auditedFinancialsList, setAuditedFinancialsList] = useState<AuditedFinancialsRecord[]>([]);
+  // False until the audited-financials fetch for the current deal has resolved
+  // (whether it returned records or confirmed none). The Analysis gate must not
+  // run on an empty list that simply hasn't loaded yet, so the Analysis entry
+  // points stay disabled while this is false.
+  const [auditedFinancialsLoaded, setAuditedFinancialsLoaded] = useState(false);
   const [auditedConfirmForm, setAuditedConfirmForm] = useState<AuditedFinancialsRecord | null>(null);
   const [auditedUploading, setAuditedUploading] = useState(false);
   const [auditedUploadError, setAuditedUploadError] = useState('');
   const [auditedSaving, setAuditedSaving] = useState(false);
+  // Set while the Confirm Extracted Details form is open *because* it's blocking
+  // navigation to Analysis (or a pipeline-init action) — see requestAnalysisAccess.
+  const [pendingGateAction, setPendingGateAction] = useState<'analysis-tab' | 'run-analysis' | null>(null);
   const [declarationType, setDeclarationType] = useState<'audited' | 'management'>('audited');
   const [statementQueue, setStatementQueue] = useState<QueuedStatement[]>([]);
   const [activeTab, setActiveTab] = useState<'documents' | 'analysis' | 'review' | 'queue' | 'snapshot'>('documents');
@@ -240,19 +248,27 @@ function V1DealPageInner() {
     [deal]
   );
 
-  const loadAuditedFinancials = useCallback(async (dealIdOverride?: string) => {
+  const loadAuditedFinancials = useCallback(async (dealIdOverride?: string): Promise<AuditedFinancialsRecord[] | undefined> => {
     const id = dealIdOverride ?? deal?.id;
-    if (!id) return;
+    if (!id) return undefined;
     try {
       const { records } = await getAuditedFinancials(id);
       setAuditedFinancialsList(records);
+      return records;
     } catch {
       // non-fatal
+      return undefined;
+    } finally {
+      // The fetch has resolved one way or the other — the gate can now trust
+      // auditedFinancialsList (empty means genuinely no records for this deal).
+      setAuditedFinancialsLoaded(true);
     }
   }, [deal]);
 
   useEffect(() => {
     if (!deal?.id) return;
+    // New deal: re-gate Analysis until this deal's financials have loaded.
+    setAuditedFinancialsLoaded(false);
     void refreshBatchUploadCount();
     void loadAuditedFinancials();
   }, [deal?.id, refreshBatchUploadCount, loadAuditedFinancials]);
@@ -538,6 +554,27 @@ function V1DealPageInner() {
     }
   };
 
+  // Gate for the Analysis tab + "Initialise analysis pipeline": if any FY record's
+  // extracted financials haven't been explicitly confirmed (confirmed_at IS NULL),
+  // redirect to Documents with that record open in the Confirm Extracted Details
+  // form instead of proceeding. Saving (possibly through several unconfirmed FYs
+  // in turn) completes the original action; Cancel drops it.
+  const requestAnalysisAccess = (action: 'analysis-tab' | 'run-analysis') => {
+    // Don't act on a financials list that hasn't finished loading — the entry
+    // points are disabled (analysisLocked) for exactly this window, but guard
+    // here too so the gate can never run against a transiently-empty list.
+    if (deal && !auditedFinancialsLoaded) return;
+    const unconfirmed = auditedFinancialsList.find((af) => !af.confirmed_at);
+    if (unconfirmed) {
+      setActiveTab('documents');
+      setAuditedConfirmForm({ ...unconfirmed });
+      setPendingGateAction(action);
+      return;
+    }
+    if (action === 'analysis-tab') setActiveTab('analysis');
+    else { setActiveTab('analysis'); void runAnalysis(); }
+  };
+
   const handleDeleteDocument = async (docId: string) => {
     if (!deal) return;
     try {
@@ -807,6 +844,9 @@ function V1DealPageInner() {
   const dealId = deal?.id ?? searchParams.get('deal_id') ?? null;
   const dealShortId = dealId ? dealId.slice(0, 16).toUpperCase() : '—';
   const isProcessing = analysisState === 'uploading' || analysisState === 'polling' || analysisState === 'exporting';
+  // While a deal's financials are still loading, the confirm gate can't yet tell
+  // "no record" from "not loaded" — so the Analysis entry points are disabled.
+  const analysisLocked = !!deal && !auditedFinancialsLoaded;
 
   const bankQueue = statementQueue.filter((item) => docTypeByDocId.current.get(item.id) !== 'audited');
   const auditedQueue = statementQueue.filter((item) => docTypeByDocId.current.get(item.id) === 'audited');
@@ -1054,18 +1094,22 @@ function V1DealPageInner() {
             { label: 'Parity Review', tab: 'review' as const },
             { label: 'Review Queue', tab: 'queue' as const, badge: needsReviewItems.length > 0 ? needsReviewItems.length : undefined },
             { label: 'Snapshot', tab: 'snapshot' as const },
-          ].map((item) => (
+          ].map((item) => {
+            const locked = item.tab === 'analysis' && analysisLocked;
+            return (
             <button
               key={item.tab}
-              onClick={() => setActiveTab(item.tab)}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '9px 16px', background: activeTab === item.tab ? 'rgba(99,102,241,0.1)' : 'transparent', borderLeft: activeTab === item.tab ? '2px solid #6366F1' : '2px solid transparent', border: 'none', color: activeTab === item.tab ? '#A5B4FC' : '#4A5568', fontSize: 13, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left' }}
+              disabled={locked}
+              onClick={() => item.tab === 'analysis' ? requestAnalysisAccess('analysis-tab') : setActiveTab(item.tab)}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '9px 16px', background: activeTab === item.tab ? 'rgba(99,102,241,0.1)' : 'transparent', borderLeft: activeTab === item.tab ? '2px solid #6366F1' : '2px solid transparent', border: 'none', color: activeTab === item.tab ? '#A5B4FC' : '#4A5568', fontSize: 13, fontFamily: "'IBM Plex Sans', sans-serif", cursor: locked ? 'not-allowed' : 'pointer', opacity: locked ? 0.4 : 1, textAlign: 'left' }}
             >
               <span>{item.label}</span>
               {'badge' in item && item.badge != null && (
                 <span style={{ fontSize: 9, fontWeight: 700, color: '#F59E0B', background: 'rgba(245,158,11,0.1)', padding: '1px 5px', borderRadius: 3, fontFamily: "'IBM Plex Mono', monospace" }}>{item.badge}</span>
               )}
             </button>
-          ))}
+            );
+          })}
           <div style={{ margin: '12px 0 4px', padding: '0 16px', fontSize: 9, color: '#2D3748', letterSpacing: '0.1em' }}>DEAL TOOLS</div>
           {['Benchmark', 'Monitor', 'Registry'].map((label) => (
             <div key={label} style={{ padding: '9px 16px', color: '#2D3748', fontSize: 13, borderLeft: '2px solid transparent', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1140,15 +1184,19 @@ function V1DealPageInner() {
 
           {/* Tab nav */}
           <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid #1A2235', marginBottom: 28 }}>
-            {TABS.map((tab) => (
+            {TABS.map((tab) => {
+              const locked = tab === 'analysis' && analysisLocked;
+              return (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
-                style={{ padding: '10px 20px', fontSize: 13, fontWeight: 500, color: activeTab === tab ? '#A5B4FC' : '#4A5568', background: 'transparent', border: 'none', borderBottom: activeTab === tab ? '2px solid #6366F1' : '2px solid transparent', cursor: 'pointer', transition: 'all 0.15s', fontFamily: "'IBM Plex Sans', sans-serif", marginBottom: -1 }}
+                disabled={locked}
+                onClick={() => tab === 'analysis' ? requestAnalysisAccess('analysis-tab') : setActiveTab(tab)}
+                style={{ padding: '10px 20px', fontSize: 13, fontWeight: 500, color: activeTab === tab ? '#A5B4FC' : '#4A5568', background: 'transparent', border: 'none', borderBottom: activeTab === tab ? '2px solid #6366F1' : '2px solid transparent', cursor: locked ? 'not-allowed' : 'pointer', opacity: locked ? 0.4 : 1, transition: 'all 0.15s', fontFamily: "'IBM Plex Sans', sans-serif", marginBottom: -1 }}
               >
                 {TAB_LABELS[tab]}
               </button>
-            ))}
+              );
+            })}
           </div>
 
           {/* ── DOCUMENTS TAB ── */}
@@ -1247,6 +1295,9 @@ function V1DealPageInner() {
                               {af.declaration_type === 'management' && (
                                 <span style={{ fontSize: 9, background: 'rgba(251,191,36,0.15)', color: '#FCD34D', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 3, padding: '1px 5px', letterSpacing: '0.05em' }}>MGMT</span>
                               )}
+                              {!af.confirmed_at && (
+                                <span style={{ fontSize: 9, background: 'rgba(245,158,11,0.12)', color: '#F59E0B', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 3, padding: '1px 5px', letterSpacing: '0.05em' }}>UNCONFIRMED</span>
+                              )}
                             </div>
                             <span style={{ fontSize: 10, color: af.extraction_confidence && af.extraction_confidence >= 70 ? '#4ADE80' : '#F59E0B', fontFamily: "'IBM Plex Mono', monospace" }}>
                               {af.extraction_confidence != null ? `${af.extraction_confidence}% confidence` : 'manual'}
@@ -1311,6 +1362,11 @@ function V1DealPageInner() {
                               <span style={{ fontSize: 9, background: 'rgba(251,191,36,0.15)', color: '#FCD34D', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 3, padding: '2px 6px', letterSpacing: '0.05em' }}>MANAGEMENT</span>
                             )}
                           </div>
+                          {pendingGateAction && (
+                            <div style={{ marginBottom: 12, padding: '8px 10px', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 5, fontSize: 11, color: '#A5B4FC' }}>
+                              Confirm these extracted details before continuing to Analysis.
+                            </div>
+                          )}
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                             {([
                               { key: 'company_name', label: 'Company name', type: 'text', placeholder: 'e.g. Buildex Ltd' },
@@ -1369,11 +1425,23 @@ function V1DealPageInner() {
                                 if (!fy) { alert('Financial year is required'); return; }
                                 setAuditedSaving(true);
                                 try {
-                                  const { financial_year: _fy, deal_id: _did, extraction_confidence: _ec, id: _id, ...patch } = auditedConfirmForm;
+                                  const { financial_year: _fy, deal_id: _did, extraction_confidence: _ec, id: _id, confirmed_at: _ca, ...patch } = auditedConfirmForm;
                                   await patchAuditedFinancials(deal.id, fy, patch);
-                                  await loadAuditedFinancials(deal.id);
+                                  const records = await loadAuditedFinancials(deal.id);
                                   setAuditedConfirmForm(null);
                                   setAuditedUploadError('');
+                                  if (pendingGateAction) {
+                                    const stillUnconfirmed = records?.find((af) => !af.confirmed_at);
+                                    if (stillUnconfirmed) {
+                                      // Another FY's extraction is still unconfirmed — keep the gate open.
+                                      setAuditedConfirmForm({ ...stillUnconfirmed });
+                                    } else {
+                                      const action = pendingGateAction;
+                                      setPendingGateAction(null);
+                                      if (action === 'analysis-tab') setActiveTab('analysis');
+                                      else { setActiveTab('analysis'); void runAnalysis(); }
+                                    }
+                                  }
                                 } catch (err) {
                                   alert(err instanceof Error ? err.message : 'Save failed');
                                 } finally {
@@ -1386,7 +1454,12 @@ function V1DealPageInner() {
                             </button>
                             <button
                               type="button"
-                              onClick={() => { setAuditedConfirmForm(null); setAuditedUploadError(''); }}
+                              onClick={() => {
+                                setAuditedConfirmForm(null);
+                                setAuditedUploadError('');
+                                setPendingGateAction(null);
+                                setActiveTab('documents');
+                              }}
                               style={{ padding: '8px 14px', background: 'transparent', color: '#64748B', border: '1px solid #1E2A3A', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
                             >
                               Cancel
@@ -1421,9 +1494,9 @@ function V1DealPageInner() {
                   {/* CTA */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                     <button
-                      onClick={() => { setActiveTab('analysis'); void runAnalysis(); }}
-                      disabled={statementQueue.length === 0 || queueHasPending || isProcessing}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 20px', background: statementQueue.length === 0 || queueHasPending || isProcessing ? '#1A2235' : '#6366F1', color: statementQueue.length === 0 || queueHasPending || isProcessing ? '#374151' : '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: statementQueue.length === 0 || queueHasPending || isProcessing ? 'not-allowed' : 'pointer', fontFamily: "'IBM Plex Sans', sans-serif", transition: 'background 0.15s' }}
+                      onClick={() => requestAnalysisAccess('run-analysis')}
+                      disabled={statementQueue.length === 0 || queueHasPending || isProcessing || analysisLocked}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 20px', background: statementQueue.length === 0 || queueHasPending || isProcessing || analysisLocked ? '#1A2235' : '#6366F1', color: statementQueue.length === 0 || queueHasPending || isProcessing || analysisLocked ? '#374151' : '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: statementQueue.length === 0 || queueHasPending || isProcessing || analysisLocked ? 'not-allowed' : 'pointer', fontFamily: "'IBM Plex Sans', sans-serif", transition: 'background 0.15s' }}
                     >
                       {isProcessing ? 'Processing…' : 'Initialise analysis pipeline'}
                       {!isProcessing && <span style={{ fontSize: 16 }}>→</span>}
