@@ -79,9 +79,13 @@ class TestConfirmedRecordUploadGuard(unittest.TestCase):
         self.client = TestClient(self.app)
 
         # Patch the extractor and the repo for the whole test.
+        # NOTE (Phase 2): the ingestion hot path now calls the Claude extractor,
+        # not extract_audited_financials_via_ingestion. Only the patch *target*
+        # below changed to follow the new call site — every assertion in this
+        # test (the Fix B 409 confirm-guard behaviour) is unchanged.
         self._patches = [
             patch(
-                "backend.v1.parsing.audited_financials_client.extract_audited_financials_via_ingestion",
+                "backend.v1.parsing.audited_financials_claude_extractor.extract_audited_financials_claude",
                 side_effect=_fake_extraction,
             ),
             patch(
