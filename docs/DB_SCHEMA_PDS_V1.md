@@ -47,3 +47,24 @@
 - Generated column `abs_amount_cents` used for convenience; if portability requires, compute in code instead of DB.
 - Zero signed amounts are rejected (`signed_amount_cents <> 0`).
 - Accrual fields live on `deals` with presence/order checks; used at reconciliation/export time.
+
+## Schema Change Log (pilot)
+
+The `pds_*` schema is frozen during pilot. Any `pds_*` migration promoted to
+`main` must be recorded here in the same PR — this entry is the explicit,
+auditable approval the CI schema-drift guard checks for.
+
+Important: these are DB-only changes that do **not** affect the snapshot
+financial-state payload, so `SCHEMA_VERSION` is intentionally **not** bumped
+(`SCHEMA_VERSION` is hashed into every snapshot; bumping it would rewrite the
+hash of all existing sealed snapshots). `SCHEMA_VERSION` is bumped only when the
+snapshot/determinism engine changes.
+
+| Date | Migration | Table | Change | Type |
+|------|-----------|-------|--------|------|
+| 2026-06-22 | `20260622000000_add_confirmed_at_to_audited_financials.sql` | `pds_audited_financials` | Add `confirmed_at timestamptz null` — explicit human confirmation of extracted financials; backfilled to `updated_at` for pre-existing rows. | Additive (nullable column) |
+| 2026-06-22 | `20260622120000_add_total_expenses_cents_to_audited_financials.sql` | `pds_audited_financials` | Add `total_expenses_cents bigint null` — the income statement's stated total-expenses line; authoritative reconciliation input. | Additive (nullable column) |
+
+All entries above are additive nullable columns on `pds_audited_financials`
+(analyst-uploaded reference data, not part of the hashed snapshot state): no
+drops, no type changes, no impact on `financial_state_hash` / `sha256_hash`.
