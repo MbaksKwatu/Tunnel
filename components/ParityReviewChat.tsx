@@ -114,6 +114,47 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
+  // Persisted analysis state (so reloading the Analysis tab doesn't force re-run)
+  const [localCorpusReady, setLocalCorpusReady] = useState<boolean>(false)
+  const [localTxnTotal, setLocalTxnTotal] = useState<number>(txnTotal)
+  const [localStatementCount, setLocalStatementCount] = useState<number>(statementCount)
+
+  const effectiveCorpusReady = corpusReady || localCorpusReady
+  const effectiveTxnTotal = corpusReady ? txnTotal : localTxnTotal
+  const effectiveStatementCount = corpusReady ? statementCount : localStatementCount
+
+  // Load persisted analysis state on mount
+  useEffect(() => {
+    const key = `parity_analysis_${dealId}`
+    if (typeof window === 'undefined') return
+    try {
+      const raw = localStorage.getItem(key)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (parsed && parsed.ready) {
+          setLocalCorpusReady(true)
+          setLocalTxnTotal(parsed.txnTotal ?? txnTotal)
+          setLocalStatementCount(parsed.statementCount ?? statementCount)
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [dealId, txnTotal, statementCount])
+
+  // When authoritative corpusReady arrives from server, persist it locally
+  useEffect(() => {
+    const key = `parity_analysis_${dealId}`
+    if (corpusReady) {
+      try {
+        localStorage.setItem(key, JSON.stringify({ ready: true, txnTotal, statementCount }))
+        setLocalCorpusReady(true)
+        setLocalTxnTotal(txnTotal)
+        setLocalStatementCount(statementCount)
+      } catch (e) { /* ignore */ }
+    }
+  }, [corpusReady, dealId, txnTotal, statementCount])
+
   // Auto-scroll on new messages
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -123,23 +164,67 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
   useEffect(() => {
     if (!corpusReady || sessionLoaded) return
     setSessionLoaded(true)
+
+    const storageKey = `parity_chat_${dealId}`
+
+    // Try to load cached chat from localStorage first (fast restore when navigating between tabs)
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem(storageKey)
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          if (parsed && Array.isArray(parsed.chatHistory) && parsed.chatHistory.length > 0) {
+            setChatHistory(parsed.chatHistory as ChatMessage[])
+            setConversationHistory(parsed.conversationHistory ?? [])
+            setProactiveTriggered(true) // don't re-trigger proactive since we have history
+            // Continue to try fetching server session and prefer server if it has data
+          }
+        }
+      } catch (e) {
+        // ignore localStorage parse errors
+      }
+    }
+
     ;(async () => {
       try {
         const session = await getParityChatSession(dealId)
         if (session.chat_history && session.chat_history.length > 0) {
+          // Prefer the server session if present (authoritative)
           setChatHistory(session.chat_history as ChatMessage[])
           setConversationHistory(session.conversation_history)
           setProactiveTriggered(true)  // don't re-trigger proactive
+          // Persist authoritative server session locally so subsequent tab switches restore quickly
+          try { if (typeof window !== 'undefined') localStorage.setItem(storageKey, JSON.stringify({ chatHistory: session.chat_history, conversationHistory: session.conversation_history })) } catch (e) { /* ignore */ }
           return
         }
       } catch {
-        // no session — fall through to proactive
+        // no server session — if we already loaded local data above, keep it; otherwise fall through to proactive
       }
-      // No existing session — trigger proactive analysis
+
+      // No existing session from server — if we didn't restore from localStorage above, trigger proactive analysis
+      // (if we did restore local, proactiveTriggered will already be true)
       setProactiveTriggered(true)
       doAsk('start')
     })()
   }, [corpusReady, sessionLoaded, dealId])
+
+  // Persist chat and conversation history locally so switching tabs (client-side navigation) preserves state
+  useEffect(() => {
+    const storageKey = `parity_chat_${dealId}`
+    if (typeof window === 'undefined') return
+    try {
+      const payload = { chatHistory, conversationHistory }
+      // Only write if there is anything to save
+      if ((chatHistory && chatHistory.length > 0) || (conversationHistory && conversationHistory.length > 0)) {
+        localStorage.setItem(storageKey, JSON.stringify(payload))
+      } else {
+        // remove empty state to avoid stale entries
+        localStorage.removeItem(storageKey)
+      }
+    } catch (e) {
+      // ignore storage errors
+    }
+  }, [dealId, chatHistory, conversationHistory])
 
   const doAsk = useCallback(async (overrideMessage?: string) => {
     const message = overrideMessage || question.trim()
@@ -176,6 +261,8 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
     setConversationHistory([])
     setProactiveTriggered(false)
     setSessionLoaded(false)
+    // remove persisted local state
+    try { if (typeof window !== 'undefined') localStorage.removeItem(`parity_chat_${dealId}`) } catch (e) { /* ignore */ }
   }, [dealId])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -212,11 +299,11 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
           <span style={{ fontSize: 15, fontWeight: 700, color: '#CBD5E1', letterSpacing: '0.02em' }}>Parity Review</span>
           <span style={{
             fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', padding: '2px 8px', borderRadius: 3,
-            background: corpusReady ? 'rgba(74,222,128,0.12)' : 'rgba(99,102,241,0.12)',
-            color: corpusReady ? '#4ADE80' : '#818CF8',
-            border: `1px solid ${corpusReady ? 'rgba(74,222,128,0.25)' : 'rgba(99,102,241,0.25)'}`,
+            background: effectiveCorpusReady ? 'rgba(74,222,128,0.12)' : 'rgba(99,102,241,0.12)',
+            color: effectiveCorpusReady ? '#4ADE80' : '#818CF8',
+            border: `1px solid ${effectiveCorpusReady ? 'rgba(74,222,128,0.25)' : 'rgba(99,102,241,0.25)'}`,
           }}>
-            {corpusReady ? 'READY' : 'PENDING'}
+            {effectiveCorpusReady ? 'READY' : 'PENDING'}
           </span>
           {chatHistory.length > 0 && (
             <button
@@ -238,11 +325,11 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
             </div>
           </div>
         )}
-        {corpusReady && chatHistory.length === 0 && !loading && (
+        {effectiveCorpusReady && chatHistory.length === 0 && !loading && (
           <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: '14px 18px', marginBottom: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: '#374151', letterSpacing: '0.08em', marginBottom: 6 }}>CORPUS LOADED</div>
             <div style={{ fontSize: 12, color: '#4A5568', lineHeight: 1.6 }}>
-              {txnTotal > 0 ? `${txnTotal} transactions` : 'Transactions'} across {statementCount || 1} statement{statementCount !== 1 ? 's' : ''} indexed. Ask any question about this borrower&apos;s financial history.
+              {effectiveTxnTotal > 0 ? `${effectiveTxnTotal} transactions` : 'Transactions'} across {effectiveStatementCount || 1} statement{effectiveStatementCount !== 1 ? 's' : ''} indexed. Ask any question about this borrower&apos;s financial history.
             </div>
           </div>
         )}
@@ -316,7 +403,7 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
         </div>
 
         {/* Suggestion chips */}
-        {corpusReady && chatHistory.length <= 1 && !loading && (
+        {effectiveCorpusReady && chatHistory.length <= 1 && !loading && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
             {SUGGESTION_CHIPS.map((chip) => (
               <button

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, memo } from 'react'
 import { getNeedsReview, resolveTransaction, type NeedsReviewItem } from '@/lib/v1-api'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
 const ROLE_OPTIONS = [
   { value: 'supplier', label: 'Supplier', color: '#6366F1' },
@@ -28,7 +29,6 @@ interface Props {
 function ReviewQueue({ dealId, analystInitials, onQueueUpdate }: Props) {
   const [items, setItems] = useState<NeedsReviewItem[]>([])
   const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
   const [selectedRole, setSelectedRole] = useState('supplier')
@@ -39,36 +39,73 @@ function ReviewQueue({ dealId, analystInitials, onQueueUpdate }: Props) {
   const [bulkRole, setBulkRole] = useState('supplier')
   const [bulkResolving, setBulkResolving] = useState(false)
 
-  const fetchItems = useCallback(async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const result = await getNeedsReview(dealId)
-      setItems(result.transactions)
-      setTotal(result.total)
-      onQueueUpdate?.(result.total)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load review queue')
-    } finally {
-      setLoading(false)
-    }
-  }, [dealId, onQueueUpdate])
+  const queryClient = useQueryClient()
 
-  useEffect(() => { fetchItems() }, [fetchItems])
+  // useQuery: use object form to satisfy newer react-query typings
+  const { data, isLoading, isFetching, refetch, error: queryError } = useQuery<{ transactions: NeedsReviewItem[]; total: number }, Error>({
+    queryKey: ['needsReview', dealId],
+    queryFn: () => getNeedsReview(dealId),
+    staleTime: 2 * 60 * 1000,
+  })
+
+  useEffect(() => {
+    if (queryError) setError(queryError.message || 'Failed to load review queue')
+  }, [queryError])
+
+  useEffect(() => {
+    if (data) {
+      setItems(data?.transactions ?? [])
+      setTotal(data?.total ?? 0)
+      onQueueUpdate?.(data?.total ?? 0)
+    }
+  }, [data, onQueueUpdate])
+
+  // helper to toggle bulk selection
+  const toggleBulkItem = useCallback((rowId: string) => {
+    setBulkSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(rowId)) next.delete(rowId)
+      else next.add(rowId)
+      return next
+    })
+  }, [])
+
+  // useMutation: object form and typed generics
+  const resolveMutation = useMutation<
+    { success: boolean; remaining_count: number },
+    Error,
+    { rowId: string; newRole: string }
+  >({
+    mutationFn: ({ rowId, newRole }) => resolveTransaction(dealId, rowId, newRole, analystInitials),
+    onMutate: async ({ rowId }) => {
+      await queryClient.cancelQueries({ queryKey: ['needsReview', dealId] })
+      const previous = queryClient.getQueryData<{ transactions: NeedsReviewItem[]; total: number }>(['needsReview', dealId])
+      if (previous) {
+        queryClient.setQueryData<{ transactions: NeedsReviewItem[]; total: number }>(['needsReview', dealId], {
+          ...previous,
+          transactions: previous.transactions.filter(t => String(t.row_id) !== rowId),
+          total: Math.max(0, previous.total - 1),
+        })
+      }
+      return { previous }
+    },
+    onError: (err: Error, vars, context) => {
+      if ((context as any)?.previous) queryClient.setQueryData(['needsReview', dealId], (context as any).previous)
+      setError(err.message)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['needsReview', dealId] })
+    },
+  })
 
   const handleResolve = async (rowId: string, newRole: string) => {
     setResolving(true)
     try {
-      const result = await resolveTransaction(dealId, rowId, newRole, analystInitials)
-      if (result.success) {
-        setItems(prev => prev.filter(i => (i.row_id as string) !== rowId))
-        setTotal(result.remaining_count)
-        setResolvedCount(prev => prev + 1)
-        setActiveItemId(null)
-        onQueueUpdate?.(result.remaining_count)
-      }
+      await resolveMutation.mutateAsync({ rowId, newRole })
+      setResolvedCount(prev => prev + 1)
+      setActiveItemId(null)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to resolve')
+      // error handled in mutation
     } finally {
       setResolving(false)
     }
@@ -77,35 +114,19 @@ function ReviewQueue({ dealId, analystInitials, onQueueUpdate }: Props) {
   const handleBulkResolve = async () => {
     if (bulkSelected.size === 0) return
     setBulkResolving(true)
-    let lastRemaining = total
-    let successCount = 0
-    for (const rowId of bulkSelected) {
+    const ids = Array.from(bulkSelected)
+    for (const rowId of ids) {
       try {
-        const result = await resolveTransaction(dealId, rowId, bulkRole, analystInitials)
-        if (result.success) {
-          lastRemaining = result.remaining_count
-          successCount++
-        }
-      } catch { /* continue with others */ }
+        await resolveMutation.mutateAsync({ rowId, newRole: bulkRole })
+      } catch {
+        /* continue with others */
+      }
     }
-    setItems(prev => prev.filter(i => !bulkSelected.has(i.row_id as string)))
-    setTotal(lastRemaining)
-    setResolvedCount(prev => prev + successCount)
     setBulkSelected(new Set())
     setBulkResolving(false)
-    onQueueUpdate?.(lastRemaining)
   }
 
-  const toggleBulkItem = (rowId: string) => {
-    setBulkSelected(prev => {
-      const next = new Set(prev)
-      if (next.has(rowId)) next.delete(rowId)
-      else next.add(rowId)
-      return next
-    })
-  }
-
-  if (loading) {
+  if (isLoading || isFetching) {
     return (
       <div style={{ padding: '48px 0', textAlign: 'center' }}>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
@@ -138,7 +159,7 @@ function ReviewQueue({ dealId, analystInitials, onQueueUpdate }: Props) {
             {bulkMode ? 'Cancel bulk' : 'Bulk resolve'}
           </button>
           <button
-            onClick={fetchItems}
+            onClick={() => refetch()}
             style={{ padding: '5px 12px', background: 'transparent', border: '1px solid #1E2A3A', borderRadius: 5, fontSize: 11, color: '#4A5568', cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
           >
             Refresh
@@ -174,7 +195,7 @@ function ReviewQueue({ dealId, analystInitials, onQueueUpdate }: Props) {
         </div>
       )}
 
-      {items.length === 0 && !loading && (
+      {items.length === 0 && !(isLoading || isFetching) && (
         <div style={{ padding: '48px 0', textAlign: 'center' }}>
           <div style={{ fontSize: 13, color: '#4ADE80', fontWeight: 600, marginBottom: 6 }}>All clear</div>
           <div style={{ fontSize: 12, color: '#374151' }}>No items remaining in the review queue.</div>
