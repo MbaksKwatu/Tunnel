@@ -1154,8 +1154,15 @@ def get_snapshot_pdf(request: Request, deal_id: str):
         "sha256_hash":          snapshot.get("sha256_hash"),
         "financial_state_hash": snapshot.get("financial_state_hash"),
     }
-    account_coverage = repos["account_coverage"].list_by_deal(deal_id)
-    pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta, account_coverage=account_coverage)
+    # Legacy ReportLab path retired — route through the single snapshot renderer
+    # (snapshot_html_renderer + weasyprint), same engine as GET /deals/{id}/report.
+    # Account coverage now renders inside the HTML snapshot itself.
+    #   account_coverage = repos["account_coverage"].list_by_deal(deal_id)
+    #   pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta, account_coverage=account_coverage)
+    from .analysis.snapshot_html_renderer import render_snapshot_html
+    import weasyprint
+    html = render_snapshot_html(deal_id)
+    pdf_bytes = weasyprint.HTML(string=html).write_pdf()
     filename = f"parity_snapshot_{deal_id}.pdf"
     return StreamingResponse(
         iter([pdf_bytes]),
@@ -1204,8 +1211,17 @@ def get_enriched_pdf(request: Request, deal_id: str, enrichment_id: Optional[str
         "financial_state_hash": snapshot.get("financial_state_hash"),
     }
 
-    account_coverage = repos["account_coverage"].list_by_deal(deal_id)
-    pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta, enrichment, account_coverage=account_coverage)
+    # Legacy ReportLab path retired — route through the single snapshot renderer
+    # (snapshot_html_renderer + weasyprint), same engine as GET /deals/{id}/report.
+    # NOTE: the HTML renderer does not yet carry Section B (analyst enrichment);
+    # this endpoint now returns the base sealed snapshot. Section B parity is a
+    # follow-up before pdf_generator.py can be deleted.
+    #   account_coverage = repos["account_coverage"].list_by_deal(deal_id)
+    #   pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta, enrichment, account_coverage=account_coverage)
+    from .analysis.snapshot_html_renderer import render_snapshot_html
+    import weasyprint
+    html = render_snapshot_html(deal_id)
+    pdf_bytes = weasyprint.HTML(string=html).write_pdf()
     suffix = "_enriched" if enrichment else ""
     filename = f"parity_{deal_id}{suffix}.pdf"
     return StreamingResponse(
@@ -1837,6 +1853,31 @@ async def upload_audited_financials(
             detail={"status": "PARSE_FAILED", "detail": str(exc)},
         ) from exc
 
+    af_repo = AuditedFinancialsRepo()
+
+    # Permanence guard: never silently overwrite a record a human has already
+    # confirmed (confirmed_at IS NOT NULL). The upsert below is keyed on
+    # (deal_id, financial_year), so without this check a re-upload — including an
+    # accidental duplicate — would clobber confirmed figures that may already
+    # drive a sealed snapshot. Replacing a confirmed record must be deliberate:
+    # the analyst removes the existing record first. (Full SHA-seal immutability
+    # is a separate piece; this is the interim guard.)
+    financial_year = data.get("financial_year")
+    if financial_year is not None:
+        existing = af_repo.get_by_deal_year(deal_id, int(financial_year))
+        if existing and existing.get("confirmed_at"):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "status": "CONFIRMED_RECORD_EXISTS",
+                    "financial_year": int(financial_year),
+                    "detail": (
+                        "A confirmed record exists for this financial year. "
+                        "To replace it, explicitly remove the existing record first."
+                    ),
+                },
+            )
+
     # Attach deal FK and declaration_type; exclude non-column keys
     row = {
         "deal_id": deal_id,
@@ -1848,9 +1889,11 @@ async def upload_audited_financials(
         },
         "extraction_confidence": int(data.get("extraction_confidence") or 0),
         "sha256_hash": data.get("sha256_hash"),
+        # A fresh extraction always overwrites any prior human confirmation —
+        # the Documents-tab navigation gate re-blocks until explicitly re-saved.
+        "confirmed_at": None,
     }
 
-    af_repo = AuditedFinancialsRepo()
     saved = af_repo.upsert(row)
 
     _conf = int(data.get("extraction_confidence") or 0)
@@ -1908,6 +1951,10 @@ def patch_audited_financials(request: Request, deal_id: str, financial_year: int
     """
     Manually update / fill in audited financials fields for a given fiscal year.
     Accepts a partial dict of the patchable fields. Creates the record if it doesn't exist.
+
+    This is the only endpoint the "Save financial details" action calls, so a
+    successful PATCH here is by definition an explicit human confirmation —
+    confirmed_at is always stamped server-side, never trusted from the client.
     """
     from .db.supabase_repositories import AuditedFinancialsRepo
 
@@ -1924,6 +1971,7 @@ def patch_audited_financials(request: Request, deal_id: str, financial_year: int
         "deal_id": deal_id,
         "financial_year": financial_year,
         **patch,
+        "confirmed_at": datetime.now(timezone.utc).isoformat(),
     }
     saved = af_repo.upsert(row)
     return saved

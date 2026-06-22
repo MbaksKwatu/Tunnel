@@ -266,6 +266,28 @@ export interface AuditedFinancialsRecord {
   total_expenses_cents?: number | null
   total_liabilities_cents?: number | null
   extraction_confidence?: number
+  confirmed_at?: string | null
+}
+
+/**
+ * Thrown when an upload is blocked because a human-confirmed record already
+ * exists for the same deal + financial year (HTTP 409). Carries a stable `code`
+ * so the UI can render a named, actionable state instead of a generic failure.
+ */
+export class AuditedFinancialsUploadError extends Error {
+  code: string
+  status: number
+  financialYear?: number | null
+  constructor(
+    message: string,
+    opts: { code: string; status: number; financialYear?: number | null }
+  ) {
+    super(message)
+    this.name = 'AuditedFinancialsUploadError'
+    this.code = opts.code
+    this.status = opts.status
+    this.financialYear = opts.financialYear ?? null
+  }
 }
 
 export async function uploadAuditedFinancials(
@@ -280,7 +302,35 @@ export async function uploadAuditedFinancials(
     method: 'POST',
     body: form,
   })
-  if (!res.ok) throw new Error(await res.text())
+  if (!res.ok) {
+    const bodyText = await res.text()
+    // FastAPI nests structured detail under { detail: {...} }.
+    let detail: unknown = null
+    try {
+      detail = (JSON.parse(bodyText) as { detail?: unknown }).detail
+    } catch {
+      /* non-JSON body — fall through to raw text */
+    }
+    if (
+      res.status === 409 &&
+      detail &&
+      typeof detail === 'object' &&
+      (detail as { status?: string }).status === 'CONFIRMED_RECORD_EXISTS'
+    ) {
+      const d = detail as { detail?: string; financial_year?: number }
+      throw new AuditedFinancialsUploadError(
+        d.detail || 'A confirmed record exists for this financial year.',
+        { code: 'CONFIRMED_RECORD_EXISTS', status: 409, financialYear: d.financial_year }
+      )
+    }
+    const msg =
+      detail && typeof detail === 'object' && (detail as { detail?: string }).detail
+        ? (detail as { detail: string }).detail
+        : typeof detail === 'string'
+          ? detail
+          : bodyText
+    throw new Error(msg)
+  }
   return res.json()
 }
 
