@@ -32,7 +32,7 @@ import io
 import os
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 _BACKEND = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 _ROOT = os.path.abspath(os.path.join(_BACKEND, os.pardir))
@@ -211,6 +211,88 @@ class TestClaudeIngestionScannedPdf(_ClaudeIngestionTestBase):
         self.assertIsNone(row.get("confirmed_at"), "fresh upload must be unconfirmed")
         # currency present on the extraction is honoured.
         self.assertEqual(row["currency"], "KES")
+
+
+class TestClaudeIngestionFailureDistinction(_ClaudeIngestionTestBase):
+    """The 422 response distinguishes a transient rate-limit (retryable) from a
+    genuine parse failure (unreadable document). The 429 -> 422 mapping was
+    originally proven only by a live E2E curl (Maharaji hit the org rate limit);
+    these tests pin it at the endpoint level so CI guards the distinction.
+    """
+
+    def test_rate_limit_returns_extraction_rate_limited(self):
+        from backend.v1.parsing.audited_financials_claude_extractor import (
+            ClaudeRateLimitError,
+        )
+
+        with patch(
+            "backend.v1.parsing.audited_financials_claude_extractor."
+            "extract_audited_financials_claude",
+            side_effect=ClaudeRateLimitError("Claude API rate limit hit for 'x.pdf': 429"),
+        ):
+            resp = self._upload("x.pdf")
+
+        self.assertEqual(resp.status_code, 422, resp.text)
+        detail = resp.json()["detail"]
+        # The new, distinct status — NOT the generic PARSE_FAILED.
+        self.assertEqual(detail["status"], "EXTRACTION_RATE_LIMITED")
+        self.assertNotEqual(detail["status"], "PARSE_FAILED")
+        self.assertIn("retry", detail["detail"].lower())
+
+    def test_genuine_parse_failure_still_returns_parse_failed(self):
+        from backend.v1.parsing.audited_financials_claude_extractor import (
+            ClaudeExtractionError,
+        )
+
+        with patch(
+            "backend.v1.parsing.audited_financials_claude_extractor."
+            "extract_audited_financials_claude",
+            side_effect=ClaudeExtractionError("Claude response for 'x.pdf' was not valid JSON"),
+        ):
+            resp = self._upload("x.pdf")
+
+        self.assertEqual(resp.status_code, 422, resp.text)
+        detail = resp.json()["detail"]
+        # Unreadable document — unchanged status.
+        self.assertEqual(detail["status"], "PARSE_FAILED")
+
+
+class TestExtractorRateLimitMapping(unittest.TestCase):
+    """Extractor level: a real anthropic 429 maps to ClaudeRateLimitError (the
+    type the endpoint keys EXTRACTION_RATE_LIMITED off), while other API errors
+    stay ClaudeExtractionError. No network — the Anthropic client is mocked."""
+
+    def test_anthropic_429_maps_to_rate_limit_error(self):
+        import anthropic
+        import httpx
+
+        from backend.v1.parsing.audited_financials_claude_extractor import (
+            extract_audited_financials_claude,
+            ClaudeRateLimitError,
+            ClaudeExtractionError,
+        )
+
+        resp = httpx.Response(
+            429, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        )
+        rate_limit_exc = anthropic.RateLimitError(
+            "rate_limit_error: 30,000 input tokens per minute", response=resp, body=None
+        )
+
+        fake_client = MagicMock()
+        fake_client.messages.create.side_effect = rate_limit_exc
+
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test-not-real"}), patch(
+            "backend.v1.parsing.audited_financials_claude_extractor.anthropic.Anthropic",
+            return_value=fake_client,
+        ):
+            with self.assertRaises(ClaudeRateLimitError) as ctx:
+                extract_audited_financials_claude(b"%PDF-1.4 fake", "x.pdf")
+
+        # It IS a ClaudeExtractionError subclass (base-class handlers still catch
+        # it), but the distinct subclass is what was raised.
+        self.assertIsInstance(ctx.exception, ClaudeExtractionError)
+        self.assertIs(type(ctx.exception), ClaudeRateLimitError)
 
 
 if __name__ == "__main__":

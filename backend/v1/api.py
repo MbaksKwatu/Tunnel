@@ -1835,6 +1835,7 @@ async def upload_audited_financials(
     from .parsing.audited_financials_claude_extractor import (
         extract_audited_financials_claude,
         ClaudeExtractionError,
+        ClaudeRateLimitError,
     )
 
     if declaration_type not in ("audited", "management"):
@@ -1860,6 +1861,21 @@ async def upload_audited_financials(
 
     try:
         data = extract_audited_financials_claude(file_bytes, filename)
+    except ClaudeRateLimitError as exc:
+        # Transient: the extraction service is rate-limited, not the document.
+        # Distinct status so the UI can prompt a retry instead of telling the
+        # analyst the file is unreadable. Must precede ClaudeExtractionError
+        # (ClaudeRateLimitError is a subclass).
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "status": "EXTRACTION_RATE_LIMITED",
+                "detail": (
+                    "The extraction service is busy right now. "
+                    "Please retry this upload in a moment."
+                ),
+            },
+        ) from exc
     except ClaudeExtractionError as exc:
         raise HTTPException(
             status_code=422,

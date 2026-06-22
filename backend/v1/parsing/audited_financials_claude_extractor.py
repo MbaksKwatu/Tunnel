@@ -177,6 +177,16 @@ class ClaudeExtractionError(Exception):
     """Raised when Claude cannot read or extract from the document at all."""
 
 
+class ClaudeRateLimitError(ClaudeExtractionError):
+    """Raised specifically when the Claude API returns a 429 rate-limit error.
+
+    Transient: the SAME upload is likely to succeed on retry, unlike a genuine
+    parse failure (unreadable document). Subclasses ClaudeExtractionError so
+    existing handlers that catch the base class still catch it; callers that
+    want to surface a retry hint catch this first.
+    """
+
+
 def _media_type_and_kind(file_name: str) -> tuple[str, str]:
     """Return (kind, media_type) where kind is one of: pdf, image, spreadsheet."""
     ext = Path(file_name).suffix.lower()
@@ -279,6 +289,14 @@ def extract_audited_financials_claude(
                 }
             ],
         )
+    except anthropic.RateLimitError as exc:
+        # 429 — transient. Distinct type so the caller can tell a retryable
+        # rate-limit from an unreadable document (both are otherwise just a
+        # failed extraction). Must precede the broad APIError catch below
+        # (RateLimitError is a subclass of APIError).
+        raise ClaudeRateLimitError(
+            f"Claude API rate limit hit for '{file_name}': {exc}"
+        ) from exc
     except anthropic.APIError as exc:
         raise ClaudeExtractionError(f"Claude API call failed for '{file_name}': {exc}") from exc
 
@@ -321,4 +339,8 @@ def extract_audited_financials_claude(
     return data
 
 
-__all__ = ["extract_audited_financials_claude", "ClaudeExtractionError"]
+__all__ = [
+    "extract_audited_financials_claude",
+    "ClaudeExtractionError",
+    "ClaudeRateLimitError",
+]
