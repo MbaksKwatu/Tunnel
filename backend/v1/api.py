@@ -1837,6 +1837,31 @@ async def upload_audited_financials(
             detail={"status": "PARSE_FAILED", "detail": str(exc)},
         ) from exc
 
+    af_repo = AuditedFinancialsRepo()
+
+    # Permanence guard: never silently overwrite a record a human has already
+    # confirmed (confirmed_at IS NOT NULL). The upsert below is keyed on
+    # (deal_id, financial_year), so without this check a re-upload — including an
+    # accidental duplicate — would clobber confirmed figures that may already
+    # drive a sealed snapshot. Replacing a confirmed record must be deliberate:
+    # the analyst removes the existing record first. (Full SHA-seal immutability
+    # is a separate piece; this is the interim guard.)
+    financial_year = data.get("financial_year")
+    if financial_year is not None:
+        existing = af_repo.get_by_deal_year(deal_id, int(financial_year))
+        if existing and existing.get("confirmed_at"):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "status": "CONFIRMED_RECORD_EXISTS",
+                    "financial_year": int(financial_year),
+                    "detail": (
+                        "A confirmed record exists for this financial year. "
+                        "To replace it, explicitly remove the existing record first."
+                    ),
+                },
+            )
+
     # Attach deal FK and declaration_type; exclude non-column keys
     row = {
         "deal_id": deal_id,
@@ -1853,7 +1878,6 @@ async def upload_audited_financials(
         "confirmed_at": None,
     }
 
-    af_repo = AuditedFinancialsRepo()
     saved = af_repo.upsert(row)
 
     _conf = int(data.get("extraction_confidence") or 0)

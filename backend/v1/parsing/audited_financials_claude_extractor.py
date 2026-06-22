@@ -77,6 +77,7 @@ document does not state — never guess, never substitute zero for missing.
   "finance_costs_cents": integer or null (positive magnitude),
   "depreciation_expense_cents": integer or null (positive magnitude),
   "other_expenses_cents": integer or null (positive magnitude),
+  "total_expenses_cents": integer or null (the income statement's OWN stated total expenses / total operating expenses / total costs line, current year, positive magnitude — copy the figure the document actually prints on that total line; do NOT add up the sub-category fields above yourself, and return null if the document shows no such total line),
   "profit_before_tax_cents": integer or null,
   "tax_expense_cents": integer or null (positive magnitude),
   "profit_after_tax_cents": integer or null,
@@ -124,6 +125,10 @@ Field-extraction rules:
 staff_costs_cents, finance_costs_cents, depreciation_expense_cents, other_expenses_cents, \
 tax_expense_cents) must be positive magnitudes even if the document shows them in \
 parentheses or as negative.
+- total_expenses_cents must be the single total-expenses figure the income statement itself \
+prints (e.g. a "Total expenses", "Total operating expenses", or "Total costs" line). Transcribe \
+that stated total verbatim; do not derive it by summing cost_of_sales_cents, operating_costs_cents, \
+etc. If no such total line is printed anywhere, return null — never substitute a self-computed sum.
 - cash_breakdown and loan_breakdown come from the notes to the accounts (the cash/bank note \
 and the borrowings/loans note), not from the face of the balance sheet — only populate them \
 if the document actually contains such a note with a breakdown.

@@ -8,6 +8,7 @@ import {
   createDeal,
   uploadDocument,
   uploadAuditedFinancials,
+  AuditedFinancialsUploadError,
   getAuditedFinancials,
   patchAuditedFinancials,
   getDocumentStatus,
@@ -156,6 +157,10 @@ function V1DealPageInner() {
   const [auditedConfirmForm, setAuditedConfirmForm] = useState<AuditedFinancialsRecord | null>(null);
   const [auditedUploading, setAuditedUploading] = useState(false);
   const [auditedUploadError, setAuditedUploadError] = useState('');
+  // Named 409 state: a re-upload was blocked because a human-confirmed record
+  // already exists for this financial year. Distinct from a generic upload error
+  // — we do NOT fall back to the manual-entry form here.
+  const [auditedConfirmedConflict, setAuditedConfirmedConflict] = useState('');
   const [auditedSaving, setAuditedSaving] = useState(false);
   // Set while the Confirm Extracted Details form is open *because* it's blocking
   // navigation to Analysis (or a pipeline-init action) — see requestAnalysisAccess.
@@ -342,6 +347,7 @@ function V1DealPageInner() {
     if (!deal) return;
     setAuditedUploading(true);
     setAuditedUploadError('');
+    setAuditedConfirmedConflict('');
     try {
       const result = await uploadAuditedFinancials(deal.id, nextFile, declarationType);
       // Pre-populate the confirmation form with extracted fields
@@ -360,6 +366,21 @@ function V1DealPageInner() {
       });
       void loadAuditedFinancials(deal.id);
     } catch (err) {
+      if (
+        err instanceof AuditedFinancialsUploadError &&
+        err.code === 'CONFIRMED_RECORD_EXISTS'
+      ) {
+        // Named state: the existing confirmed record stands. Do NOT open the
+        // manual-entry form — that would invite overwriting confirmed figures.
+        const fy = err.financialYear ? ` (FY ${err.financialYear})` : '';
+        setAuditedConfirmedConflict(
+          `This upload was blocked: a confirmed financial record already exists for this financial year${fy}, ` +
+          `and Parity does not overwrite confirmed figures. ` +
+          `If you intend to replace it, remove the existing confirmed record first, then re-upload. ` +
+          `If this was an accidental re-upload, no action is needed — the existing record is unchanged.`
+        );
+        return;
+      }
       const msg = err instanceof Error ? err.message : 'Upload failed';
       setAuditedUploadError(msg);
       // Still open the form for manual entry
@@ -1342,6 +1363,21 @@ function V1DealPageInner() {
                             formats="PDF · CSV · XLSX · Auto-extracts revenue, cash & FY dates"
                           />
                         )
+                      )}
+
+                      {/* Named state: re-upload blocked over a confirmed record (HTTP 409) */}
+                      {auditedConfirmedConflict && (
+                        <div
+                          role="alert"
+                          style={{ background: '#1C1407', border: '1px solid #F59E0B', borderRadius: 8, padding: 12, marginTop: 8 }}
+                        >
+                          <p style={{ fontSize: 12, fontWeight: 700, color: '#FBBF24', margin: 0 }}>
+                            Confirmed record already exists
+                          </p>
+                          <p style={{ fontSize: 11, color: '#FCD34D', marginTop: 6, marginBottom: 0, lineHeight: 1.5 }}>
+                            {auditedConfirmedConflict}
+                          </p>
+                        </div>
                       )}
 
                       {/* Upload error */}
