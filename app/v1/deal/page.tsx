@@ -11,6 +11,8 @@ import {
   AuditedFinancialsUploadError,
   getAuditedFinancials,
   patchAuditedFinancials,
+  removeAuditedFinancials,
+  AuditedFinancialsRemoveError,
   getDocumentStatus,
   exportSnapshot,
   getDocumentTransactions,
@@ -162,6 +164,12 @@ function V1DealPageInner() {
   // — we do NOT fall back to the manual-entry form here.
   const [auditedConfirmedConflict, setAuditedConfirmedConflict] = useState('');
   const [auditedSaving, setAuditedSaving] = useState(false);
+  // Removal (soft-delete) of a wrongly-uploaded FY record. afRemoveTarget holds
+  // the financial_year currently being removed (its inline confirm panel is open).
+  const [afRemoveTarget, setAfRemoveTarget] = useState<number | null>(null);
+  const [afRemoveReason, setAfRemoveReason] = useState('');
+  const [afRemoveError, setAfRemoveError] = useState('');
+  const [afRemoving, setAfRemoving] = useState(false);
   // Set while the Confirm Extracted Details form is open *because* it's blocking
   // navigation to Analysis (or a pipeline-init action) — see requestAnalysisAccess.
   const [pendingGateAction, setPendingGateAction] = useState<'analysis-tab' | 'run-analysis' | null>(null);
@@ -269,6 +277,40 @@ function V1DealPageInner() {
       setAuditedFinancialsLoaded(true);
     }
   }, [deal]);
+
+  // Soft-remove a wrongly-uploaded FY record. Unconfirmed records remove freely;
+  // confirmed records go through an attributed supersede (reason required), which
+  // the backend enforces too — this UI just surfaces it cleanly.
+  const handleRemoveAuditedFinancials = useCallback(async (af: AuditedFinancialsRecord) => {
+    if (!deal?.id || af.financial_year == null || afRemoving) return;
+    const isConfirmed = !!af.confirmed_at;
+    const reason = afRemoveReason.trim();
+    if (isConfirmed && !reason) {
+      setAfRemoveError('A reason is required to remove a confirmed record.');
+      return;
+    }
+    setAfRemoving(true);
+    setAfRemoveError('');
+    try {
+      await removeAuditedFinancials(deal.id, af.financial_year, {
+        supersede: isConfirmed,
+        reason: reason || undefined,
+      });
+      setAfRemoveTarget(null);
+      setAfRemoveReason('');
+      await loadAuditedFinancials(deal.id);
+    } catch (err) {
+      const msg =
+        err instanceof AuditedFinancialsRemoveError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Could not remove record';
+      setAfRemoveError(msg);
+    } finally {
+      setAfRemoving(false);
+    }
+  }, [deal, afRemoveReason, afRemoving, loadAuditedFinancials]);
 
   useEffect(() => {
     if (!deal?.id) return;
@@ -1338,13 +1380,64 @@ function V1DealPageInner() {
                               <span style={{ fontSize: 11, color: '#94A3B8' }}>Assets: KES {(af.total_assets_cents / 100).toLocaleString()}</span>
                             )}
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => setAuditedConfirmForm({ ...af })}
-                            style={{ marginTop: 8, fontSize: 10, color: '#6366F1', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                          >
-                            Edit details →
-                          </button>
+                          <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 14 }}>
+                            <button
+                              type="button"
+                              onClick={() => setAuditedConfirmForm({ ...af })}
+                              style={{ fontSize: 10, color: '#6366F1', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                            >
+                              Edit details →
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAfRemoveTarget(af.financial_year ?? null);
+                                setAfRemoveReason('');
+                                setAfRemoveError('');
+                              }}
+                              style={{ fontSize: 10, color: '#F87171', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                            >
+                              Remove
+                            </button>
+                          </div>
+
+                          {afRemoveTarget === af.financial_year && (
+                            <div style={{ marginTop: 8, padding: 10, background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 6 }}>
+                              <div style={{ fontSize: 11, color: '#FCA5A5', marginBottom: 6, lineHeight: 1.4 }}>
+                                {af.confirmed_at
+                                  ? `FY ${af.financial_year} is confirmed. Removing it supersedes a confirmed record — this is logged and attributed, and a reason is required.`
+                                  : `Remove FY ${af.financial_year} from this deal? It is taken out of the queue (retained for audit) and the analysis gate re-evaluates.`}
+                              </div>
+                              <input
+                                type="text"
+                                value={afRemoveReason}
+                                onChange={(e) => setAfRemoveReason(e.target.value)}
+                                placeholder={af.confirmed_at ? 'Reason (required)' : 'Reason (optional)'}
+                                style={{ width: '100%', boxSizing: 'border-box', fontSize: 11, padding: '6px 8px', background: '#0A0F1C', border: '1px solid #2D3748', borderRadius: 4, color: '#E2E8F0', marginBottom: 6 }}
+                              />
+                              {afRemoveError && (
+                                <div style={{ fontSize: 10, color: '#F87171', marginBottom: 6 }}>{afRemoveError}</div>
+                              )}
+                              <div style={{ display: 'flex', gap: 8 }}>
+                                <button
+                                  type="button"
+                                  disabled={afRemoving || (!!af.confirmed_at && !afRemoveReason.trim())}
+                                  onClick={() => handleRemoveAuditedFinancials(af)}
+                                  style={{ fontSize: 10, fontWeight: 600, color: '#fff', background: afRemoving || (!!af.confirmed_at && !afRemoveReason.trim()) ? '#7F1D1D' : '#DC2626', border: 'none', borderRadius: 4, padding: '5px 10px', cursor: afRemoving || (!!af.confirmed_at && !afRemoveReason.trim()) ? 'not-allowed' : 'pointer' }}
+                                >
+                                  {afRemoving ? 'Removing…' : af.confirmed_at ? 'Supersede & remove' : 'Remove'}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={afRemoving}
+                                  onClick={() => { setAfRemoveTarget(null); setAfRemoveReason(''); setAfRemoveError(''); }}
+                                  style={{ fontSize: 10, color: '#94A3B8', background: 'none', border: '1px solid #2D3748', borderRadius: 4, padding: '5px 10px', cursor: 'pointer' }}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ))}
 

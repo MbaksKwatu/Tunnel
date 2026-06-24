@@ -64,6 +64,7 @@ snapshot/determinism engine changes.
 |------|-----------|-------|--------|------|
 | 2026-06-22 | `20260622000000_add_confirmed_at_to_audited_financials.sql` | `pds_audited_financials` | Add `confirmed_at timestamptz null` — explicit human confirmation of extracted financials; backfilled to `updated_at` for pre-existing rows. | Additive (nullable column) |
 | 2026-06-22 | `20260622120000_add_total_expenses_cents_to_audited_financials.sql` | `pds_audited_financials` | Add `total_expenses_cents bigint null` — the income statement's stated total-expenses line; authoritative reconciliation input. | Additive (nullable column) |
+| 2026-06-24 | `20260624000000_add_removal_columns_to_audited_financials.sql` (backend mirror `019_add_removal_columns_to_audited_financials.sql`) | `pds_audited_financials` | Add `removed_at timestamptz null`, `removed_reason text null`, `removed_by text null` — soft-delete so a wrongly-uploaded FY record can be removed from the deal queue (all reads filter `removed_at IS NULL`) and retained for audit. Confirmed records removable only via attributed supersede (`?supersede=true` + reason). Partial index `idx_pds_af_active`. | Additive (nullable columns) |
 
 All entries above are additive nullable columns on `pds_audited_financials`
 (analyst-uploaded reference data, not part of the hashed snapshot state): no

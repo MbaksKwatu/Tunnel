@@ -545,16 +545,54 @@ class AuditedFinancialsRepo(BaseRepo):
         return res.data[0] if res.data else data
 
     def get_by_deal_id(self, deal_id: str) -> List[Dict[str, Any]]:
-        return self.select_eq("deal_id", deal_id)
+        """Active (non-removed) records for a deal. Soft-removed rows
+        (removed_at IS NOT NULL) are retained for audit but never read."""
+        res = (
+            self.client.table(self.table)
+            .select("*")
+            .eq("deal_id", deal_id)
+            .is_("removed_at", "null")
+            .execute()
+        )
+        return res.data or []
 
     def get_by_deal_year(self, deal_id: str, financial_year: int) -> Optional[Dict[str, Any]]:
-        """Return the single row for (deal_id, financial_year), or None."""
+        """Return the single ACTIVE row for (deal_id, financial_year), or None.
+        Soft-removed rows are excluded so a removed FY does not block a re-upload
+        via the 409 guard and is not re-removed via the DELETE route."""
         res = (
             self.client.table(self.table)
             .select("*")
             .eq("deal_id", deal_id)
             .eq("financial_year", financial_year)
+            .is_("removed_at", "null")
             .limit(1)
+            .execute()
+        )
+        return res.data[0] if res.data else None
+
+    def soft_delete(
+        self,
+        deal_id: str,
+        financial_year: int,
+        removed_at: str,
+        removed_reason: Optional[str],
+        removed_by: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        """Mark the active (deal_id, financial_year) row removed. Returns the
+        updated row, or None if there was no active row to remove (already
+        removed, or lost a race with a concurrent re-upload). Soft-delete only —
+        the row is retained; reads filter it out via removed_at IS NULL."""
+        res = (
+            self.client.table(self.table)
+            .update({
+                "removed_at": removed_at,
+                "removed_reason": removed_reason,
+                "removed_by": removed_by,
+            })
+            .eq("deal_id", deal_id)
+            .eq("financial_year", financial_year)
+            .is_("removed_at", "null")
             .execute()
         )
         return res.data[0] if res.data else None

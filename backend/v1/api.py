@@ -1971,6 +1971,14 @@ async def upload_audited_financials(
         # A fresh extraction always overwrites any prior human confirmation —
         # the Documents-tab navigation gate re-blocks until explicitly re-saved.
         "confirmed_at": None,
+        # Re-activate the (deal, FY) row if it had been soft-removed: the upsert
+        # below is keyed on (deal_id, financial_year), so without clearing these
+        # the re-uploaded record would stay filtered out as removed. (The 409
+        # guard above already skips removed rows, so a re-upload reaching here is
+        # the deliberate "remove then re-upload" replacement workflow.)
+        "removed_at": None,
+        "removed_reason": None,
+        "removed_by": None,
     }
 
     saved = af_repo.upsert(row)
@@ -2053,6 +2061,115 @@ def patch_audited_financials(request: Request, deal_id: str, financial_year: int
     }
     saved = af_repo.upsert(row)
     return saved
+
+
+@router.delete("/deals/{deal_id}/audited-financials/{financial_year}")
+def remove_audited_financials(
+    request: Request,
+    deal_id: str,
+    financial_year: int,
+    supersede: bool = False,
+    body: dict = Body(default=None),
+):
+    """
+    Soft-remove a wrongly-uploaded audited-financials record from a deal's queue.
+
+    Tiered, mirroring the 409 upload guard (upload_audited_financials):
+      • Unconfirmed record (confirmed_at IS NULL) — removed freely; nothing
+        downstream depends on it yet.
+      • Confirmed record (confirmed_at IS NOT NULL) — protected. Blocked with
+        409 CONFIRMED_RECORD_LOCKED unless `?supersede=true` AND a non-empty
+        reason is supplied, in which case it is removed as an attributed
+        supersede. This is the path the upload guard's "remove the existing
+        record first" message points analysts to.
+
+    Soft-delete only: removed_at / removed_reason / removed_by are stamped
+    server-side; the row is retained for audit and filtered out of every read
+    (see AuditedFinancialsRepo.get_by_deal_*). The removal's attribution lives on
+    these columns, NOT in pds_override_log — that log is transaction-classification
+    shaped and is read by override-count / snapshot-basis logic (see override_log
+    usage in this module), so AF removals must not be written there.
+    """
+    from .db.supabase_repositories import AuditedFinancialsRepo
+
+    repos = _repos(request)
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    af_repo = AuditedFinancialsRepo()
+    existing = af_repo.get_by_deal_year(deal_id, int(financial_year))
+    if not existing:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "status": "RECORD_NOT_FOUND",
+                "financial_year": int(financial_year),
+                "detail": "No active audited-financials record for this financial year.",
+            },
+        )
+
+    reason = body.get("reason") if isinstance(body, dict) else None
+    reason = reason.strip() if isinstance(reason, str) and reason.strip() else None
+
+    is_confirmed = existing.get("confirmed_at") is not None
+    if is_confirmed:
+        # Removing a confirmed record must be deliberate and attributed.
+        if not supersede:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "status": "CONFIRMED_RECORD_LOCKED",
+                    "financial_year": int(financial_year),
+                    "detail": (
+                        "This financial year is confirmed. Removing it requires an "
+                        "explicit supersede with a reason."
+                    ),
+                },
+            )
+        if not reason:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "status": "SUPERSEDE_REASON_REQUIRED",
+                    "financial_year": int(financial_year),
+                    "detail": "A reason is required to supersede a confirmed record.",
+                },
+            )
+
+    removed_by = _extract_user_id_from_request(request)
+    removed = af_repo.soft_delete(
+        deal_id,
+        int(financial_year),
+        removed_at=datetime.now(timezone.utc).isoformat(),
+        removed_reason=reason,
+        removed_by=removed_by,
+    )
+    if not removed:
+        # Lost a race with a concurrent removal / re-upload.
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "status": "RECORD_NOT_FOUND",
+                "financial_year": int(financial_year),
+                "detail": "No active record to remove.",
+            },
+        )
+
+    logger.info(
+        "[API] Removed audited financials deal_id=%s FY=%s superseded=%s by=%s reason=%r",
+        deal_id,
+        financial_year,
+        bool(is_confirmed),
+        removed_by or "unknown",
+        reason,
+    )
+
+    return {
+        "status": "REMOVED",
+        "deal_id": deal_id,
+        "financial_year": int(financial_year),
+        "superseded": bool(is_confirmed),
+    }
 
 
 @router.post("/api/request-parser")
