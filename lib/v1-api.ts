@@ -267,6 +267,7 @@ export interface AuditedFinancialsRecord {
   total_liabilities_cents?: number | null
   extraction_confidence?: number
   confirmed_at?: string | null
+  removed_at?: string | null
 }
 
 /**
@@ -284,6 +285,28 @@ export class AuditedFinancialsUploadError extends Error {
   ) {
     super(message)
     this.name = 'AuditedFinancialsUploadError'
+    this.code = opts.code
+    this.status = opts.status
+    this.financialYear = opts.financialYear ?? null
+  }
+}
+
+/**
+ * Thrown when a removal is blocked or under-specified. Codes:
+ *   CONFIRMED_RECORD_LOCKED   (409) — confirmed record, no ?supersede=true
+ *   SUPERSEDE_REASON_REQUIRED (422) — supersede requested without a reason
+ * Carries a stable `code` so the UI can render a named state.
+ */
+export class AuditedFinancialsRemoveError extends Error {
+  code: string
+  status: number
+  financialYear?: number | null
+  constructor(
+    message: string,
+    opts: { code: string; status: number; financialYear?: number | null }
+  ) {
+    super(message)
+    this.name = 'AuditedFinancialsRemoveError'
     this.code = opts.code
     this.status = opts.status
     this.financialYear = opts.financialYear ?? null
@@ -353,6 +376,55 @@ export async function patchAuditedFinancials(
     body: JSON.stringify(fields),
   })
   if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+/**
+ * Soft-remove an audited-financials record from a deal's queue.
+ * Unconfirmed records remove freely. Confirmed records require
+ * `{ supersede: true, reason }` — the backend returns 409 CONFIRMED_RECORD_LOCKED
+ * otherwise, or 422 SUPERSEDE_REASON_REQUIRED if the reason is missing.
+ */
+export async function removeAuditedFinancials(
+  dealId: string,
+  financialYear: number,
+  opts: { supersede?: boolean; reason?: string } = {}
+): Promise<{ status: string; deal_id: string; financial_year: number; superseded: boolean }> {
+  const qs = opts.supersede ? '?supersede=true' : ''
+  const res = await fetchApi(
+    `${BASE}/deals/${dealId}/audited-financials/${financialYear}${qs}`,
+    {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(opts.reason ? { reason: opts.reason } : {}),
+    }
+  )
+  if (!res.ok) {
+    const bodyText = await res.text()
+    let detail: unknown = null
+    try {
+      detail = (JSON.parse(bodyText) as { detail?: unknown }).detail
+    } catch {
+      /* non-JSON body — fall through to raw text */
+    }
+    const d =
+      detail && typeof detail === 'object'
+        ? (detail as { status?: string; detail?: string; financial_year?: number })
+        : null
+    if (res.status === 409 && d?.status === 'CONFIRMED_RECORD_LOCKED') {
+      throw new AuditedFinancialsRemoveError(
+        d.detail || 'This financial year is confirmed and is locked against removal.',
+        { code: 'CONFIRMED_RECORD_LOCKED', status: 409, financialYear: d.financial_year }
+      )
+    }
+    if (res.status === 422 && d?.status === 'SUPERSEDE_REASON_REQUIRED') {
+      throw new AuditedFinancialsRemoveError(
+        d.detail || 'A reason is required to supersede a confirmed record.',
+        { code: 'SUPERSEDE_REASON_REQUIRED', status: 422, financialYear: d.financial_year }
+      )
+    }
+    throw new Error(d?.detail || bodyText)
+  }
   return res.json()
 }
 
