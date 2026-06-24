@@ -65,7 +65,9 @@ snapshot/determinism engine changes.
 | 2026-06-22 | `20260622000000_add_confirmed_at_to_audited_financials.sql` | `pds_audited_financials` | Add `confirmed_at timestamptz null` — explicit human confirmation of extracted financials; backfilled to `updated_at` for pre-existing rows. | Additive (nullable column) |
 | 2026-06-22 | `20260622120000_add_total_expenses_cents_to_audited_financials.sql` | `pds_audited_financials` | Add `total_expenses_cents bigint null` — the income statement's stated total-expenses line; authoritative reconciliation input. | Additive (nullable column) |
 | 2026-06-24 | `20260624000000_add_removal_columns_to_audited_financials.sql` (backend mirror `019_add_removal_columns_to_audited_financials.sql`) | `pds_audited_financials` | Add `removed_at timestamptz null`, `removed_reason text null`, `removed_by text null` — soft-delete so a wrongly-uploaded FY record can be removed from the deal queue (all reads filter `removed_at IS NULL`) and retained for audit. Confirmed records removable only via attributed supersede (`?supersede=true` + reason). Partial index `idx_pds_af_active`. | Additive (nullable columns) |
+| 2026-06-24 | `20260624130000_add_confirmed_by_and_confirm_log.sql` (backend mirror `020_add_confirmed_by_and_confirm_log.sql`) | `pds_audited_financials`, **new** `pds_af_confirm_log` | Add `confirmed_by text null` (Supabase user sub of whoever confirmed). Add append-only `pds_af_confirm_log` (deal_id, financial_year, confirmed_by, confirmed_at, source) with owner-scoped insert/select RLS — durable per-event confirmation attribution. **No backfill / no re-running UPDATE** (idempotent re-run per migrator). | Additive (nullable column + new append-only table) |
 
-All entries above are additive nullable columns on `pds_audited_financials`
-(analyst-uploaded reference data, not part of the hashed snapshot state): no
-drops, no type changes, no impact on `financial_state_hash` / `sha256_hash`.
+All entries above are additive (nullable columns on `pds_audited_financials`,
+plus the new append-only `pds_af_confirm_log` audit table) — analyst-uploaded
+reference / attribution data, not part of the hashed snapshot state: no drops, no
+type changes, no impact on `financial_state_hash` / `sha256_hash`.

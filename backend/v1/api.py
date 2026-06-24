@@ -2042,24 +2042,60 @@ def patch_audited_financials(request: Request, deal_id: str, financial_year: int
     successful PATCH here is by definition an explicit human confirmation —
     confirmed_at is always stamped server-side, never trusted from the client.
     """
-    from .db.supabase_repositories import AuditedFinancialsRepo
+    from .db.supabase_repositories import AuditedFinancialsRepo, AfConfirmLogRepo
 
     repos = _repos(request)
     if not repos["deals"].get_deal(deal_id):
         _error("NOT_FOUND", f"Deal {deal_id} not found")
 
+    # A successful PATCH is, by definition, an explicit human confirmation. The
+    # confirm gate's promise is "a human approved this number", so we must record
+    # WHO. Reject a confirm we cannot attribute rather than assert an anonymous
+    # human action — the UI always sends a JWT, so a missing user means something
+    # is wrong, and an unattributable confirmation is exactly the gap this closes.
+    confirmed_by = _extract_user_id_from_request(request)
+    if not confirmed_by:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "status": "CONFIRM_AUTH_REQUIRED",
+                "detail": "Confirming financial details requires an authenticated user.",
+            },
+        )
+
     patch = {k: v for k, v in body.items() if k in _PATCHABLE_AF_FIELDS}
     if not patch:
         _error("BAD_REQUEST", f"No patchable fields provided. Allowed: {sorted(_PATCHABLE_AF_FIELDS)}")
 
+    confirmed_at = datetime.now(timezone.utc).isoformat()
     af_repo = AuditedFinancialsRepo()
     row = {
         "deal_id": deal_id,
         "financial_year": financial_year,
         **patch,
-        "confirmed_at": datetime.now(timezone.utc).isoformat(),
+        "confirmed_at": confirmed_at,
+        "confirmed_by": confirmed_by,
     }
     saved = af_repo.upsert(row)
+
+    # Durable, append-only attribution: one audit row per confirmation event.
+    # A log-write failure must not 500 the user's save — confirmed_by is already
+    # persisted on the AF row (primary attribution); the log is the per-event
+    # trail. Surface failures in logs rather than rolling back the confirmation.
+    try:
+        AfConfirmLogRepo().insert_log({
+            "deal_id": deal_id,
+            "financial_year": financial_year,
+            "confirmed_by": confirmed_by,
+            "confirmed_at": confirmed_at,
+            "source": saved.get("id"),
+        })
+    except Exception:
+        logger.exception(
+            "[API] confirm-log write failed deal_id=%s FY=%s by=%s",
+            deal_id, financial_year, confirmed_by,
+        )
+
     return saved
 
 
