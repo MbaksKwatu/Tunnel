@@ -601,6 +601,21 @@ class AuditedFinancialsRepo(BaseRepo):
         self.client.table(self.table).update(summary).eq("deal_id", deal_id).eq("financial_year", financial_year).execute()
 
 
+class AfConfirmLogRepo(BaseRepo):
+    """Append-only audit trail of audited-financials confirmation events
+    (one row per confirm: who/when/which FY). Insert-only by convention —
+    no update/delete, mirroring the override-log posture."""
+
+    def __init__(self):
+        super().__init__("pds_af_confirm_log")
+
+    def insert_log(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+        return self.insert(entry)
+
+    def list_by_deal(self, deal_id: str) -> List[Dict[str, Any]]:
+        return self.select_eq("deal_id", deal_id)
+
+
 class AccountCoverageRepo(BaseRepo):
     def __init__(self):
         super().__init__("pds_account_coverage")

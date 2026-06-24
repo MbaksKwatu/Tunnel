@@ -13,11 +13,20 @@ Tiers, mirroring the 409 upload guard:
 Runs end-to-end through the real FastAPI routes in backend/v1/api.py; only the
 extractor and the Supabase-backed AuditedFinancialsRepo are patched.
 """
+import base64
 import io
+import json
 import os
 import sys
 import unittest
 from unittest.mock import patch
+
+# Confirming (PATCH) now requires an authenticated user.
+_AUTH = {
+    "Authorization": "Bearer h."
+    + base64.urlsafe_b64encode(json.dumps({"sub": "test-user"}).encode()).rstrip(b"=").decode()
+    + ".s"
+}
 
 _BACKEND = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 _ROOT = os.path.abspath(os.path.join(_BACKEND, os.pardir))
@@ -126,6 +135,7 @@ class TestAuditedFinancialsRemoval(unittest.TestCase):
         return self.client.patch(
             f"/v1/deals/{self.deal_id}/audited-financials/{_FY}",
             json={"turnover_cents": 5_000_00},
+            headers=_AUTH,
         )
 
     def _remove(self, *, supersede=False, reason=None):
