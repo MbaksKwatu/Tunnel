@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { deleteDocument, patchAuditedFinancials } from '@/lib/v1-api';
+import { useState, useCallback } from 'react';
+import { deleteDocument, patchAuditedFinancials,removeAuditedFinancials, AuditedFinancialsRemoveError } from '@/lib/v1-api';
 import type { Deal, AuditedFinancialsRecord } from '@/lib/v1-api';
 import type { AnalysisState, QueuedStatement } from './types';
 
@@ -41,6 +41,8 @@ const FileRow = ({
       setRemoving(false);
     }
   };
+
+  
 
   return (
     <div style={{ borderBottom: '1px solid #1A2235' }}>
@@ -150,6 +152,42 @@ export default function DocumentsTab({
   onInitialiseAnalysis,
   errorMsg,
 }: DocumentsTabProps) {
+  const [afRemoveTarget, setAfRemoveTarget] = useState<number | null>(null);
+  const [afRemoveReason, setAfRemoveReason] = useState('');
+  const [afRemoveError, setAfRemoveError] = useState('');
+  const [afRemoving, setAfRemoving] = useState(false);
+  
+   const handleRemoveAuditedFinancials = useCallback(async (af: AuditedFinancialsRecord) => {
+    if (!deal?.id || af.financial_year == null || afRemoving) return;
+    const isConfirmed = !!af.confirmed_at;
+    const reason = afRemoveReason.trim();
+    if (isConfirmed && !reason) {
+      setAfRemoveError('A reason is required to remove a confirmed record.');
+      return;
+    }
+    setAfRemoving(true);
+    setAfRemoveError('');
+    try {
+      await removeAuditedFinancials(deal.id, af.financial_year, {
+        supersede: isConfirmed,
+        reason: reason || undefined,
+      });
+      setAfRemoveTarget(null);
+      setAfRemoveReason('');
+      await loadAuditedFinancials(deal.id);
+    } catch (err) {
+      const msg =
+        err instanceof AuditedFinancialsRemoveError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Could not remove record';
+      setAfRemoveError(msg);
+    } finally {
+      setAfRemoving(false);
+    }
+  }, [deal, afRemoveReason, afRemoving, loadAuditedFinancials]);
+
   return (
     <div>
       {!deal && (
@@ -235,44 +273,98 @@ export default function DocumentsTab({
               )}
 
               {/* Existing extracted records */}
-              {auditedFinancialsList.map((af) => (
-                <div key={af.financial_year} style={{ background: '#0A0F1C', border: '1px solid #1E2A3A', borderRadius: 6, padding: '10px 12px', marginBottom: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: '#E2E8F0', fontFamily: "'IBM Plex Mono', monospace" }}>
-                        FY {af.financial_year ?? '—'}
+                {auditedFinancialsList.map((af) => (
+                  <div key={af.financial_year} style={{ background: '#0A0F1C', border: '1px solid #1E2A3A', borderRadius: 6, padding: '10px 12px', marginBottom: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: '#E2E8F0', fontFamily: "'IBM Plex Mono', monospace" }}>
+                          FY {af.financial_year ?? '—'}
+                        </span>
+                        {af.declaration_type === 'management' && (
+                          <span style={{ fontSize: 9, background: 'rgba(251,191,36,0.15)', color: '#FCD34D', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 3, padding: '1px 5px', letterSpacing: '0.05em' }}>MGMT</span>
+                        )}
+                        {!af.confirmed_at && (
+                          <span style={{ fontSize: 9, background: 'rgba(245,158,11,0.12)', color: '#F59E0B', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 3, padding: '1px 5px', letterSpacing: '0.05em' }}>UNCONFIRMED</span>
+                        )}
+                      </div>
+                      <span style={{ fontSize: 10, color: af.extraction_confidence && af.extraction_confidence >= 70 ? '#4ADE80' : '#F59E0B', fontFamily: "'IBM Plex Mono', monospace" }}>
+                        {af.extraction_confidence != null ? `${af.extraction_confidence}% confidence` : 'manual'}
                       </span>
-                      {af.declaration_type === 'management' && (
-                        <span style={{ fontSize: 9, background: 'rgba(251,191,36,0.15)', color: '#FCD34D', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 3, padding: '1px 5px', letterSpacing: '0.05em' }}>MGMT</span>
+                    </div>
+                    <div style={{ marginTop: 6, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px' }}>
+                      {af.turnover_cents != null && (
+                        <span style={{ fontSize: 11, color: '#94A3B8' }}>Revenue: KES {(af.turnover_cents / 100).toLocaleString()}</span>
+                      )}
+                      {af.cash_and_equivalents_cents != null && (
+                        <span style={{ fontSize: 11, color: '#94A3B8' }}>Cash: KES {(af.cash_and_equivalents_cents / 100).toLocaleString()}</span>
+                      )}
+                      {af.profit_after_tax_cents != null && (
+                        <span style={{ fontSize: 11, color: '#94A3B8' }}>PAT: KES {(af.profit_after_tax_cents / 100).toLocaleString()}</span>
+                      )}
+                      {af.total_assets_cents != null && (
+                        <span style={{ fontSize: 11, color: '#94A3B8' }}>Assets: KES {(af.total_assets_cents / 100).toLocaleString()}</span>
                       )}
                     </div>
-                    <span style={{ fontSize: 10, color: af.extraction_confidence && af.extraction_confidence >= 70 ? '#4ADE80' : '#F59E0B', fontFamily: "'IBM Plex Mono', monospace" }}>
-                      {af.extraction_confidence != null ? `${af.extraction_confidence}% confidence` : 'manual'}
-                    </span>
+                    <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 14 }}>
+                      <button
+                        type="button"
+                        onClick={() => setAuditedConfirmForm({ ...af })}
+                        style={{ fontSize: 10, color: '#6366F1', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                      >
+                        Edit details →
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAfRemoveTarget(af.financial_year ?? null);
+                          setAfRemoveReason('');
+                          setAfRemoveError('');
+                        }}
+                        style={{ fontSize: 10, color: '#F87171', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+
+                    {afRemoveTarget === af.financial_year && (
+                      <div style={{ marginTop: 8, padding: 10, background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 6 }}>
+                        <div style={{ fontSize: 11, color: '#FCA5A5', marginBottom: 6, lineHeight: 1.4 }}>
+                          {af.confirmed_at
+                            ? `FY ${af.financial_year} is confirmed. Removing it supersedes a confirmed record — this is logged and attributed, and a reason is required.`
+                            : `Remove FY ${af.financial_year} from this deal? It is taken out of the queue (retained for audit) and the analysis gate re-evaluates.`}
+                        </div>
+                        <input
+                          type="text"
+                          value={afRemoveReason}
+                          onChange={(e) => setAfRemoveReason(e.target.value)}
+                          placeholder={af.confirmed_at ? 'Reason (required)' : 'Reason (optional)'}
+                          style={{ width: '100%', boxSizing: 'border-box', fontSize: 11, padding: '6px 8px', background: '#0A0F1C', border: '1px solid #2D3748', borderRadius: 4, color: '#E2E8F0', marginBottom: 6 }}
+                        />
+                        {afRemoveError && (
+                          <div style={{ fontSize: 10, color: '#F87171', marginBottom: 6 }}>{afRemoveError}</div>
+                        )}
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button
+                            type="button"
+                            disabled={afRemoving || (!!af.confirmed_at && !afRemoveReason.trim())}
+                            onClick={() => handleRemoveAuditedFinancials(af)}
+                            style={{ fontSize: 10, fontWeight: 600, color: '#fff', background: afRemoving || (!!af.confirmed_at && !afRemoveReason.trim()) ? '#7F1D1D' : '#DC2626', border: 'none', borderRadius: 4, padding: '5px 10px', cursor: afRemoving || (!!af.confirmed_at && !afRemoveReason.trim()) ? 'not-allowed' : 'pointer' }}
+                          >
+                            {afRemoving ? 'Removing…' : af.confirmed_at ? 'Supersede & remove' : 'Remove'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={afRemoving}
+                            onClick={() => { setAfRemoveTarget(null); setAfRemoveReason(''); setAfRemoveError(''); }}
+                            style={{ fontSize: 10, color: '#94A3B8', background: 'none', border: '1px solid #2D3748', borderRadius: 4, padding: '5px 10px', cursor: 'pointer' }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div style={{ marginTop: 6, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px' }}>
-                    {af.turnover_cents != null && (
-                      <span style={{ fontSize: 11, color: '#94A3B8' }}>Revenue: KES {(af.turnover_cents / 100).toLocaleString()}</span>
-                    )}
-                    {af.cash_and_equivalents_cents != null && (
-                      <span style={{ fontSize: 11, color: '#94A3B8' }}>Cash: KES {(af.cash_and_equivalents_cents / 100).toLocaleString()}</span>
-                    )}
-                    {af.profit_after_tax_cents != null && (
-                      <span style={{ fontSize: 11, color: '#94A3B8' }}>PAT: KES {(af.profit_after_tax_cents / 100).toLocaleString()}</span>
-                    )}
-                    {af.total_assets_cents != null && (
-                      <span style={{ fontSize: 11, color: '#94A3B8' }}>Assets: KES {(af.total_assets_cents / 100).toLocaleString()}</span>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setAuditedConfirmForm({ ...af })}
-                    style={{ marginTop: 8, fontSize: 10, color: '#6366F1', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                  >
-                    Edit details →
-                  </button>
-                </div>
-              ))}
+                ))}
 
               {/* Upload zone */}
               {!auditedConfirmForm && (
