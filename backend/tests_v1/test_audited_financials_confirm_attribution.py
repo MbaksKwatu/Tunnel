@@ -12,8 +12,6 @@ WHO confirmed, durably.
 Runs end-to-end through the real FastAPI routes; AuditedFinancialsRepo and
 AfConfirmLogRepo are patched with in-memory fakes.
 """
-import base64
-import json
 import os
 import sys
 import unittest
@@ -30,16 +28,16 @@ from fastapi.testclient import TestClient
 
 from backend.v1.api import router as v1_router
 from backend.v1.db.memory_repositories import build_memory_repos
+from tests_v1.jwt_test_utils import PUBLIC_JWKS, bearer
 
 _FY = 2025
 _USER = "user-sub-abc123"
 
 
 def _bearer(sub=_USER):
-    """Unsigned JWT whose payload carries `sub`. _extract_user_id_from_request
-    only base64-decodes the payload; it does not verify the signature."""
-    payload = base64.urlsafe_b64encode(json.dumps({"sub": sub}).encode()).rstrip(b"=").decode()
-    return {"Authorization": f"Bearer header.{payload}.sig"}
+    """A genuinely signed ES256 token carrying `sub` (verifies against the
+    patched test JWKS — see setUp)."""
+    return bearer(sub)
 
 
 class _FakeAFRepo:
@@ -90,6 +88,7 @@ class TestConfirmAttribution(unittest.TestCase):
         self._patches = [
             patch("backend.v1.db.supabase_repositories.AuditedFinancialsRepo", _FakeAFRepo),
             patch("backend.v1.db.supabase_repositories.AfConfirmLogRepo", _FakeConfirmLog),
+            patch("backend.v1.api._get_jwks", return_value=PUBLIC_JWKS),
         ]
         for p in self._patches:
             p.start()
