@@ -4,17 +4,21 @@ All money fields: integer cents.  All ratios: integer basis points.
 Snapshot only on explicit POST /v1/deals/{deal_id}/export.
 """
 
-import base64
 import csv
 import io
 import json
 import logging
+import os
+import threading
 import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+import httpx
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request, BackgroundTasks, Body
 from fastapi.responses import StreamingResponse, HTMLResponse
+from jose import jwt as _jose_jwt
+from jose.exceptions import JWTError as _JoseJWTError
 from pypdf import PdfWriter
 
 from .utils.pdf_merge import validate_pdf_count
@@ -222,21 +226,117 @@ def _repos(request: Optional[Request] = None) -> Dict[str, Any]:
 # Deals
 # ===================================================================
 
+# ---------------------------------------------------------------------------
+# Supabase JWT verification (asymmetric ES256 via the project's public JWKS).
+#
+# This project uses Supabase's asymmetric JWT signing keys: the current signing
+# key is ECC P-256 (ES256), and the public key is published at the project's
+# JWKS endpoint. We verify the signature against that public key — there is no
+# shared secret to configure. The JWKS is derived from SUPABASE_URL (already in
+# the environment) and cached with a short TTL; on an unknown `kid` (key
+# rotation) we refetch once before rejecting.
+#
+# The legacy HS256 shared secret is intentionally NOT supported: with a 1-hour
+# access-token expiry and the last HS256 rotation months ago, no live user token
+# is signed with it.
+# ---------------------------------------------------------------------------
+
+_SUPABASE_JWT_ALGORITHMS = ["ES256"]
+_SUPABASE_JWT_AUDIENCE = "authenticated"
+_JWKS_TTL_SECONDS = 600
+
+_jwks_cache: Dict[str, Any] = {"keys": None, "fetched_at": 0.0}
+_jwks_lock = threading.Lock()
+
+
+def _supabase_jwks_url() -> Optional[str]:
+    base = os.getenv("SUPABASE_URL")
+    if not base:
+        return None
+    return base.rstrip("/") + "/auth/v1/.well-known/jwks.json"
+
+
+def _get_jwks(force_refresh: bool = False) -> Optional[dict]:
+    """Return the project JWKS, cached for _JWKS_TTL_SECONDS.
+
+    On fetch failure, falls back to a previously cached copy if available so a
+    transient network blip does not reject every legitimate token.
+    """
+    url = _supabase_jwks_url()
+    if not url:
+        logger.error("[auth] SUPABASE_URL not configured; cannot verify JWTs")
+        return None
+
+    now = time.time()
+    with _jwks_lock:
+        cached = _jwks_cache["keys"]
+        fresh = cached is not None and (now - _jwks_cache["fetched_at"]) < _JWKS_TTL_SECONDS
+        if fresh and not force_refresh:
+            return cached
+        try:
+            resp = httpx.get(url, timeout=5.0)
+            resp.raise_for_status()
+            jwks = resp.json()
+        except Exception:
+            logger.warning("[auth] failed to fetch JWKS from %s; using cached copy if any", url)
+            return cached
+        _jwks_cache["keys"] = jwks
+        _jwks_cache["fetched_at"] = now
+        return jwks
+
+
+def _verify_with_jwks(token: str, kid: Optional[str], jwks: dict) -> Optional[dict]:
+    """Verify the token against the JWK matching `kid`; return claims or None."""
+    keys = (jwks or {}).get("keys") or []
+    key = next((k for k in keys if k.get("kid") == kid), None)
+    if key is None:
+        return None
+    try:
+        return _jose_jwt.decode(
+            token,
+            key,
+            algorithms=_SUPABASE_JWT_ALGORITHMS,
+            audience=_SUPABASE_JWT_AUDIENCE,
+        )
+    except _JoseJWTError:
+        return None
+
+
 def _extract_user_id_from_request(request: Request) -> Optional[str]:
-    """Decode the Supabase JWT from Authorization header to get the user sub."""
+    """Verify the Supabase JWT signature (ES256 via JWKS) and return the verified sub.
+
+    Centralized so every attribution path (confirmed_by, removed_by, override-log
+    authorship, parity-chat session key, ...) inherits the same signature, expiry,
+    and audience check rather than trusting a base64-decoded-but-unverified payload.
+    A forged or expired token now returns None (rejected) instead of a spoofed sub.
+    """
     auth_header = request.headers.get("authorization", "")
     if not auth_header.startswith("Bearer "):
         return None
     token = auth_header[7:]
+
+    # Read the (untrusted) header only to select the signing key by `kid`.
     try:
-        parts = token.split(".")
-        if len(parts) != 3:
-            return None
-        padding = "=" * (4 - len(parts[1]) % 4)
-        payload = json.loads(base64.urlsafe_b64decode(parts[1] + padding))
-        return payload.get("sub")
-    except Exception:
+        header = _jose_jwt.get_unverified_header(token)
+    except _JoseJWTError:
         return None
+    kid = header.get("kid")
+
+    jwks = _get_jwks()
+    if not jwks:
+        # Fail closed: no keys means we cannot verify, so we trust nothing.
+        return None
+
+    claims = _verify_with_jwks(token, kid, jwks)
+    if claims is None:
+        # Possibly a rotated signing key the cache hasn't seen yet — refetch once.
+        refreshed = _get_jwks(force_refresh=True)
+        if refreshed is not None and refreshed is not jwks:
+            claims = _verify_with_jwks(token, kid, refreshed)
+    if claims is None:
+        return None
+
+    return claims.get("sub")
 
 
 @router.post("/deals")

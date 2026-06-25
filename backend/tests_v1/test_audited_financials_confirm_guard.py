@@ -11,21 +11,11 @@ The extractor and the AuditedFinancialsRepo (Supabase-backed in production) are
 patched; everything else runs through the genuine endpoint code in
 backend/v1/api.py so the guard ordering is covered.
 """
-import base64
 import io
-import json
 import os
 import sys
 import unittest
 from unittest.mock import patch
-
-# Confirming (PATCH) now requires an authenticated user; an unsigned JWT whose
-# payload carries `sub` is enough (the handler only base64-decodes the payload).
-_AUTH = {
-    "Authorization": "Bearer h."
-    + base64.urlsafe_b64encode(json.dumps({"sub": "test-user"}).encode()).rstrip(b"=").decode()
-    + ".s"
-}
 
 _BACKEND = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 _ROOT = os.path.abspath(os.path.join(_BACKEND, os.pardir))
@@ -38,6 +28,11 @@ from fastapi.testclient import TestClient
 
 from backend.v1.api import router as v1_router
 from backend.v1.db.memory_repositories import build_memory_repos
+from tests_v1.jwt_test_utils import PUBLIC_JWKS, bearer
+
+# Confirming (PATCH) now requires an authenticated user with a genuinely signed
+# Supabase JWT; this is one (verifies against the patched test JWKS in setUp).
+_AUTH = bearer("test-user")
 
 
 _FY = 2025
@@ -102,6 +97,7 @@ class TestConfirmedRecordUploadGuard(unittest.TestCase):
                 "backend.v1.db.supabase_repositories.AuditedFinancialsRepo",
                 _FakeAFRepo,
             ),
+            patch("backend.v1.api._get_jwks", return_value=PUBLIC_JWKS),
         ]
         for p in self._patches:
             p.start()
