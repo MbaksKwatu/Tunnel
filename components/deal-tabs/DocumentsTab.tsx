@@ -512,8 +512,8 @@ export default function DocumentsTab({
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <button
               onClick={onInitialiseAnalysis}
-              disabled={statementQueue.length === 0 || queueHasPending || isProcessing}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 20px', background: statementQueue.length === 0 || queueHasPending || isProcessing ? '#1A2235' : '#6366F1', color: statementQueue.length === 0 || queueHasPending || isProcessing ? '#374151' : '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: statementQueue.length === 0 || queueHasPending || isProcessing ? 'not-allowed' : 'pointer', fontFamily: "'IBM Plex Sans', sans-serif", transition: 'background 0.15s' }}
+              disabled={statementQueue.length === 0 || queueHasPending || isProcessing || !!auditedConfirmForm}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 20px', background: statementQueue.length === 0 || queueHasPending || isProcessing || !!auditedConfirmForm ? '#1A2235' : '#6366F1', color: statementQueue.length === 0 || queueHasPending || isProcessing || !!auditedConfirmForm ? '#374151' : '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: statementQueue.length === 0 || queueHasPending || isProcessing || !!auditedConfirmForm ? 'not-allowed' : 'pointer', fontFamily: "'IBM Plex Sans', sans-serif", transition: 'background 0.15s' }}
             >
               {isProcessing ? 'Processing…' : 'Initialise analysis pipeline'}
               {!isProcessing && <span style={{ fontSize: 16 }}>→</span>}
@@ -524,6 +524,11 @@ export default function DocumentsTab({
               </span>
             )}
           </div>
+          {auditedConfirmForm && (
+            <div style={{ marginTop: 12, fontSize: 12, color: '#F59E0B', fontFamily: "'IBM Plex Mono', monospace" }}>
+              Save or cancel the financial details form above before initialising analysis.
+            </div>
+          )}
           {errorMsg && <div style={{ marginTop: 12, fontSize: 12, color: '#F87171', fontFamily: "'IBM Plex Mono', monospace" }}>{errorMsg}</div>}
         </>
       )}
