@@ -133,6 +133,7 @@ def extract_kcb_pdf(file_path: str) -> ExtractionResult:
 
             rows = _group_by_line(words, _ROW_TOLERANCE)
             pending: Optional[dict] = None
+            footer_started = False
 
             for row_words in rows:
                 txn_date_parts: List[str] = []
@@ -161,10 +162,21 @@ def extract_kcb_pdf(file_path: str) -> ExtractionResult:
                 desc_str = " ".join(desc_parts).strip()
                 value_date_str = " ".join(value_date_parts).strip()
 
-                if any(phrase in desc_str.upper() for phrase in [
-                    "BALANCE AT PERIOD END",
-                    "PERIOD END"
-                ]):
+                # Once the page-summary footer starts ("Balance at Period
+                # End"), everything after it on this page is footer-only —
+                # including a totals row carrying the *aggregate* money-out/
+                # money-in/balance for the whole statement, which must never
+                # be merged into the last real transaction (PAR-26). PDF
+                # word-extraction sometimes splits "END" across separate
+                # row-groups (e.g. "BALANCE AT PERIOD E" + "ND:"), so this
+                # checks for "BALANCE AT PERIOD" without requiring the full
+                # suffix, and then skips unconditionally until end of page —
+                # a description-only phrase check can't catch the totals row
+                # itself, since it carries no description text at all.
+                if footer_started:
+                    continue
+                if not txn_date_str and "BALANCE AT PERIOD" in desc_str.upper():
+                    footer_started = True
                     continue
 
                 if not txn_date_str and not desc_str and not money_out and not money_in:
