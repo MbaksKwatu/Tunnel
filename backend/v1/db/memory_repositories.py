@@ -141,6 +141,13 @@ class MemoryEntitiesRepo(EntitiesRepository):
     def list_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         return [copy.deepcopy(e) for e in self._store.values() if e.get("deal_id") == deal_id]
 
+    def delete_eq(self, column: str, value: Any) -> None:
+        # Mirrors BaseRepo.delete_eq (and the sibling memory doubles
+        # MemoryTransferLinksRepo / MemoryTxnEntityMapRepo). The export path
+        # calls repos["entities"].delete_eq("deal_id", deal_id) before re-inserting
+        # (api.py); without this the in-memory double diverges from the live repo.
+        self._store = {k: v for k, v in self._store.items() if v.get(column) != value}
+
 
 class MemoryTxnEntityMapRepo(TxnEntityMapRepository):
     def __init__(self):

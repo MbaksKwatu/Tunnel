@@ -1154,8 +1154,15 @@ def get_snapshot_pdf(request: Request, deal_id: str):
         "sha256_hash":          snapshot.get("sha256_hash"),
         "financial_state_hash": snapshot.get("financial_state_hash"),
     }
-    account_coverage = repos["account_coverage"].list_by_deal(deal_id)
-    pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta, account_coverage=account_coverage)
+    # Legacy ReportLab path retired — route through the single snapshot renderer
+    # (snapshot_html_renderer + weasyprint), same engine as GET /deals/{id}/report.
+    # Account coverage now renders inside the HTML snapshot itself.
+    #   account_coverage = repos["account_coverage"].list_by_deal(deal_id)
+    #   pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta, account_coverage=account_coverage)
+    from .analysis.snapshot_html_renderer import render_snapshot_html
+    import weasyprint
+    html = render_snapshot_html(deal_id)
+    pdf_bytes = weasyprint.HTML(string=html).write_pdf()
     filename = f"parity_snapshot_{deal_id}.pdf"
     return StreamingResponse(
         iter([pdf_bytes]),
@@ -1204,8 +1211,17 @@ def get_enriched_pdf(request: Request, deal_id: str, enrichment_id: Optional[str
         "financial_state_hash": snapshot.get("financial_state_hash"),
     }
 
-    account_coverage = repos["account_coverage"].list_by_deal(deal_id)
-    pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta, enrichment, account_coverage=account_coverage)
+    # Legacy ReportLab path retired — route through the single snapshot renderer
+    # (snapshot_html_renderer + weasyprint), same engine as GET /deals/{id}/report.
+    # NOTE: the HTML renderer does not yet carry Section B (analyst enrichment);
+    # this endpoint now returns the base sealed snapshot. Section B parity is a
+    # follow-up before pdf_generator.py can be deleted.
+    #   account_coverage = repos["account_coverage"].list_by_deal(deal_id)
+    #   pdf_bytes = _generate_snapshot_pdf(canonical, snap_meta, enrichment, account_coverage=account_coverage)
+    from .analysis.snapshot_html_renderer import render_snapshot_html
+    import weasyprint
+    html = render_snapshot_html(deal_id)
+    pdf_bytes = weasyprint.HTML(string=html).write_pdf()
     suffix = "_enriched" if enrichment else ""
     filename = f"parity_{deal_id}{suffix}.pdf"
     return StreamingResponse(
@@ -1795,17 +1811,31 @@ async def upload_audited_financials(
     """
     Upload an audited or management financial statements file for a deal.
 
-    Accepts PDF (native or scanned), CSV, and Excel formats.  Sends the file
-    to parity-ingestion for extraction, then stores the structured data in
-    pds_audited_financials.  Idempotent: re-uploading the same financial year
-    overwrites the previous record.
+    Accepts PDF (native or scanned), CSV, and Excel formats.  Extracts via
+    Claude (native PDF/vision input — see
+    Tunnel/docs/AUDITED_FINANCIALS_EXTRACTION_INVESTIGATION.md sections 8-11),
+    then stores the structured data in pds_audited_financials.  Idempotent:
+    re-uploading the same financial year overwrites the previous record.
 
     ``declaration_type`` must be ``'audited'`` (default) or ``'management'``.
     """
+    import hashlib
+
     from .db.supabase_repositories import AuditedFinancialsRepo
-    from .parsing.audited_financials_client import (
-        extract_audited_financials_via_ingestion,
-        AuditedFinancialsExtractionError,
+
+    # OLD EXTRACTOR — retained for reference and rollback.
+    # No longer called from the ingestion hot path as of 2026-06-22
+    # (feat/wire-claude-extractor-ingestion). Do not remove until Phase 4
+    # (full permanence) is complete. See AUDITED_FINANCIALS_EXTRACTION_INVESTIGATION.md
+    # section 8 for why the Claude-based extractor replaced this path.
+    # from .parsing.audited_financials_client import (
+    #     extract_audited_financials_via_ingestion,
+    #     AuditedFinancialsExtractionError,
+    # )
+    from .parsing.audited_financials_claude_extractor import (
+        extract_audited_financials_claude,
+        ClaudeExtractionError,
+        ClaudeRateLimitError,
     )
 
     if declaration_type not in ("audited", "management"):
@@ -1830,35 +1860,134 @@ async def upload_audited_financials(
     file_bytes = await file.read()
 
     try:
-        data = extract_audited_financials_via_ingestion(file_bytes, filename)
-    except AuditedFinancialsExtractionError as exc:
+        data = extract_audited_financials_claude(file_bytes, filename)
+    except ClaudeRateLimitError as exc:
+        # Transient: the extraction service is rate-limited, not the document.
+        # Distinct status so the UI can prompt a retry instead of telling the
+        # analyst the file is unreadable. Must precede ClaudeExtractionError
+        # (ClaudeRateLimitError is a subclass).
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "status": "EXTRACTION_RATE_LIMITED",
+                "detail": (
+                    "The extraction service is busy right now. "
+                    "Please retry this upload in a moment."
+                ),
+            },
+        ) from exc
+    except ClaudeExtractionError as exc:
         raise HTTPException(
             status_code=422,
             detail={"status": "PARSE_FAILED", "detail": str(exc)},
         ) from exc
 
-    # Attach deal FK and declaration_type; exclude non-column keys
+    # pds_audited_financials.financial_year/_start/_end are NOT NULL with no
+    # default (migration 014_pds_audited_financials.sql). The old coordinate
+    # extractor guaranteed these via its own required-field ValueError gate
+    # before ever returning; the Claude extractor has no such gate (it's
+    # explicitly told to return null rather than guess) — so a document Claude
+    # can't date must fail the same clean PARSE_FAILED way, not hit the DB's
+    # NOT NULL constraint as an unhandled 500.
+    if not data.get("financial_year") or not data.get("financial_year_start") or not data.get("financial_year_end"):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "status": "PARSE_FAILED",
+                "detail": "Could not determine the financial year for this document.",
+            },
+        )
+
+    af_repo = AuditedFinancialsRepo()
+
+    # Permanence guard: never silently overwrite a record a human has already
+    # confirmed (confirmed_at IS NOT NULL). The upsert below is keyed on
+    # (deal_id, financial_year), so without this check a re-upload — including an
+    # accidental duplicate — would clobber confirmed figures that may already
+    # drive a sealed snapshot. Replacing a confirmed record must be deliberate:
+    # the analyst removes the existing record first. (Full SHA-seal immutability
+    # is a separate piece; this is the interim guard.)
+    financial_year = data.get("financial_year")
+    if financial_year is not None:
+        existing = af_repo.get_by_deal_year(deal_id, int(financial_year))
+        if existing and existing.get("confirmed_at"):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "status": "CONFIRMED_RECORD_EXISTS",
+                    "financial_year": int(financial_year),
+                    "detail": (
+                        "A confirmed record exists for this financial year. "
+                        "To replace it, explicitly remove the existing record first."
+                    ),
+                },
+            )
+
+    # The Claude extractor reports no per-field confidence score by design
+    # (AUDITED_FINANCIALS_EXTRACTION_INVESTIGATION.md section 9.1: "no
+    # confidence score"). Leave the column null rather than fabricate a
+    # number or fall back to a misleading literal 0 — the frontend already
+    # renders null as "manual" (app/v1/deal/page.tsx:1324); the human-confirm
+    # gate (confirmed_at) still forces review regardless of this label.
+    _raw_confidence = data.get("extraction_confidence")
+    extraction_confidence = int(_raw_confidence) if _raw_confidence is not None else None
+
+    # pds_audited_financials.sha256_hash has no reader anywhere in the
+    # codebase (grepped) other than this write — it's a content fingerprint,
+    # not the protected canonical/financial_state_hash. The Claude extractor
+    # doesn't compute one, so reproduce the legacy extractor's exact formula
+    # (parity-ingestion/app/extractors/audited_financials_extractor.py:612-618)
+    # here rather than inside the new module, which stays standalone per its
+    # own docstring.
+    _hash_key = (
+        f"{data.get('company_name')}|{data.get('financial_year')}|"
+        f"{data.get('turnover_cents')}|{data.get('profit_after_tax_cents')}|"
+        f"{data.get('cash_and_equivalents_cents')}"
+    )
+    sha256_hash = hashlib.sha256(_hash_key.encode()).hexdigest()
+
+    # Attach deal FK and declaration_type; exclude non-column keys.
+    # currency has a NOT NULL DEFAULT 'KES' (migration 014) — if Claude found
+    # no currency marker anywhere (returns null, by design — never guesses),
+    # omit the key so the column default applies instead of explicitly
+    # writing NULL into a NOT NULL column.
     row = {
         "deal_id": deal_id,
         "declaration_type": declaration_type,
         **{
             k: v
             for k, v in data.items()
-            if k not in ("sha256_hash", "extraction_method")
+            if k not in ("sha256_hash", "extraction_method", "extraction_confidence", "_usage")
+            and not (k == "currency" and v is None)
         },
-        "extraction_confidence": int(data.get("extraction_confidence") or 0),
-        "sha256_hash": data.get("sha256_hash"),
+        "extraction_confidence": extraction_confidence,
+        "sha256_hash": sha256_hash,
+        # pds_audited_financials.extraction_method DEFAULTs to
+        # 'pdfplumber_coordinate' (migration era when that was the only path).
+        # Write the real method so Claude-extracted rows aren't mislabeled as
+        # the legacy extractor — the column default would otherwise silently
+        # claim pdfplumber provenance for every Claude extraction.
+        "extraction_method": data.get("extraction_method") or "claude_sonnet_4_6",
+        # A fresh extraction always overwrites any prior human confirmation —
+        # the Documents-tab navigation gate re-blocks until explicitly re-saved.
+        "confirmed_at": None,
+        # Re-activate the (deal, FY) row if it had been soft-removed: the upsert
+        # below is keyed on (deal_id, financial_year), so without clearing these
+        # the re-uploaded record would stay filtered out as removed. (The 409
+        # guard above already skips removed rows, so a re-upload reaching here is
+        # the deliberate "remove then re-upload" replacement workflow.)
+        "removed_at": None,
+        "removed_reason": None,
+        "removed_by": None,
     }
 
-    af_repo = AuditedFinancialsRepo()
     saved = af_repo.upsert(row)
 
-    _conf = int(data.get("extraction_confidence") or 0)
     logger.info(
-        "[API] Saved audited financials deal_id=%s FY=%s confidence=%d%% type=%s",
+        "[API] Saved audited financials deal_id=%s FY=%s confidence=%s type=%s",
         deal_id,
         data.get("financial_year"),
-        _conf,
+        extraction_confidence,
         declaration_type,
     )
 
@@ -1869,7 +1998,7 @@ async def upload_audited_financials(
         "financial_year": data.get("financial_year"),
         "financial_year_start": data.get("financial_year_start"),
         "financial_year_end": data.get("financial_year_end"),
-        "extraction_confidence": int(data.get("extraction_confidence") or 0),
+        "extraction_confidence": extraction_confidence,
         "declaration_type": declaration_type,
         "turnover_cents": data.get("turnover_cents"),
         "profit_after_tax_cents": data.get("profit_after_tax_cents"),
@@ -1908,6 +2037,94 @@ def patch_audited_financials(request: Request, deal_id: str, financial_year: int
     """
     Manually update / fill in audited financials fields for a given fiscal year.
     Accepts a partial dict of the patchable fields. Creates the record if it doesn't exist.
+
+    This is the only endpoint the "Save financial details" action calls, so a
+    successful PATCH here is by definition an explicit human confirmation —
+    confirmed_at is always stamped server-side, never trusted from the client.
+    """
+    from .db.supabase_repositories import AuditedFinancialsRepo, AfConfirmLogRepo
+
+    repos = _repos(request)
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+    # A successful PATCH is, by definition, an explicit human confirmation. The
+    # confirm gate's promise is "a human approved this number", so we must record
+    # WHO. Reject a confirm we cannot attribute rather than assert an anonymous
+    # human action — the UI always sends a JWT, so a missing user means something
+    # is wrong, and an unattributable confirmation is exactly the gap this closes.
+    confirmed_by = _extract_user_id_from_request(request)
+    if not confirmed_by:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "status": "CONFIRM_AUTH_REQUIRED",
+                "detail": "Confirming financial details requires an authenticated user.",
+            },
+        )
+
+    patch = {k: v for k, v in body.items() if k in _PATCHABLE_AF_FIELDS}
+    if not patch:
+        _error("BAD_REQUEST", f"No patchable fields provided. Allowed: {sorted(_PATCHABLE_AF_FIELDS)}")
+
+    confirmed_at = datetime.now(timezone.utc).isoformat()
+    af_repo = AuditedFinancialsRepo()
+    row = {
+        "deal_id": deal_id,
+        "financial_year": financial_year,
+        **patch,
+        "confirmed_at": confirmed_at,
+        "confirmed_by": confirmed_by,
+    }
+    saved = af_repo.upsert(row)
+
+    # Durable, append-only attribution: one audit row per confirmation event.
+    # A log-write failure must not 500 the user's save — confirmed_by is already
+    # persisted on the AF row (primary attribution); the log is the per-event
+    # trail. Surface failures in logs rather than rolling back the confirmation.
+    try:
+        AfConfirmLogRepo().insert_log({
+            "deal_id": deal_id,
+            "financial_year": financial_year,
+            "confirmed_by": confirmed_by,
+            "confirmed_at": confirmed_at,
+            "source": saved.get("id"),
+        })
+    except Exception:
+        logger.exception(
+            "[API] confirm-log write failed deal_id=%s FY=%s by=%s",
+            deal_id, financial_year, confirmed_by,
+        )
+
+    return saved
+
+
+@router.delete("/deals/{deal_id}/audited-financials/{financial_year}")
+def remove_audited_financials(
+    request: Request,
+    deal_id: str,
+    financial_year: int,
+    supersede: bool = False,
+    body: dict = Body(default=None),
+):
+    """
+    Soft-remove a wrongly-uploaded audited-financials record from a deal's queue.
+
+    Tiered, mirroring the 409 upload guard (upload_audited_financials):
+      • Unconfirmed record (confirmed_at IS NULL) — removed freely; nothing
+        downstream depends on it yet.
+      • Confirmed record (confirmed_at IS NOT NULL) — protected. Blocked with
+        409 CONFIRMED_RECORD_LOCKED unless `?supersede=true` AND a non-empty
+        reason is supplied, in which case it is removed as an attributed
+        supersede. This is the path the upload guard's "remove the existing
+        record first" message points analysts to.
+
+    Soft-delete only: removed_at / removed_reason / removed_by are stamped
+    server-side; the row is retained for audit and filtered out of every read
+    (see AuditedFinancialsRepo.get_by_deal_*). The removal's attribution lives on
+    these columns, NOT in pds_override_log — that log is transaction-classification
+    shaped and is read by override-count / snapshot-basis logic (see override_log
+    usage in this module), so AF removals must not be written there.
     """
     from .db.supabase_repositories import AuditedFinancialsRepo
 
@@ -1915,18 +2132,80 @@ def patch_audited_financials(request: Request, deal_id: str, financial_year: int
     if not repos["deals"].get_deal(deal_id):
         _error("NOT_FOUND", f"Deal {deal_id} not found")
 
-    patch = {k: v for k, v in body.items() if k in _PATCHABLE_AF_FIELDS}
-    if not patch:
-        _error("BAD_REQUEST", f"No patchable fields provided. Allowed: {sorted(_PATCHABLE_AF_FIELDS)}")
-
     af_repo = AuditedFinancialsRepo()
-    row = {
+    existing = af_repo.get_by_deal_year(deal_id, int(financial_year))
+    if not existing:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "status": "RECORD_NOT_FOUND",
+                "financial_year": int(financial_year),
+                "detail": "No active audited-financials record for this financial year.",
+            },
+        )
+
+    reason = body.get("reason") if isinstance(body, dict) else None
+    reason = reason.strip() if isinstance(reason, str) and reason.strip() else None
+
+    is_confirmed = existing.get("confirmed_at") is not None
+    if is_confirmed:
+        # Removing a confirmed record must be deliberate and attributed.
+        if not supersede:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "status": "CONFIRMED_RECORD_LOCKED",
+                    "financial_year": int(financial_year),
+                    "detail": (
+                        "This financial year is confirmed. Removing it requires an "
+                        "explicit supersede with a reason."
+                    ),
+                },
+            )
+        if not reason:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "status": "SUPERSEDE_REASON_REQUIRED",
+                    "financial_year": int(financial_year),
+                    "detail": "A reason is required to supersede a confirmed record.",
+                },
+            )
+
+    removed_by = _extract_user_id_from_request(request)
+    removed = af_repo.soft_delete(
+        deal_id,
+        int(financial_year),
+        removed_at=datetime.now(timezone.utc).isoformat(),
+        removed_reason=reason,
+        removed_by=removed_by,
+    )
+    if not removed:
+        # Lost a race with a concurrent removal / re-upload.
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "status": "RECORD_NOT_FOUND",
+                "financial_year": int(financial_year),
+                "detail": "No active record to remove.",
+            },
+        )
+
+    logger.info(
+        "[API] Removed audited financials deal_id=%s FY=%s superseded=%s by=%s reason=%r",
+        deal_id,
+        financial_year,
+        bool(is_confirmed),
+        removed_by or "unknown",
+        reason,
+    )
+
+    return {
+        "status": "REMOVED",
         "deal_id": deal_id,
-        "financial_year": financial_year,
-        **patch,
+        "financial_year": int(financial_year),
+        "superseded": bool(is_confirmed),
     }
-    saved = af_repo.upsert(row)
-    return saved
 
 
 @router.post("/api/request-parser")
