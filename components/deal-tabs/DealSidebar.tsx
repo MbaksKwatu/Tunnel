@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import type { Deal, DealListItem } from '@/lib/v1-api';
+import type { Deal } from '@/lib/v1-api';
 
 export type DealTab = 'documents' | 'analysis' | 'review' | 'queue' | 'snapshot';
 
@@ -10,11 +10,6 @@ export interface DealSidebarProps {
   deal: Deal | null;
   dealName: string;
   dealId: string | null;
-  sidebarDeals: DealListItem[];
-  pinnedDealIds: Set<string>;
-  togglePinDeal: (dealId: string) => void;
-  showDealList: boolean;
-  setShowDealList: (show: boolean) => void;
   activeTab: DealTab;
   setActiveTab: (tab: DealTab) => void;
   needsReviewCount: number;
@@ -24,11 +19,6 @@ export default function DealSidebar({
   deal,
   dealName,
   dealId,
-  sidebarDeals,
-  pinnedDealIds,
-  togglePinDeal,
-  showDealList,
-  setShowDealList,
   activeTab,
   setActiveTab,
   needsReviewCount,
@@ -42,67 +32,13 @@ export default function DealSidebar({
         {dealName && <div style={{ fontSize: 10, color: '#4A5568', marginTop: 6, letterSpacing: '0.08em', background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 4, padding: '3px 8px', display: 'inline-flex', gap: 6 }}>{dealName.toUpperCase()}</div>}
       </div>
       <nav style={{ flex: 1, padding: '12px 0', overflowY: 'auto' }}>
-        {/* Pinned deals + Deals browser */}
         <button
-          onClick={() => setShowDealList(!showDealList)}
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '6px 16px 8px', background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
+          onClick={() => router.push('/deals')}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', padding: '6px 16px 12px', background: 'transparent', border: 'none', cursor: 'pointer', color: '#64748B', fontSize: 12, fontFamily: "'IBM Plex Sans', sans-serif" }}
         >
-          <span style={{ fontSize: 9, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>PINNED</span>
-          <span style={{ fontSize: 9, color: '#374151', fontFamily: "'IBM Plex Mono', monospace" }}>{pinnedDealIds.size > 0 ? pinnedDealIds.size : ''}</span>
+          <span style={{ fontSize: 13 }}>←</span>
+          All deals
         </button>
-        {/* Pinned deals — always visible */}
-        {sidebarDeals.filter(d => pinnedDealIds.has(d.id)).map((d) => {
-          const isActive = deal?.id === d.id;
-          const name = (d.company_name || d.name || 'Untitled') as string;
-          return (
-            <div key={d.id} style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-              <button
-                onClick={() => router.push(`/v1/deal?deal_id=${d.id}`)}
-                style={{ flex: 1, display: 'block', padding: '6px 4px 6px 18px', background: isActive ? 'rgba(99,102,241,0.08)' : 'transparent', borderLeft: isActive ? '2px solid #6366F1' : '2px solid transparent', border: 'none', color: isActive ? '#A5B4FC' : '#64748B', fontSize: 11, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-              >
-                {name}
-              </button>
-              <button
-                onClick={() => togglePinDeal(d.id)}
-                title="Unpin deal"
-                style={{ padding: '2px 8px', background: 'transparent', border: 'none', color: '#2D3748', fontSize: 10, cursor: 'pointer', fontFamily: "'IBM Plex Mono', monospace", flexShrink: 0 }}
-              >x</button>
-            </div>
-          );
-        })}
-
-        {/* All deals overlay */}
-        {showDealList && (
-          <div style={{ margin: '4px 8px', background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 6, overflow: 'hidden' }}>
-            <div style={{ padding: '8px 10px', borderBottom: '1px solid #1A2235', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 9, fontWeight: 700, color: '#374151', letterSpacing: '0.1em' }}>ALL DEALS</span>
-              <button onClick={() => setShowDealList(false)} style={{ background: 'transparent', border: 'none', color: '#374151', fontSize: 12, cursor: 'pointer', padding: 0, lineHeight: 1 }}>x</button>
-            </div>
-            {sidebarDeals.length === 0 && (
-              <div style={{ padding: '10px', fontSize: 11, color: '#2D3748' }}>No deals yet</div>
-            )}
-            {sidebarDeals.map((d) => {
-              const isPinned = pinnedDealIds.has(d.id);
-              const name = (d.company_name || d.name || 'Untitled') as string;
-              return (
-                <div key={d.id} style={{ display: 'flex', alignItems: 'center', padding: '5px 10px', borderBottom: '1px solid #1A2235', gap: 6 }}>
-                  <button
-                    onClick={() => { router.push(`/v1/deal?deal_id=${d.id}`); setShowDealList(false); }}
-                    style={{ flex: 1, background: 'transparent', border: 'none', color: '#64748B', fontSize: 11, cursor: 'pointer', textAlign: 'left', fontFamily: "'IBM Plex Sans', sans-serif", padding: '2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                  >{name}</button>
-                  <button
-                    onClick={() => togglePinDeal(d.id)}
-                    style={{ padding: '2px 6px', background: isPinned ? 'rgba(99,102,241,0.1)' : 'transparent', border: `1px solid ${isPinned ? '#6366F1' : '#1E2A3A'}`, borderRadius: 3, fontSize: 9, color: isPinned ? '#A5B4FC' : '#374151', cursor: 'pointer', fontFamily: "'IBM Plex Mono', monospace", flexShrink: 0 }}
-                  >{isPinned ? 'UNPIN' : 'PIN'}</button>
-                </div>
-              );
-            })}
-            <button
-              onClick={() => { router.push('/deals/new'); setShowDealList(false); }}
-              style={{ display: 'block', width: '100%', padding: '8px 10px', background: 'transparent', border: 'none', color: '#6366F1', fontSize: 11, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left' }}
-            >+ New deal</button>
-          </div>
-        )}
 
         {/* Divider */}
         {deal && <div style={{ margin: '4px 16px 8px', borderTop: '1px solid #1A2235' }} />}

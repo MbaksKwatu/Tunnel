@@ -131,11 +131,6 @@ function V1DealPageInner() {
   // Tracks doc IDs confirmed as "unsupported format" — used to show inline CTA in FileRow
   const [unknownFormatDocIds, setUnknownFormatDocIds] = useState<Set<string>>(new Set());
   const [sidebarDeals, setSidebarDeals] = useState<DealListItem[]>([]);
-  const [pinnedDealIds, setPinnedDealIds] = useState<Set<string>>(() => {
-    if (typeof window === 'undefined') return new Set();
-    try { return new Set(JSON.parse(localStorage.getItem('parity_pinned_deals') ?? '[]')); } catch { return new Set(); }
-  });
-  const [showDealList, setShowDealList] = useState(false);
   const [userInitials, setUserInitials] = useState('AN');
 
   // Derive real currency from the already-loaded deal list (no separate fetch needed)
@@ -145,22 +140,6 @@ function V1DealPageInner() {
     const match = sidebarDeals.find((d) => d.id === urlDealId);
     if (match?.currency) setCurrency(match.currency);
   }, [searchParams, sidebarDeals, currency]);
-
-  const togglePinDeal = useCallback((dealId: string) => {
-    setPinnedDealIds(prev => {
-      const next = new Set(prev);
-      if (next.has(dealId)) next.delete(dealId); else next.add(dealId);
-      localStorage.setItem('parity_pinned_deals', JSON.stringify([...next]));
-      return next;
-    });
-  }, []);
-
-  // Auto-pin current deal
-  useEffect(() => {
-    if (deal?.id && !pinnedDealIds.has(deal.id)) {
-      togglePinDeal(deal.id);
-    }
-  }, [deal?.id]);
 
   // Drill-down modal for clickable analysis tables
   const [drillModal, setDrillModal] = useState<DrillModalState | null>(null);
@@ -723,11 +702,6 @@ function V1DealPageInner() {
         deal={deal}
         dealName={dealName}
         dealId={dealId}
-        sidebarDeals={sidebarDeals}
-        pinnedDealIds={pinnedDealIds}
-        togglePinDeal={togglePinDeal}
-        showDealList={showDealList}
-        setShowDealList={setShowDealList}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         needsReviewCount={needsReviewItems.length}
