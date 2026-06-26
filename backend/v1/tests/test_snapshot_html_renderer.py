@@ -206,8 +206,14 @@ def test_status_to_badge_exact_match():
 
 def test_status_to_badge_variance_default():
     cls, label = renderer._status_to_badge("VARIANCE")
-    assert cls == "b-watch"
+    assert cls == "b-variance"
     assert label == "Variance"
+
+
+def test_status_to_badge_variance_with_incomplete_coverage():
+    cls, label = renderer._status_to_badge("VARIANCE", coverage_incomplete=True)
+    assert cls == "b-warn"
+    assert label == "Gap · coverage incomplete"
 
 
 def test_make_qr_svg_produces_inline_svg():
