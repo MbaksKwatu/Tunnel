@@ -898,6 +898,17 @@ def export(request: Request, deal_id: str, force: bool = False):
     from .db.supabase_repositories import AuditedFinancialsRepo
     af_rows = AuditedFinancialsRepo().get_by_deal_id(deal_id)
     audited_financials = af_rows[0] if af_rows else None
+    # Precompute the presentation reconciliation section (loan_activity / account_coverage
+    # / cash_position / tier) so it can be SEALED into the snapshot below. The PDF renderer
+    # reads this from canonical_json instead of recomputing live at render time, which was
+    # the source of snapshot-vs-PDF inconsistencies (sealed coverage=null while PDF showed a
+    # live %). Non-fatal: legacy snapshots without this key fall back to a live recompute.
+    recon_section = None
+    try:
+        from .analysis.snapshot_generator import generate_reconciliation_section
+        recon_section = generate_reconciliation_section(deal_id)
+    except Exception as exc:
+        logger.warning("[EXPORT] recon_section precompute failed (non-fatal): %s", exc)
     payload = build_pds_payload(
         schema_version=run["schema_version"],
         config_version=run["config_version"],
@@ -922,6 +933,7 @@ def export(request: Request, deal_id: str, force: bool = False):
         },
         overrides_applied=overrides,
         audited_financials=audited_financials,
+        recon_section=recon_section,
     )
     snapshot = export_snapshot(
         snapshot_repo=repos["snapshots"],
@@ -964,11 +976,11 @@ def export(request: Request, deal_id: str, force: bool = False):
     except Exception as exc:
         logger.warning("[EXPORT] account_coverage persist failed (non-fatal): %s", exc)
 
-    # Auto-trigger full fiscal-year reconciliation when audited financials exist
-    if audited_financials:
+    # Auto-trigger full fiscal-year reconciliation when audited financials exist.
+    # Reuse the recon_section already computed (and sealed into the snapshot) above.
+    if audited_financials and recon_section is not None:
         try:
-            from .analysis.snapshot_generator import generate_reconciliation_section
-            recon = generate_reconciliation_section(deal_id)
+            recon = recon_section
             recon_tier = recon.get("tier", "LOW_CONFIDENCE")
             cash_status = (recon.get("cash_position") or {}).get("status")
             recon_status_val = "OK" if recon_tier in ("HIGH_CONFIDENCE", "MEDIUM_CONFIDENCE") else "LOW"

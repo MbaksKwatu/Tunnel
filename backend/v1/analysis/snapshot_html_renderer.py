@@ -238,10 +238,15 @@ def render_snapshot_html(
         "role":     role_by_txn.get(t["id"], "other"),
     } for t in txn_rows]
 
-    # 6. Reconciliation engine (only when audited financials present)
+    # 6. Reconciliation engine (only when audited financials present).
+    #    Prefer the reconciliation section SEALED into the snapshot's canonical_json so
+    #    the PDF renders the hashed values rather than a live recompute that can drift
+    #    from the snapshot. Legacy snapshots written before recon_section was sealed fall
+    #    back to a live recompute.
     recon_section: Dict = {}
     if recon_available:
-        recon_section = generate_reconciliation_section(deal_id)
+        sealed_recon = canonical.get("recon_section")
+        recon_section = sealed_recon if sealed_recon else generate_reconciliation_section(deal_id)
 
     # ── Computed metrics ──────────────────────────────────────────────────────
 
