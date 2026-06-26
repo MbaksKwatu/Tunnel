@@ -694,7 +694,7 @@ def render_snapshot_html(
     ]
     coverage_incomplete = recon_available and bool(missing_bank_names)
     missing_note = (
-        f" Coverage gap — {', '.join(missing_bank_names)} not submitted."
+        f"Coverage gap — {', '.join(missing_bank_names)} not submitted."
         if coverage_incomplete else ""
     )
 
@@ -712,18 +712,19 @@ def render_snapshot_html(
         elif fy:
             recon_fiscal_note = f"All checks at fiscal year-end Dec 31 {fy}"
 
-        # Cash position
+        # Cash position — never softened by coverage gaps: the declared Note 11
+        # balance is the company's own attestation of total cash at year-end, so
+        # a variance here is treated as genuinely unexplained regardless of which
+        # bank statements are missing.
         cash_var    = cash_r.get("variance_pct")
         cash_status = cash_r.get("status") or "SKIPPED"
-        cash_badge  = _status_to_badge(cash_status, coverage_incomplete)
+        cash_badge  = _status_to_badge(cash_status)
         if cash_status == "EXACT_MATCH":
             cash_assessment = "On submitted accounts: KES 0 variance."
         elif cash_var is not None:
             cash_assessment = f"{abs(cash_var):.1f}% variance on submitted accounts."
         else:
             cash_assessment = cash_r.get("reason") or "Insufficient data."
-        if cash_badge[0] == "b-warn":
-            cash_assessment += missing_note
         recon_rows.append({
             "check":          "Cash position",
             "observed_str":   _fmt_kes(int(cash_r.get("total_bank_kes", 0) * 100)),
@@ -747,7 +748,7 @@ def render_snapshot_html(
         rev_badge = _status_to_badge(rev_status, coverage_incomplete)
         rev_assessment = rev_text or "--"
         if rev_badge[0] == "b-warn":
-            rev_assessment += missing_note
+            rev_assessment = f"{rev_assessment.rstrip('.')} {missing_note}"
         recon_rows.append({
             "check":        "Revenue",
             "observed_str": _fmt_kes(int(rev_r.get("bank_inflows_kes", 0) * 100)),
@@ -763,10 +764,10 @@ def render_snapshot_html(
 
         # Expenses
         exp_gap   = exp_r.get("gap_pct")
-        exp_badge = _status_to_badge("ACCEPTABLE" if (exp_gap or 0) <= 15 else "VARIANCE", coverage_incomplete)
+        exp_badge = _status_to_badge("ACCEPTABLE" if abs(exp_gap or 0) <= 15 else "VARIANCE", coverage_incomplete)
         exp_assessment = exp_r.get("explanation") or "--"
         if exp_badge[0] == "b-warn":
-            exp_assessment += missing_note
+            exp_assessment = f"{exp_assessment.rstrip('.')} {missing_note}"
         recon_rows.append({
             "check":        "Expenses",
             "observed_str": _fmt_kes(int(exp_r.get("bank_outflows_kes", 0) * 100)),
@@ -791,7 +792,7 @@ def render_snapshot_html(
         else:
             loan_assessment = loan_r.get("reason") or "Insufficient data."
         if loan_badge[0] == "b-warn":
-            loan_assessment += missing_note
+            loan_assessment = f"{loan_assessment.rstrip('.')} {missing_note}"
         recon_rows.append({
             "check":        "Loan activity",
             "observed_str": _fmt_kes(int(loan_r.get("bank_net_borrowing_kes", 0) * 100)),
