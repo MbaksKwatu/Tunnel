@@ -69,9 +69,33 @@ body {
 }
 
 /* ── PRINT ── */
+@page { size: A4; margin: 0; }
+
 @media print {
-  .page { page-break-after: always; box-shadow: none; }
+  /* min-height is a screen-only approximation of A4 proportions for the
+     stacked-card preview. In print it must not be enforced: the page's
+     true content height rarely matches it exactly, and combined with the
+     footer's margin-top:auto (below) that mismatch pushes the footer onto
+     an isolated near-blank page. Letting .page size to its own content
+     and disabling the auto-margin pin keeps the footer directly attached
+     to the content above it instead. */
+  .page { page-break-after: always; box-shadow: none; min-height: 0; margin: 0 auto; }
   .page:last-child { page-break-after: avoid; }
+  .page-footer { margin-top: 0; }
+
+  /* Never split an atomic row/card across a page boundary — break between
+     rows instead, which is the worst case once the footer fix above stops
+     forcing isolated blank pages. */
+  .cashflow-table tr,
+  .recon-table tr,
+  .loan-table tr,
+  .coverage-table tr,
+  .metrics-grid,
+  .composition-grid,
+  .coverage-header,
+  .pattern-row {
+    page-break-inside: avoid;
+  }
 }
 
 /* ── PAGE CARD ── */
