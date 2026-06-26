@@ -512,11 +512,12 @@ def render_snapshot_html(
         net     = v["inflow_cents"] - v["outflow_cents"]
         abs_net = abs(net)
         bar_pct = min(int(abs_net / max_abs_net * 100), 100)
-        net_m   = abs_net / 100 / 1_000_000
         sign    = "+" if net >= 0 else "−"
         cashflow_rows_ctx.append({
             "month_label":    MONTH_ABBR.get(m[5:7], m[5:7]),
-            "net_str":        f"{sign}{net_m:.2f}M",
+            "inflow_str":     f"{v['inflow_cents'] / 100:,.0f}",
+            "outflow_str":    f"{v['outflow_cents'] / 100:,.0f}",
+            "net_str":        f"{sign}{abs_net / 100:,.0f}",
             "net_color_class": "pos" if net >= 0 else "neg",
             "positive":       net >= 0,
             "bar_pct":        bar_pct,
