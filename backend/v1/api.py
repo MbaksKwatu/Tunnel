@@ -1083,7 +1083,14 @@ def export(request: Request, deal_id: str, force: bool = False):
             recon = recon_section
             recon_tier = recon.get("tier", "LOW_CONFIDENCE")
             cash_status = (recon.get("cash_position") or {}).get("status")
-            recon_status_val = "OK" if recon_tier in ("HIGH_CONFIDENCE", "MEDIUM_CONFIDENCE") else "LOW"
+            # reconciliation_status is a DB enum (OK / NOT_RUN / FAILED_OVERLAP). Reaching
+            # this block means reconciliation ran and was sealed into the snapshot, so the
+            # status is OK regardless of confidence tier. The HIGH/MEDIUM/LOW/CRITICAL tier
+            # is conveyed separately via the snapshot recon_section badge and the
+            # reconciliation_pct_bp written below — writing the tier name ("LOW") here
+            # raised "invalid input value for enum reconciliation_status_enum" and silently
+            # blocked the recon report on every incomplete-coverage deal.
+            recon_status_val = "OK"
             cash_variance_bp = None
             if cash_status == "EXACT_MATCH":
                 cash_variance_bp = 10000
