@@ -2,7 +2,7 @@
 Bank format detection and extraction router.
 
 XLSX is routed by extension first. PDF detection order:
-KCB → KCB_Online → Equity_CLMS → NCBA → Equity → ABSA → COOP → MPESA_PDF → Stanbic → SCB
+KCB → KCB_Online → Equity_CLMS → NCBA → Equity → ABSA → COOP → MPESA_PDF → Stanbic → I&M → SCB
 
 Note: Equity_CLMS must precede NCBA because some CLMS statements trigger NCBA detection.
 """
@@ -19,6 +19,7 @@ from app.extractors.absa_extractor import detect_absa, extract_absa_pdf
 from app.extractors.coop_extractor import detect_coop, extract_coop_pdf
 from app.extractors.mpesa_pdf_extractor import detect_mpesa_pdf, extract_mpesa_pdf
 from app.extractors.stanbic_extractor import detect_stanbic, extract_stanbic_pdf
+from app.extractors.im_extractor import detect_im, extract_im_pdf
 from app.extractors.pdf_extractor import extract_scb_pdf
 from app.extractors.currency_detector import detect as detect_currency
 
@@ -30,7 +31,7 @@ UNSUPPORTED_RESPONSE = {
     "status": "UNSUPPORTED_FORMAT",
     "message": (
         "Bank format not recognised. Supported formats: SCB, Co-op, ABSA, M-Pesa, "
-        "Equity Bank, KCB, NCBA, Stanbic"
+        "Equity Bank, KCB, NCBA, Stanbic, I&M Bank"
     ),
 }
 
@@ -87,6 +88,8 @@ def route_extract(file_path: str) -> Union[ExtractionResult, dict]:
         return extract_mpesa_pdf(file_path)
     if detect_stanbic(file_path):
         return extract_stanbic_pdf(file_path)
+    if detect_im(file_path):
+        return extract_im_pdf(file_path)
 
     try:
         import pdfplumber
