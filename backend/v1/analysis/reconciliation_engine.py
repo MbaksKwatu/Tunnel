@@ -129,8 +129,13 @@ def _get_fiscal_year_transactions(
             break
         em_offset += PAGE
 
+    # pds_txn_entity_map.txn_id is the raw-transaction PRIMARY KEY (pds_raw_transactions.id,
+    # a uuid), NOT the pds_raw_transactions.txn_id business key (text). Looking up by the
+    # business key never matched, so every role resolved to "" — which silently zeroed the
+    # role-based reconciliations (Revenue Observed = 0, Loan Observed = 0) and over-counted
+    # Expenses (its filter passes empty roles, so internal transfers were summed as outflows).
     for row in txn_rows:
-        row["role"] = role_map.get(row.get("txn_id", ""), "")
+        row["role"] = role_map.get(row.get("id", ""), "")
 
     return txn_rows
 
