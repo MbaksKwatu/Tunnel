@@ -270,6 +270,18 @@ def render_snapshot_html(
     else:
         acct_cov_raw = {}
 
+    # ── Active year ────────────────────────────────────────────────────────
+    # Drives every "this year" filter below (avg revenue, loan frequency,
+    # cashflow rows/notes). Use the declared audited financial year when
+    # present, else the most recent transaction's year — never a hardcoded
+    # year, which previously zeroed these metrics for any deal whose
+    # transactions weren't dated 2025.
+    if recon_available and af.get("financial_year"):
+        active_year = str(af["financial_year"])
+    else:
+        _txn_years = [(t["txn_date"] or "")[:4] for t in txns if t["txn_date"]]
+        active_year = max(_txn_years) if _txn_years else ""
+
     # ── Computed metrics ──────────────────────────────────────────────────────
 
     # Avg monthly revenue
@@ -277,7 +289,7 @@ def render_snapshot_html(
     for t in txns:
         if t["signed"] > 0 and t["role"] in REVENUE_ROLES:
             m = (t["txn_date"] or "")[:7]
-            if m.startswith("2025-"):
+            if m.startswith(f"{active_year}-"):
                 by_month_rev[m] += t["signed"]
     avg_rev_cents = (
         int(sum(by_month_rev.values()) / len(by_month_rev)) if by_month_rev else 0
@@ -303,12 +315,12 @@ def render_snapshot_html(
     op_in = sum(v for k, v in by_role_in.items() if k in REVENUE_ROLES)
     income_quality_pct = (op_in / total_in * 100) if total_in else 0
 
-    # Loan repayment frequency (2025)
+    # Loan repayment frequency (active year)
     repay_months: Dict[str, int] = defaultdict(int)
     for t in txns:
         if t["role"] == "loan_repayment" and t["signed"] < 0:
             m = (t["txn_date"] or "")[:7]
-            if m.startswith("2025-"):
+            if m.startswith(f"{active_year}-"):
                 repay_months[m] += 1
     loan_freq = (
         sum(repay_months.values()) / len(repay_months) if repay_months else 0
@@ -362,7 +374,7 @@ def render_snapshot_html(
     # Cashflow net-negative months
     neg_months = sorted(
         m for m, v in monthly_merged.items()
-        if m.startswith("2025-") and (v["inflow_cents"] - v["outflow_cents"]) < 0
+        if m.startswith(f"{active_year}-") and (v["inflow_cents"] - v["outflow_cents"]) < 0
     )
     if neg_months:
         worst = min(
@@ -499,15 +511,15 @@ def render_snapshot_html(
         ]
 
     # ── Monthly cashflow chart rows ──────────────────────────────────────────
-    months_2025 = sorted(m for m in monthly_merged if m.startswith("2025-"))
+    active_months = sorted(m for m in monthly_merged if m.startswith(f"{active_year}-"))
     max_abs_net = (
         max(abs(monthly_merged[m]["inflow_cents"] - monthly_merged[m]["outflow_cents"])
-            for m in months_2025)
-        if months_2025 else 1
+            for m in active_months)
+        if active_months else 1
     ) or 1
 
     cashflow_rows_ctx = []
-    for m in months_2025:
+    for m in active_months:
         v = monthly_merged[m]
         net     = v["inflow_cents"] - v["outflow_cents"]
         abs_net = abs(net)
