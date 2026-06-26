@@ -79,13 +79,22 @@ body {
      an isolated near-blank page. Letting .page size to its own content
      and disabling the auto-margin pin keeps the footer directly attached
      to the content above it instead. */
-  .page { page-break-after: always; box-shadow: none; min-height: 0; margin: 0 auto; }
-  .page:last-child { page-break-after: avoid; }
+  /* No forced page-break-after: a logical section is only pushed onto a
+     fresh physical page when it doesn't fit in the remaining space of the
+     current one (the standard "break only if needed" pattern, driven by
+     page-break-inside:avoid below). Forcing a break after every section
+     regardless of remaining space is what stranded short trailing footers
+     on their own near-blank page once a section's real content exceeded
+     one page — removing it lets sections share a page when there's room
+     and overflow cleanly onto the next when there isn't. Page numbers
+     ("1/3" etc.) are still accurate counts of logical sections, not
+     physical pages, by design. */
+  .page { box-shadow: none; min-height: 0; margin: 0 auto 16px; }
   .page-footer { margin-top: 0; }
 
-  /* Never split an atomic row/card across a page boundary — break between
-     rows instead, which is the worst case once the footer fix above stops
-     forcing isolated blank pages. */
+  /* Keep these atomic across a page boundary — break between rows/sections
+     instead of through the middle of one. */
+  .page-header,
   .cashflow-table tr,
   .cf-row,
   .recon-table tr,
