@@ -243,7 +243,12 @@ def render_snapshot_html(
     txns = [{
         "txn_date": t["txn_date"],
         "signed":   t["signed_amount_cents"] or 0,
-        "abs":      t["abs_amount_cents"] or 0,
+        # abs_amount_cents was NULL on every row platform-wide until the
+        # ingestion fix that stopped stripping it before insert (it was
+        # never actually a DB-generated column). Derive it here too, so
+        # rows ingested before that fix still render correctly rather than
+        # silently zeroing outflow composition and loan activity totals.
+        "abs":      t["abs_amount_cents"] if t["abs_amount_cents"] is not None else abs(t["signed_amount_cents"] or 0),
         "desc":     t["normalized_descriptor"] or "",
         "balance":  t["balance_cents"],
         "role":     role_by_txn.get(t["id"], "other"),
