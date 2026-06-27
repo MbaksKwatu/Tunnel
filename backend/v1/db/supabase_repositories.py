@@ -68,6 +68,42 @@ class BaseRepo:
                 break
         return out
 
+    def select_eq2(self, col1: str, val1: Any, col2: str, val2: Any) -> List[Dict[str, Any]]:
+        """Same pagination as select_eq, with a second equality filter pushed to the DB."""
+        out: List[Dict[str, Any]] = []
+        offset = 0
+        while True:
+            end = offset + _SELECT_PAGE_SIZE - 1
+            res = (
+                self.client.table(self.table)
+                .select("*")
+                .eq(col1, val1)
+                .eq(col2, val2)
+                .range(offset, end)
+                .execute()
+            )
+            chunk = res.data or []
+            out.extend(chunk)
+            if len(chunk) < _SELECT_PAGE_SIZE:
+                break
+            offset += _SELECT_PAGE_SIZE
+            if offset > 2_000_000:
+                break
+        return out
+
+    def select_in(self, column: str, values: Sequence[Any]) -> List[Dict[str, Any]]:
+        """Fetch only rows matching a specific set of ids — avoids pulling an entire
+        deal's table just to look up a handful of referenced rows."""
+        ids = [v for v in dict.fromkeys(values) if v]
+        if not ids:
+            return []
+        out: List[Dict[str, Any]] = []
+        for i in range(0, len(ids), BATCH_SIZE):
+            chunk_ids = ids[i : i + BATCH_SIZE]
+            res = self.client.table(self.table).select("*").in_(column, chunk_ids).execute()
+            out.extend(res.data or [])
+        return out
+
     def delete_eq(self, column: str, value: Any) -> None:
         self.client.table(self.table).delete().eq(column, value).execute()
 
@@ -354,6 +390,11 @@ class TxnEntityMapRepo(TxnEntityMapRepository, BaseRepo):
 
     def list_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         return self.select_eq("deal_id", deal_id)
+
+    def list_needs_review_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
+        """Filters role='needs_review' in the DB query instead of pulling every
+        mapping row for the deal and filtering in Python."""
+        return self.select_eq2("deal_id", deal_id, "role", "needs_review")
 
     def update_role(self, txn_uuid: str, new_role: str) -> None:
         self.client.table(self.table).update({"role": new_role}).eq("txn_id", txn_uuid).execute()

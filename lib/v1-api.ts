@@ -183,6 +183,15 @@ export async function exportSnapshot(
   return res.json()
 }
 
+/** Read-only check for whether a deal already has an analysis run, without triggering export. */
+export async function getLatestAnalysis(
+  dealId: string
+): Promise<{ analysis_run: AnalysisRun | null }> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/analysis/latest`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
 export async function getDocumentTransactions(
   documentId: string
 ): Promise<{ document_id: string; transactions: Array<Record<string, unknown>> }> {

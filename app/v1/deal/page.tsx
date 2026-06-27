@@ -26,6 +26,7 @@ import {
   getReconciliation,
   getDeal,
   downloadReport,
+  getLatestAnalysis,
 } from '@/lib/v1-api';
 import type { DealListItem } from '@/lib/v1-api';
 import { BatchUpload } from '@/components/BatchUpload';
@@ -132,6 +133,7 @@ function V1DealPageInner() {
   const [unknownFormatDocIds, setUnknownFormatDocIds] = useState<Set<string>>(new Set());
   const [sidebarDeals, setSidebarDeals] = useState<DealListItem[]>([]);
   const [userInitials, setUserInitials] = useState('AN');
+  const rehydratedDealId = useRef<string | null>(null);
 
   // Derive real currency from the already-loaded deal list (no separate fetch needed)
   useEffect(() => {
@@ -191,6 +193,32 @@ function V1DealPageInner() {
     void refreshBatchUploadCount();
     void loadAuditedFinancials();
   }, [deal?.id, refreshBatchUploadCount, loadAuditedFinancials]);
+
+  // Rehydrate the Analysis tab from an existing run when a deal is (re)opened.
+  // analysisState/exportData are pure client state — without this, reloading a
+  // deal page always shows "No analysis run yet" even if analysis already
+  // completed in a prior session. Read-only check first (analysis/latest) so we
+  // never call the export endpoint on a deal that has no run at all; exportSnapshot
+  // itself short-circuits to the existing snapshot when nothing changed, so this
+  // doesn't create a new analysis_run.
+  useEffect(() => {
+    if (!deal?.id || analysisState !== 'idle' || rehydratedDealId.current === deal.id) return;
+    rehydratedDealId.current = deal.id;
+    (async () => {
+      try {
+        const { analysis_run } = await getLatestAnalysis(deal.id);
+        if (!analysis_run) return;
+        const data = await exportSnapshot(deal.id);
+        setExportData(data);
+        const txRes = await listDealTransactions(deal.id);
+        setRawTransactions(txRes.transactions as unknown as Array<Record<string, unknown>>);
+        setAnalysisState('done');
+      } catch {
+        // No existing analysis, or documents still processing — leave at 'idle',
+        // same as a deal that has never been analysed.
+      }
+    })();
+  }, [deal?.id, analysisState]);
 
   useEffect(() => {
     setStatementQueue((prev) => {
