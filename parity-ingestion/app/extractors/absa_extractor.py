@@ -6,6 +6,15 @@ Date: DD/MM/YYYY → ISO
 User Narrative: append as description + " | " + user_narrative. If blank, use description only.
 Money Out → negative (debit_raw). Money In → positive (credit_raw).
 
+Some Absa templates (e.g. "Corporate and Business Banking" statements)
+insert a second Value Date column immediately after Txn Date, still inside
+the x0 < _TXN_DATE_X_MAX zone. Without handling it, both dates concatenate
+into one unparseable string ("29/05/2026 31/05/2026"), every row silently
+fails date parsing, and the whole file extracts zero transactions. Guarded
+below by only ever keeping the first date-shaped token per row — the
+common-case single-date template only ever has one, so this is a no-op
+for it.
+
 Uses extract_words + x-thresholds (no tables in ABSA PDF).
 """
 from __future__ import annotations
@@ -26,6 +35,7 @@ _MONEY_OUT_X_MAX = 465.0
 _MONEY_IN_X_MAX = 515.0
 # Balance: x0 >= 515
 _AMOUNT_PAT = re.compile(r"^[\d,]+\.\d{2}$")
+_DATE_TOKEN_PAT = re.compile(r"^\d{2}/\d{2}/\d{4}$")
 _ROW_TOLERANCE = 5.0
 
 
@@ -173,6 +183,8 @@ def extract_absa_pdf(file_path: str) -> ExtractionResult:
                 for w in row_words:
                     col = _assign_word_column(w)
                     if col == "date":
+                        if date_parts and _DATE_TOKEN_PAT.match(w["text"]):
+                            continue  # value date column — transaction date already captured
                         date_parts.append(w["text"])
                     elif col == "desc":
                         desc_parts.append(w["text"])
@@ -193,6 +205,17 @@ def extract_absa_pdf(file_path: str) -> ExtractionResult:
                     continue
 
                 if not date_str and not desc_str and not money_out and not money_in:
+                    continue
+
+                # End-of-statement "Total <money out> <money in>" recap row: no
+                # date, no description, both amount columns populated at once.
+                # A real transaction never has both a debit and a credit value
+                # on the same row, so this combination is a safe, specific
+                # signature — without it, this synthetic row's amounts merge
+                # into whichever transaction is still pending (no date of its
+                # own to start a new one), corrupting that real transaction's
+                # debit/credit.
+                if not date_str and not desc_str and money_out and money_in:
                     continue
 
                 iso_date = _parse_absa_date(date_str) or ""

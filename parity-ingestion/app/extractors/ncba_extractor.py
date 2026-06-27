@@ -4,6 +4,9 @@ NCBA Bank Kenya PDF statement extractor.
 Supports common layouts:
 - Date | Description/Narrative | Debit | Credit | Balance
 - Date | Value Date | Description | Money Out | Money In | Balance
+- Posting Date | Value Date | Bank Reference | Channel Reference |
+  Transaction Type | Transaction Details | Debit Amount | Credit Amount |
+  Running Balance  (ruled table — see _extract_via_table)
 Date formats: DD/MM/YYYY, DD-MM-YYYY, DD Mon YYYY
 """
 from __future__ import annotations
@@ -26,24 +29,45 @@ MONTH_MAP = {
     "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12,
 }
 
+# Header signature for the ruled-table NCBA template — confirmed unique
+# against every other supported bank's header text.
+_TABLE_HEADER_REQUIRED = {"POSTING DATE", "CHANNEL REFERENCE"}
+
+# Letterhead/branding text only ever appears in roughly the first ~500
+# characters of page 1 (company name, account number, statement period).
+# Scanning the full statement risked false-positiving whenever a *transaction
+# narration* happened to name another bank as a counterparty (e.g. "FROM NCBA
+# BANK M-PESA..." in a real, unrelated I&M Bank statement) — that text lives
+# well past this point.
+_HEADER_SCAN_CHARS = 500
+
+
+def _normalize_header_cell(c: Optional[str]) -> str:
+    return (c or "").replace("\n", " ").strip().upper()
+
 
 def detect_ncba(file_path: str) -> bool:
     """Return True if the PDF appears to be an NCBA Bank Kenya statement."""
     try:
         with pdfplumber.open(file_path) as pdf:
-            text = ""
-            for page in pdf.pages[:3]:
-                t = page.extract_text()
-                if t:
-                    text += t + " "
-            text_upper = text.upper()
+            header_text = (pdf.pages[0].extract_text() or "")[:_HEADER_SCAN_CHARS].upper()
             has_ncba = (
-                "NCBA" in text_upper
-                or "NCBA BANK" in text_upper
-                or "NCBA GROUP" in text_upper
-                or ("NIC" in text_upper and "CBA" in text_upper)
+                "NCBA" in header_text
+                or ("NIC" in header_text and "CBA" in header_text)
             )
-            return bool(has_ncba)
+            if has_ncba:
+                return True
+
+            # Some NCBA templates render the brand as a logo image only —
+            # fingerprint via the unique ruled-table header instead.
+            for page in pdf.pages[:2]:
+                for table in page.extract_tables():
+                    if not table:
+                        continue
+                    header = {_normalize_header_cell(c) for c in table[0]}
+                    if _TABLE_HEADER_REQUIRED.issubset(header):
+                        return True
+            return False
     except Exception:
         return False
 
@@ -157,7 +181,70 @@ def _parse_ncba_line(line: str) -> Optional[dict]:
     }
 
 
+def _extract_via_table(file_path: str) -> List[RawTransaction]:
+    """
+    Table-based extraction for the ruled-table NCBA template. Unlike the
+    text-line template below, this one has real ruled borders, so
+    extract_tables() returns clean, already-columned rows directly —
+    extract_text() on this same file produces garbled, wrapped-mid-word
+    output that the regex line parser below can't read.
+
+    Returns [] if no page has a table matching the required header — caller
+    falls back to the text-line path for the older NCBA template.
+    """
+    transactions: List[RawTransaction] = []
+    row_idx = 0
+    with pdfplumber.open(file_path) as pdf:
+        for page in pdf.pages:
+            for table in page.extract_tables():
+                if not table or len(table) < 2:
+                    continue
+                header = [_normalize_header_cell(c) for c in table[0]]
+                if not _TABLE_HEADER_REQUIRED.issubset(set(header)):
+                    continue
+                idx = {name: i for i, name in enumerate(header)}
+
+                def cell(row: List[Optional[str]], col: str) -> str:
+                    i = idx.get(col)
+                    if i is None or i >= len(row):
+                        return ""
+                    return (row[i] or "").strip()
+
+                for row in table[1:]:
+                    if not row:
+                        continue
+                    iso_date = _parse_ncba_date(cell(row, "POSTING DATE")) or ""
+                    if not iso_date:
+                        continue
+                    desc = re.sub(r"\s+", " ", cell(row, "TRANSACTION DETAILS").replace("\n", " ")).strip()
+                    transactions.append(
+                        RawTransaction(
+                            row_index=row_idx,
+                            date_raw=iso_date,
+                            description=desc,
+                            debit_raw=cell(row, "DEBIT AMOUNT").replace(",", ""),
+                            credit_raw=cell(row, "CREDIT AMOUNT").replace(",", ""),
+                            balance_raw=cell(row, "RUNNING BALANCE").replace(",", ""),
+                            source_file=file_path,
+                            extraction_confidence=1.0,
+                        )
+                    )
+                    row_idx += 1
+    return transactions
+
+
 def extract_ncba_pdf(file_path: str) -> ExtractionResult:
+    table_transactions = _extract_via_table(file_path)
+    if table_transactions:
+        return ExtractionResult(
+            source_file=file_path,
+            extractor_type="ncba_pdf",
+            row_count=len(table_transactions),
+            extraction_status="success",
+            warnings=[],
+            raw_transactions=table_transactions,
+        )
+
     transactions: List[RawTransaction] = []
     warnings: List[WarningItem] = []
     row_idx = 0
