@@ -776,16 +776,23 @@ def get_needs_review_transactions(request: Request, deal_id: str):
     if not deal:
         _error("NOT_FOUND", f"Deal {deal_id} not found")
 
-    all_maps = list(repos["txn_map"].list_by_deal(deal_id))
-    nr_maps = [m for m in all_maps if (m.get("role") or "").lower() == "needs_review"]
+    # Filter role='needs_review' in the DB query — this used to fetch every
+    # txn_map/raw_transaction/entity row for the whole deal (thousands of rows,
+    # several paginated round-trips) just to pick out a handful flagged rows.
+    # That made this endpoint take 9-13s on deals with a couple thousand
+    # transactions. Only fetch the rows actually referenced by the flagged maps.
+    nr_maps = list(repos["txn_map"].list_needs_review_by_deal(deal_id))
 
     if not nr_maps:
         return {"transactions": [], "total": 0}
 
-    all_txns = list(repos["raw"].list_by_deal(deal_id))
+    txn_ids = [str(m.get("txn_id") or "") for m in nr_maps]
+    entity_ids = [m.get("entity_id") for m in nr_maps]
+
+    all_txns = repos["raw"].select_in("id", txn_ids)
     txn_by_id = {str(t.get("id")): t for t in all_txns if t.get("id")}
 
-    all_entities = list(repos["entities"].list_by_deal(deal_id))
+    all_entities = repos["entities"].select_in("entity_id", entity_ids)
     entity_name_by_id = {e.get("entity_id"): e.get("display_name") or "" for e in all_entities}
 
     results = []
