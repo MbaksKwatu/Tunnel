@@ -74,9 +74,9 @@ export default function RequestParserPage() {
       <div style={{ minHeight: '100vh', background: '#080C18', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'IBM Plex Sans', sans-serif" }}>
         <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 10, width: 480, maxWidth: '90vw', padding: 40, textAlign: 'center' }}>
           {/* Icon */}
-          <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' }}>
+          <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'rgba(20,184,166,0.12)', border: '1px solid rgba(20,184,166,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' }}>
             <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-              <path d="M4.5 11l5 5L17.5 6" stroke="#A5B4FC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M4.5 11l5 5L17.5 6" stroke="#5EEAD4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
 
@@ -85,7 +85,7 @@ export default function RequestParserPage() {
           </h1>
           <p style={{ fontSize: 13, color: '#64748B', lineHeight: 1.6, margin: '0 0 8px' }}>
             We&apos;re onboarding the format for{' '}
-            <span style={{ color: '#A5B4FC', fontWeight: 600 }}>{bankName}</span>.
+            <span style={{ color: '#5EEAD4', fontWeight: 600 }}>{bankName}</span>.
           </p>
           <p style={{ fontSize: 13, color: '#64748B', lineHeight: 1.6, margin: '0 0 28px' }}>
             We&apos;ll notify you at{' '}
@@ -95,7 +95,7 @@ export default function RequestParserPage() {
 
           <button
             onClick={() => router.push('/deals')}
-            style={{ width: '100%', padding: '11px 0', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
+            style={{ width: '100%', padding: '11px 0', background: '#14B8A6', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
           >
             Return to Deals
           </button>
@@ -114,8 +114,8 @@ export default function RequestParserPage() {
         {/* Header */}
         <div style={{ marginBottom: 28 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: '#6366F1', letterSpacing: '0.08em', fontWeight: 700 }}>
-              P/ PARITY<span style={{ fontSize: 9, verticalAlign: 'super', color: '#4A5568' }}>v2.0</span>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, letterSpacing: '0.08em', fontWeight: 700 }}>
+              <span style={{ color: '#14B8A6' }}>P/</span> <span style={{ color: '#fff' }}>PARITY</span><span style={{ fontSize: 9, verticalAlign: 'super', color: '#4A5568' }}>v2.0</span>
             </div>
             <span style={{ fontSize: 10, color: '#2D3748' }}>·</span>
             <span style={{ fontSize: 10, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.06em' }}>FORMAT DESK</span>
@@ -200,12 +200,12 @@ export default function RequestParserPage() {
               onDrop={handleDrop}
               onClick={() => fileInputRef.current?.click()}
               style={{
-                border: `1px dashed ${isDragging ? '#6366F1' : file ? 'rgba(74,222,128,0.4)' : '#2D3748'}`,
+                border: `1px dashed ${isDragging ? '#14B8A6' : file ? 'rgba(74,222,128,0.4)' : '#2D3748'}`,
                 borderRadius: 6,
                 padding: '20px 16px',
                 textAlign: 'center',
                 cursor: 'pointer',
-                background: isDragging ? 'rgba(99,102,241,0.05)' : file ? 'rgba(74,222,128,0.04)' : 'transparent',
+                background: isDragging ? 'rgba(20,184,166,0.05)' : file ? 'rgba(74,222,128,0.04)' : 'transparent',
                 transition: 'all 0.15s',
               }}
             >
@@ -264,7 +264,7 @@ export default function RequestParserPage() {
           <button
             type="submit"
             disabled={!canSubmit}
-            style={{ width: '100%', padding: '11px 0', background: canSubmit ? '#6366F1' : '#1A2235', color: canSubmit ? '#fff' : '#374151', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: canSubmit ? 'pointer' : 'not-allowed', fontFamily: "'IBM Plex Sans', sans-serif", transition: 'background 0.15s' }}
+            style={{ width: '100%', padding: '11px 0', background: canSubmit ? '#14B8A6' : '#1A2235', color: canSubmit ? '#fff' : '#374151', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: canSubmit ? 'pointer' : 'not-allowed', fontFamily: "'IBM Plex Sans', sans-serif", transition: 'background 0.15s' }}
           >
             {isSubmitting ? 'Submitting…' : 'Submit Bank Format →'}
           </button>

@@ -62,7 +62,7 @@ export default function AnalysisTab({
   const confPct = run ? (run.final_confidence_bp / 100).toFixed(1) : null;
   const tier = run?.tier ?? null;
   const roleBadgeColor: Record<string, string> = {
-    supplier: '#6366F1', revenue_operational: '#4ADE80', revenue_non_operational: '#22D3EE',
+    supplier: '#14B8A6', revenue_operational: '#4ADE80', revenue_non_operational: '#22D3EE',
     payroll: '#F59E0B', needs_review: '#F59E0B', loan_repayment: '#F87171', other: '#374151',
   };
   return (
@@ -70,7 +70,7 @@ export default function AnalysisTab({
       {analysisState === 'idle' && !run && (
         <div style={{ padding: '48px 0', textAlign: 'center' }}>
           <div style={{ fontSize: 13, color: '#4A5568', marginBottom: 16 }}>No analysis run yet. Upload documents and initialise the pipeline.</div>
-          <button onClick={onGoToDocuments} style={{ padding: '9px 18px', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>← Go to Documents</button>
+          <button onClick={onGoToDocuments} style={{ padding: '9px 18px', background: '#14B8A6', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>← Go to Documents</button>
         </div>
       )}
       {(isProcessing || run) && (
@@ -109,7 +109,7 @@ export default function AnalysisTab({
                     <span style={{ fontSize: 12, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace" }}>{stage.detail}</span>
                     {stage.status === 'active' && stage.pct !== undefined && (
                       <div style={{ marginTop: 4, height: 3, background: '#1A2235', borderRadius: 2, overflow: 'hidden', width: 200 }}>
-                        <div style={{ height: '100%', width: `${stage.pct}%`, background: '#6366F1', borderRadius: 2, transition: 'width 0.5s' }} />
+                        <div style={{ height: '100%', width: `${stage.pct}%`, background: '#14B8A6', borderRadius: 2, transition: 'width 0.5s' }} />
                       </div>
                     )}
                   </div>
@@ -319,9 +319,9 @@ export default function AnalysisTab({
                 {/* Entity Breakdown */}
                 {entityBreakdownByCategory.length > 0 && (
                   <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid #1A2235', borderLeft: '3px solid #6366F1' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid #1A2235', borderLeft: '3px solid #14B8A6' }}>
                       <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>ENTITY BREAKDOWN</span>
-                      <span style={{ fontSize: 10, color: '#6366F1', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', padding: '2px 7px', borderRadius: 3, letterSpacing: '0.06em' }}>ONTOLOGY v2.0</span>
+                      <span style={{ fontSize: 10, color: '#14B8A6', background: 'rgba(20,184,166,0.1)', border: '1px solid rgba(20,184,166,0.2)', padding: '2px 7px', borderRadius: 3, letterSpacing: '0.06em' }}>ONTOLOGY v2.0</span>
                     </div>
                     <div style={{ padding: '0 20px' }}>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 120px 50px', gap: 8, padding: '10px 0', borderBottom: '1px solid #1A2235' }}>
@@ -330,9 +330,9 @@ export default function AnalysisTab({
                       {entityBreakdown.slice(0, 10).map((r) => (
                         <div key={r.entityId} onClick={() => {
                           const txns = (rawTransactions as Array<Record<string, unknown>>).filter(t => String(t.entity_id ?? '') === r.entityId || String(t.entity_name ?? '') === r.entityName);
-                          onDrill({ title: r.entityName, color: '#6366F1', rows: txns, type: 'txn' });
+                          onDrill({ title: r.entityName, color: '#14B8A6', rows: txns, type: 'txn' });
                         }} style={{ display: 'grid', gridTemplateColumns: '1fr 100px 120px 50px', gap: 8, padding: '10px 0', borderBottom: '1px solid #1A2235', alignItems: 'center', cursor: 'pointer', transition: 'background 0.15s' }}
-                          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99,102,241,0.06)')}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(20,184,166,0.06)')}
                           onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                         >
                           <span style={{ fontSize: 12, color: r.role === 'needs_review' ? '#F59E0B' : '#CBD5E1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: r.role === 'needs_review' ? 600 : 400 }}>{r.entityName}</span>
@@ -352,7 +352,7 @@ export default function AnalysisTab({
                       <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>ITEMS REQUIRING REVIEW</span>
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         <span style={{ fontSize: 10, fontWeight: 700, color: '#F59E0B', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.25)', padding: '2px 7px', borderRadius: 3 }}>{needsReviewItems.length} flagged</span>
-                        <button onClick={onGoToQueue} style={{ fontSize: 10, color: '#6366F1', background: 'transparent', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 3, padding: '2px 8px', cursor: 'pointer' }}>Review →</button>
+                        <button onClick={onGoToQueue} style={{ fontSize: 10, color: '#14B8A6', background: 'transparent', border: '1px solid rgba(20,184,166,0.3)', borderRadius: 3, padding: '2px 8px', cursor: 'pointer' }}>Review →</button>
                       </div>
                     </div>
                     <div style={{ padding: '8px 0' }}>
@@ -382,7 +382,7 @@ export default function AnalysisTab({
               {entityBreakdown.length > 0 && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
                   {[
-                    { label: 'SUPPLIERS', role: 'supplier', color: '#6366F1' },
+                    { label: 'SUPPLIERS', role: 'supplier', color: '#14B8A6' },
                     { label: 'REVENUE', roles: ['revenue_operational', 'revenue_non_operational'], color: '#4ADE80' },
                     { label: 'PAYROLL', role: 'payroll', color: '#F59E0B' },
                   ].map((section) => {
@@ -402,7 +402,7 @@ export default function AnalysisTab({
                           }).sort((a, b) => Math.abs(Number(b.signed_amount_cents ?? 0)) - Math.abs(Number(a.signed_amount_cents ?? 0)));
                           onDrill({ title: section.label, color: section.color, rows: allTxns, type: 'txn' });
                         }} style={{ padding: '12px 16px', borderBottom: '1px solid #1A2235', borderLeft: `3px solid ${section.color}`, cursor: 'pointer', transition: 'background 0.15s' }}
-                          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99,102,241,0.06)')}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(20,184,166,0.06)')}
                           onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                         >
                           <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>{section.label}</span>
@@ -415,7 +415,7 @@ export default function AnalysisTab({
                               const txns = (rawTransactions as Array<Record<string, unknown>>).filter(t => String(t.entity_id ?? '') === r.entityId || String(t.entity_name ?? '') === r.entityName);
                               onDrill({ title: `${section.label} — ${r.entityName}`, color: section.color, rows: txns, type: 'txn' });
                             }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 16px', borderBottom: '1px solid #1A2235', cursor: 'pointer', transition: 'background 0.15s' }}
-                              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99,102,241,0.06)')}
+                              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(20,184,166,0.06)')}
                               onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                             >
                               <div style={{ flex: 1, minWidth: 0 }}>
@@ -457,7 +457,7 @@ export default function AnalysisTab({
                             .sort((a, b) => Math.abs(Number(b.signed_amount_cents ?? 0)) - Math.abs(Number(a.signed_amount_cents ?? 0)));
                           onDrill({ title: section.label, color: section.color, rows: allTxns, type: 'txn' });
                         }} style={{ padding: '12px 16px', borderBottom: '1px solid #1A2235', borderLeft: `3px solid ${section.color}`, cursor: 'pointer', transition: 'background 0.15s' }}
-                          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99,102,241,0.06)')}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(20,184,166,0.06)')}
                           onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                         >
                           <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>{section.label}</span>

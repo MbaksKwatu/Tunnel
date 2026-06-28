@@ -101,7 +101,7 @@ export default function UnknownParserModal({
               <button
                 onClick={onSubmit}
                 disabled={!form.bankName.trim() || submitting}
-                style={{ flex: 1, padding: '10px 0', background: !form.bankName.trim() || submitting ? '#1A2235' : '#6366F1', color: !form.bankName.trim() || submitting ? '#374151' : '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: !form.bankName.trim() || submitting ? 'not-allowed' : 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
+                style={{ flex: 1, padding: '10px 0', background: !form.bankName.trim() || submitting ? '#1A2235' : '#14B8A6', color: !form.bankName.trim() || submitting ? '#374151' : '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: !form.bankName.trim() || submitting ? 'not-allowed' : 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
               >
                 {submitting ? 'Submitting…' : 'Request parser →'}
               </button>
@@ -116,16 +116,16 @@ export default function UnknownParserModal({
         ) : (
           /* Confirmation */
           <div style={{ textAlign: 'center', padding: '8px 0' }}>
-            <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10l4.5 4.5L16 6" stroke="#A5B4FC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(20,184,166,0.12)', border: '1px solid rgba(20,184,166,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10l4.5 4.5L16 6" stroke="#5EEAD4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </div>
             <h3 style={{ fontSize: 16, fontWeight: 700, color: '#F1F5F9', margin: '0 0 8px' }}>Parser request submitted</h3>
             <p style={{ fontSize: 13, color: '#4A5568', margin: '0 0 20px', lineHeight: 1.5 }}>
-              We've logged <strong style={{ color: '#6366F1' }}>{form.bankName}</strong> ({form.country}) for the engineering queue. You'll be able to re-upload once the parser is live.
+              We've logged <strong style={{ color: '#14B8A6' }}>{form.bankName}</strong> ({form.country}) for the engineering queue. You'll be able to re-upload once the parser is live.
             </p>
             <button
               onClick={onClose}
-              style={{ padding: '9px 20px', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+              style={{ padding: '9px 20px', background: '#14B8A6', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
             >
               Done
             </button>

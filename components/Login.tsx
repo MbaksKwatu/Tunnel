@@ -87,26 +87,26 @@ export default function Login() {
     >
       <div
         className="w-full max-w-md rounded-xl p-8 space-y-6"
-        style={{ background: '#0D1220', border: '1px solid rgba(99,102,241,0.2)' }}
+        style={{ background: '#0D1220', border: '1px solid rgba(20,184,166,0.2)' }}
       >
         {/* Logo */}
         <div className="text-center space-y-1">
           <div className="text-2xl font-bold tracking-widest" style={{ color: '#F1F5F9', fontFamily: 'IBM Plex Mono, monospace' }}>
             PARITY
           </div>
-          <div className="text-xs tracking-widest uppercase" style={{ color: '#6366F1', fontFamily: 'IBM Plex Sans, sans-serif' }}>
+          <div className="text-xs tracking-widest uppercase" style={{ color: '#14B8A6', fontFamily: 'IBM Plex Sans, sans-serif' }}>
             Intelligence Infrastructure
           </div>
         </div>
 
         {/* Mode toggle */}
-        <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid rgba(99,102,241,0.25)' }}>
+        <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid rgba(20,184,166,0.25)' }}>
           <button
             type="button"
             onClick={() => { setMode('magic'); setError(''); setMessage('') }}
             className="flex-1 py-2 text-sm font-medium transition-colors"
             style={{
-              background: mode === 'magic' ? '#6366F1' : 'transparent',
+              background: mode === 'magic' ? '#14B8A6' : 'transparent',
               color: mode === 'magic' ? '#fff' : '#94A3B8',
             }}
           >
@@ -117,7 +117,7 @@ export default function Login() {
             onClick={() => { setMode('password'); setError(''); setMessage('') }}
             className="flex-1 py-2 text-sm font-medium transition-colors"
             style={{
-              background: mode === 'password' ? '#6366F1' : 'transparent',
+              background: mode === 'password' ? '#14B8A6' : 'transparent',
               color: mode === 'password' ? '#fff' : '#94A3B8',
             }}
           >
@@ -132,7 +132,7 @@ export default function Login() {
           </div>
         )}
         {message && (
-          <div className="p-3 rounded-lg text-sm" style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.4)', color: '#A5B4FC' }}>
+          <div className="p-3 rounded-lg text-sm" style={{ background: 'rgba(20,184,166,0.1)', border: '1px solid rgba(20,184,166,0.4)', color: '#5EEAD4' }}>
             {message}
           </div>
         )}
@@ -151,7 +151,7 @@ export default function Login() {
               className="w-full px-3 py-2.5 rounded-lg text-sm outline-none transition-colors"
               style={{
                 background: '#131929',
-                border: '1px solid rgba(99,102,241,0.25)',
+                border: '1px solid rgba(20,184,166,0.25)',
                 color: '#F1F5F9',
               }}
             />
@@ -163,7 +163,7 @@ export default function Login() {
                 <label className="text-xs font-medium" style={{ color: '#94A3B8' }}>Password</label>
                 {!isSignUp && (
                   <button type="button" onClick={() => { setShowForgotPassword(true); setError(''); setMessage('') }}
-                    className="text-xs" style={{ color: '#6366F1' }}>
+                    className="text-xs" style={{ color: '#14B8A6' }}>
                     Forgot password?
                   </button>
                 )}
@@ -176,7 +176,7 @@ export default function Login() {
                 minLength={6}
                 placeholder="••••••••"
                 className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
-                style={{ background: '#131929', border: '1px solid rgba(99,102,241,0.25)', color: '#F1F5F9' }}
+                style={{ background: '#131929', border: '1px solid rgba(20,184,166,0.25)', color: '#F1F5F9' }}
               />
             </div>
           )}
@@ -185,7 +185,7 @@ export default function Login() {
             type="submit"
             disabled={loading}
             className="w-full py-2.5 rounded-lg font-semibold text-sm transition-opacity"
-            style={{ background: '#6366F1', color: '#fff', opacity: loading ? 0.7 : 1 }}
+            style={{ background: '#14B8A6', color: '#fff', opacity: loading ? 0.7 : 1 }}
           >
             {loading ? (
               <span className="flex items-center justify-center gap-2">

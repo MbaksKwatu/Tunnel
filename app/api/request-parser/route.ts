@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
     // ── Build notification email HTML ─────────────────────────────────────────
     const partnerTag = partner ? ` [${partner.toUpperCase()}]` : '';
     const notifyHtml = `
-      <h2 style="font-family:monospace;color:#6366F1">🔧 Parser Request${partnerTag}: ${bankName}</h2>
+      <h2 style="font-family:monospace;color:#14B8A6">🔧 Parser Request${partnerTag}: ${bankName}</h2>
       <table style="font-family:sans-serif;font-size:14px;border-collapse:collapse">
         ${partner ? `<tr><td style="padding:4px 12px 4px 0;color:#6b7280;font-weight:600">Partner</td><td>${partner}</td></tr>` : ''}
         <tr><td style="padding:4px 12px 4px 0;color:#6b7280;font-weight:600">Bank</td><td>${bankName}</td></tr>
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
         to: [contactEmail],
         subject: 'Bank Format Received — Parity',
         html: `
-          <h2 style="font-family:monospace;color:#6366F1">Bank Format Received</h2>
+          <h2 style="font-family:monospace;color:#14B8A6">Bank Format Received</h2>
           <p style="font-family:sans-serif;font-size:14px">
             Thanks! We're onboarding the <strong>${bankName}</strong> format now.
           </p>

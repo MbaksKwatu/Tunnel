@@ -122,7 +122,7 @@ export default function OverridesPage() {
   if (!authChecked || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: '#080C18' }}>
-        <div className="w-8 h-8 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
+        <div className="w-8 h-8 rounded-full border-2 border-teal-500 border-t-transparent animate-spin" />
       </div>
     )
   }
@@ -130,10 +130,10 @@ export default function OverridesPage() {
   return (
     <div className="min-h-screen" style={{ background: '#080C18' }}>
       {/* Top bar */}
-      <div className="border-b px-6 py-4" style={{ borderColor: 'rgba(99,102,241,0.15)', background: '#0D1220' }}>
+      <div className="border-b px-6 py-4" style={{ borderColor: 'rgba(20,184,166,0.15)', background: '#0D1220' }}>
         <div className="max-w-5xl mx-auto flex items-center justify-between">
           <div>
-            <div className="text-xs font-medium tracking-widest uppercase" style={{ color: '#6366F1', fontFamily: 'IBM Plex Mono, monospace' }}>
+            <div className="text-xs font-medium tracking-widest uppercase" style={{ color: '#14B8A6', fontFamily: 'IBM Plex Mono, monospace' }}>
               PARITY · OVERRIDE GATE
             </div>
             <h1 className="text-lg font-bold mt-0.5" style={{ color: '#F1F5F9' }}>Needs Review</h1>
@@ -145,7 +145,7 @@ export default function OverridesPage() {
               onChange={(e) => setAnalystInitials(e.target.value.slice(0, 3).toUpperCase())}
               maxLength={3}
               className="w-14 px-2 py-1 rounded text-xs text-center uppercase font-mono outline-none"
-              style={{ background: '#131929', border: '1px solid rgba(99,102,241,0.3)', color: '#A5B4FC' }}
+              style={{ background: '#131929', border: '1px solid rgba(20,184,166,0.3)', color: '#5EEAD4' }}
             />
           </div>
         </div>
@@ -154,7 +154,7 @@ export default function OverridesPage() {
       <div className="max-w-5xl mx-auto px-6 py-6 space-y-5">
         {/* Progress banner */}
         {total > 0 && (
-          <div className="rounded-xl p-5" style={{ background: '#0D1220', border: '1px solid rgba(99,102,241,0.2)' }}>
+          <div className="rounded-xl p-5" style={{ background: '#0D1220', border: '1px solid rgba(20,184,166,0.2)' }}>
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-medium" style={{ color: '#F1F5F9' }}>
                 {allDone ? '✓ All resolved — redirecting…' : `${resolvedCount} of ${total} resolved`}
@@ -163,12 +163,12 @@ export default function OverridesPage() {
                 {total - resolvedCount} remaining
               </span>
             </div>
-            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(99,102,241,0.15)' }}>
+            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(20,184,166,0.15)' }}>
               <div
                 className="h-full rounded-full transition-all duration-500"
                 style={{
                   width: total > 0 ? `${(resolvedCount / total) * 100}%` : '0%',
-                  background: allDone ? '#22C55E' : '#6366F1',
+                  background: allDone ? '#22C55E' : '#14B8A6',
                 }}
               />
             </div>
@@ -184,14 +184,14 @@ export default function OverridesPage() {
 
         {/* Empty state */}
         {!fetchError && total === 0 && (
-          <div className="rounded-xl p-10 text-center" style={{ background: '#0D1220', border: '1px solid rgba(99,102,241,0.2)' }}>
+          <div className="rounded-xl p-10 text-center" style={{ background: '#0D1220', border: '1px solid rgba(20,184,166,0.2)' }}>
             <div className="text-3xl mb-3">✓</div>
             <p className="text-sm font-medium" style={{ color: '#F1F5F9' }}>No transactions need review</p>
             <p className="text-xs mt-1" style={{ color: '#64748B' }}>All transactions have been classified automatically.</p>
             <button
               onClick={() => router.push(`/deals/${dealId}/review`)}
               className="mt-4 px-4 py-2 rounded-lg text-sm font-medium"
-              style={{ background: '#6366F1', color: '#fff' }}
+              style={{ background: '#14B8A6', color: '#fff' }}
             >
               Continue to Review
             </button>
@@ -200,7 +200,7 @@ export default function OverridesPage() {
 
         {/* Transaction rows */}
         {transactions.length > 0 && (
-          <div className="rounded-xl overflow-hidden" style={{ border: '1px solid rgba(99,102,241,0.2)' }}>
+          <div className="rounded-xl overflow-hidden" style={{ border: '1px solid rgba(20,184,166,0.2)' }}>
             {/* Table header */}
             <div
               className="grid text-xs font-medium px-4 py-2.5"
@@ -208,7 +208,7 @@ export default function OverridesPage() {
                 gridTemplateColumns: '100px 1fr 110px 220px 100px',
                 background: '#0A0F1C',
                 color: '#64748B',
-                borderBottom: '1px solid rgba(99,102,241,0.15)',
+                borderBottom: '1px solid rgba(20,184,166,0.15)',
               }}
             >
               <span>Date</span>
@@ -231,7 +231,7 @@ export default function OverridesPage() {
                   style={{
                     gridTemplateColumns: '100px 1fr 110px 220px 100px',
                     background: state.resolved ? 'rgba(34,197,94,0.04)' : idx % 2 === 0 ? '#0D1220' : '#0B1019',
-                    borderBottom: isLast ? 'none' : '1px solid rgba(99,102,241,0.1)',
+                    borderBottom: isLast ? 'none' : '1px solid rgba(20,184,166,0.1)',
                     opacity: state.resolved ? 0.65 : 1,
                   }}
                 >
@@ -272,7 +272,7 @@ export default function OverridesPage() {
                         className="w-full text-xs rounded px-2 py-1.5 outline-none"
                         style={{
                           background: '#131929',
-                          border: '1px solid rgba(99,102,241,0.3)',
+                          border: '1px solid rgba(20,184,166,0.3)',
                           color: '#F1F5F9',
                         }}
                       >
@@ -295,7 +295,7 @@ export default function OverridesPage() {
                         onClick={() => handleResolve(txn)}
                         disabled={state.resolving}
                         className="px-3 py-1.5 rounded text-xs font-medium transition-opacity"
-                        style={{ background: '#6366F1', color: '#fff', opacity: state.resolving ? 0.6 : 1 }}
+                        style={{ background: '#14B8A6', color: '#fff', opacity: state.resolving ? 0.6 : 1 }}
                       >
                         {state.resolving ? (
                           <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">

@@ -89,7 +89,7 @@ const DropZone = ({ onFileDrop, label, formats }: { onFileDrop: (f: File) => voi
       onDragLeave={() => setDragging(false)}
       onDrop={(e) => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) onFileDrop(f); }}
       onClick={() => { const el = document.createElement('input'); el.type = 'file'; el.accept = '.pdf,.csv,.xlsx,.docx'; el.onchange = (ev) => { const f = (ev.target as HTMLInputElement).files?.[0]; if (f) onFileDrop(f); }; el.click(); }}
-      style={{ border: `1px dashed ${dragging ? '#6366F1' : '#2D3748'}`, borderRadius: 6, padding: '14px 12px', textAlign: 'center', cursor: 'pointer', background: dragging ? 'rgba(99,102,241,0.05)' : 'transparent', transition: 'all 0.15s', marginTop: 8 }}
+      style={{ border: `1px dashed ${dragging ? '#14B8A6' : '#2D3748'}`, borderRadius: 6, padding: '14px 12px', textAlign: 'center', cursor: 'pointer', background: dragging ? 'rgba(20,184,166,0.05)' : 'transparent', transition: 'all 0.15s', marginTop: 8 }}
     >
       <div style={{ fontSize: 12, color: '#4A5568' }}>+ {label}</div>
       <div style={{ fontSize: 10, color: '#2D3748', marginTop: 4, letterSpacing: '0.05em' }}>{formats}</div>
@@ -252,9 +252,9 @@ export default function DocumentsTab({
                           fontSize: 11,
                           fontWeight: 600,
                           borderRadius: 5,
-                          border: declarationType === type ? '1px solid #6366F1' : '1px solid #1E2A3A',
-                          background: declarationType === type ? 'rgba(99,102,241,0.12)' : 'transparent',
-                          color: declarationType === type ? '#A5B4FC' : '#4A5568',
+                          border: declarationType === type ? '1px solid #14B8A6' : '1px solid #1E2A3A',
+                          background: declarationType === type ? 'rgba(20,184,166,0.12)' : 'transparent',
+                          color: declarationType === type ? '#5EEAD4' : '#4A5568',
                           cursor: 'pointer',
                           letterSpacing: '0.05em',
                         }}
@@ -309,7 +309,7 @@ export default function DocumentsTab({
                       <button
                         type="button"
                         onClick={() => setAuditedConfirmForm({ ...af })}
-                        style={{ fontSize: 10, color: '#6366F1', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                        style={{ fontSize: 10, color: '#14B8A6', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                       >
                         Edit details →
                       </button>
@@ -370,7 +370,7 @@ export default function DocumentsTab({
               {!auditedConfirmForm && (
                 auditedUploading ? (
                   <div style={{ padding: '14px 12px', textAlign: 'center', border: '1px dashed #2D3748', borderRadius: 6, marginTop: 8 }}>
-                    <span style={{ fontSize: 12, color: '#6366F1' }}>
+                    <span style={{ fontSize: 12, color: '#14B8A6' }}>
                       {declarationType === 'management' ? 'Processing management accounts…' : 'Extracting financial data…'}
                     </span>
                   </div>
@@ -390,9 +390,9 @@ export default function DocumentsTab({
 
               {/* Confirmation / manual fill form */}
               {auditedConfirmForm && (
-                <div style={{ background: '#0A0F1C', border: '1px solid #6366F1', borderRadius: 8, padding: 16, marginTop: 12 }}>
+                <div style={{ background: '#0A0F1C', border: '1px solid #14B8A6', borderRadius: 8, padding: 16, marginTop: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#A5B4FC', letterSpacing: '0.08em' }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#5EEAD4', letterSpacing: '0.08em' }}>
                       {auditedConfirmForm.extraction_confidence != null
                         ? `CONFIRM EXTRACTED DETAILS — ${auditedConfirmForm.extraction_confidence}% confidence`
                         : 'ENTER FINANCIAL DETAILS'}
@@ -415,7 +415,7 @@ export default function DocumentsTab({
                           value={(auditedConfirmForm[key as keyof AuditedFinancialsRecord] as string | undefined) ?? ''}
                           onChange={(e) => setAuditedConfirmForm((prev) => prev ? { ...prev, [key]: e.target.value } : prev)}
                           placeholder={placeholder}
-                          style={{ width: '100%', background: '#131929', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 5, padding: '6px 8px', fontSize: 12, color: '#E2E8F0', outline: 'none', boxSizing: 'border-box' }}
+                          style={{ width: '100%', background: '#131929', border: '1px solid rgba(20,184,166,0.25)', borderRadius: 5, padding: '6px 8px', fontSize: 12, color: '#E2E8F0', outline: 'none', boxSizing: 'border-box' }}
                         />
                       </div>
                     ))}
@@ -443,7 +443,7 @@ export default function DocumentsTab({
                               setAuditedConfirmForm((prev) => prev ? { ...prev, [key]: isNaN(kes) ? null : Math.round(kes * 100) } : prev);
                             }}
                             placeholder="0"
-                            style={{ width: '100%', background: '#131929', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 5, padding: '6px 8px', fontSize: 12, color: '#E2E8F0', outline: 'none', boxSizing: 'border-box' }}
+                            style={{ width: '100%', background: '#131929', border: '1px solid rgba(20,184,166,0.25)', borderRadius: 5, padding: '6px 8px', fontSize: 12, color: '#E2E8F0', outline: 'none', boxSizing: 'border-box' }}
                           />
                         </div>
                       );
@@ -470,7 +470,7 @@ export default function DocumentsTab({
                           setAuditedSaving(false);
                         }
                       }}
-                      style={{ flex: 1, padding: '8px 0', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: auditedSaving ? 'not-allowed' : 'pointer', opacity: auditedSaving ? 0.6 : 1 }}
+                      style={{ flex: 1, padding: '8px 0', background: '#14B8A6', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: auditedSaving ? 'not-allowed' : 'pointer', opacity: auditedSaving ? 0.6 : 1 }}
                     >
                       {auditedSaving ? 'Saving…' : 'Save financial details'}
                     </button>
@@ -513,7 +513,7 @@ export default function DocumentsTab({
             <button
               onClick={onInitialiseAnalysis}
               disabled={statementQueue.length === 0 || queueHasPending || isProcessing || !!auditedConfirmForm}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 20px', background: statementQueue.length === 0 || queueHasPending || isProcessing || !!auditedConfirmForm ? '#1A2235' : '#6366F1', color: statementQueue.length === 0 || queueHasPending || isProcessing || !!auditedConfirmForm ? '#374151' : '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: statementQueue.length === 0 || queueHasPending || isProcessing || !!auditedConfirmForm ? 'not-allowed' : 'pointer', fontFamily: "'IBM Plex Sans', sans-serif", transition: 'background 0.15s' }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 20px', background: statementQueue.length === 0 || queueHasPending || isProcessing || !!auditedConfirmForm ? '#1A2235' : '#14B8A6', color: statementQueue.length === 0 || queueHasPending || isProcessing || !!auditedConfirmForm ? '#374151' : '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: statementQueue.length === 0 || queueHasPending || isProcessing || !!auditedConfirmForm ? 'not-allowed' : 'pointer', fontFamily: "'IBM Plex Sans', sans-serif", transition: 'background 0.15s' }}
             >
               {isProcessing ? 'Processing…' : 'Initialise analysis pipeline'}
               {!isProcessing && <span style={{ fontSize: 16 }}>→</span>}

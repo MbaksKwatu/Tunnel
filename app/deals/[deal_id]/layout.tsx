@@ -52,8 +52,8 @@ export default function DealLayout({ children }: { children: React.ReactNode }) 
       }}>
         {/* Logo */}
         <div style={{ padding: '0 20px 24px', borderBottom: '1px solid #1E2A3A' }}>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: '#6366F1', letterSpacing: '0.1em', fontWeight: 700 }}>
-            P/ PARITY
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, letterSpacing: '0.1em', fontWeight: 700 }}>
+            <span style={{ color: '#14B8A6' }}>P/</span> <span style={{ color: '#fff' }}>PARITY</span>
           </div>
           <div style={{ fontSize: 11, color: '#4A5568', marginTop: 2, letterSpacing: '0.08em' }}>
             INTELLIGENCE INFRASTRUCTURE
@@ -76,10 +76,10 @@ export default function DealLayout({ children }: { children: React.ReactNode }) 
                   alignItems: 'center',
                   width: '100%',
                   padding: '10px 20px',
-                  background: active ? 'rgba(99,102,241,0.12)' : 'transparent',
-                  borderLeft: active ? '2px solid #6366F1' : '2px solid transparent',
+                  background: active ? 'rgba(20,184,166,0.12)' : 'transparent',
+                  borderLeft: active ? '2px solid #14B8A6' : '2px solid transparent',
                   border: 'none',
-                  color: active ? '#A5B4FC' : '#64748B',
+                  color: active ? '#5EEAD4' : '#64748B',
                   fontSize: 13,
                   fontFamily: "'IBM Plex Sans', sans-serif",
                   cursor: 'pointer',
@@ -125,14 +125,14 @@ export default function DealLayout({ children }: { children: React.ReactNode }) 
               width: 30,
               height: 30,
               borderRadius: '50%',
-              background: 'rgba(99,102,241,0.2)',
-              border: '1px solid rgba(99,102,241,0.4)',
+              background: 'rgba(20,184,166,0.2)',
+              border: '1px solid rgba(20,184,166,0.4)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontSize: 11,
               fontWeight: 700,
-              color: '#A5B4FC',
+              color: '#5EEAD4',
               fontFamily: "'IBM Plex Mono', monospace",
               flexShrink: 0,
             }}>

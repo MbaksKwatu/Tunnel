@@ -180,7 +180,7 @@ export default function ExportPage() {
             disabled={!summary.has_snapshot || pdfLoading}
             style={{
               padding: '12px 24px',
-              background: summary.has_snapshot ? '#6366F1' : '#1A2235',
+              background: summary.has_snapshot ? '#14B8A6' : '#1A2235',
               border: 'none',
               borderRadius: 6,
               color: summary.has_snapshot ? '#fff' : '#2D3748',
@@ -201,9 +201,9 @@ export default function ExportPage() {
             style={{
               padding: '12px 24px',
               background: 'transparent',
-              border: `1px solid ${summary.total_transactions > 0 ? '#6366F1' : '#1E2A3A'}`,
+              border: `1px solid ${summary.total_transactions > 0 ? '#14B8A6' : '#1E2A3A'}`,
               borderRadius: 6,
-              color: summary.total_transactions > 0 ? '#A5B4FC' : '#2D3748',
+              color: summary.total_transactions > 0 ? '#5EEAD4' : '#2D3748',
               fontSize: 13,
               fontFamily: "'IBM Plex Sans', sans-serif",
               cursor: summary.total_transactions > 0 ? 'pointer' : 'not-allowed',
