@@ -51,9 +51,15 @@ jobs:
       # production domains — including the custom one — at the given deployment.
       # Running it on every push makes the canonical domain track the latest
       # build deterministically, instead of depending on auto-assignment state.
+      #
+      # `vercel promote` needs an explicit --scope: unlike `vercel deploy`,
+      # it does not resolve the team from VERCEL_ORG_ID, so without it the
+      # deployment lookup runs under the token's personal scope and fails
+      # with "Deployment belongs to a different team". The scope is the team
+      # slug (mbaks-projects), matching the *-mbaks-projects.vercel.app domains.
       - name: Deploy to Vercel production (staging project)
         run: |
           set -euo pipefail
           DEPLOY_URL="$(vercel deploy --prod --yes --token=${{ secrets.VERCEL_TOKEN }})"
           echo "Deployed: $DEPLOY_URL"
-          vercel promote "$DEPLOY_URL" --yes --token=${{ secrets.VERCEL_TOKEN }}
+          vercel promote "$DEPLOY_URL" --yes --scope=mbaks-projects --token=${{ secrets.VERCEL_TOKEN }}
