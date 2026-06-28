@@ -38,5 +38,22 @@ jobs:
       # once already — now it runs on every push instead of by hand.
       - name: Install Vercel CLI
         run: npm install -g vercel@52.0.0
+      # `vercel deploy --prod` builds and creates a production deployment, and
+      # the auto-generated *-mbaks-projects.vercel.app domain follows it. But
+      # the CUSTOM production domain (parity-sme-staging.vercel.app) had stopped
+      # following new production deployments: the project was left in a
+      # pinned / rolled-back state, which disables auto-assignment of production
+      # domains. In that state every --prod deploy still succeeds but the
+      # canonical domain stays frozen on an old build (it sat on a 2026-06-20
+      # build for over a week despite many green production deploys).
+      #
+      # `vercel promote <url>` re-enables auto-assignment AND points all
+      # production domains — including the custom one — at the given deployment.
+      # Running it on every push makes the canonical domain track the latest
+      # build deterministically, instead of depending on auto-assignment state.
       - name: Deploy to Vercel production (staging project)
-        run: vercel deploy --prod --yes --token=${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          DEPLOY_URL="$(vercel deploy --prod --yes --token=${{ secrets.VERCEL_TOKEN }})"
+          echo "Deployed: $DEPLOY_URL"
+          vercel promote "$DEPLOY_URL" --yes --token=${{ secrets.VERCEL_TOKEN }}
