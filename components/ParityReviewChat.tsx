@@ -51,7 +51,7 @@ function renderTable(rows: string[]): string {
   const bodyStart = sepIdx >= 0 ? sepIdx + 1 : (headerCells ? 1 : 0)
   const bodyRows = rows.slice(bodyStart).filter(r => !/^\|[\s\-:|]+\|$/.test(r))
 
-  const thStyle = 'padding:5px 10px;border:1px solid #1E2A3A;font-size:11px;font-weight:600;color:#A5B4FC;background:#0F172A;text-align:left;white-space:nowrap'
+  const thStyle = 'padding:5px 10px;border:1px solid #1E2A3A;font-size:11px;font-weight:600;color:#5EEAD4;background:#0F172A;text-align:left;white-space:nowrap'
   const tdStyle = 'padding:4px 10px;border:1px solid #1E2A3A;font-size:12px;color:#CBD5E1;white-space:nowrap'
 
   let html = '<table style="border-collapse:collapse;width:100%;margin:8px 0;font-family:\'IBM Plex Mono\',monospace">'
@@ -72,7 +72,7 @@ function mdToHtml(md: string): string {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   s = convertTables(s)
   return s
-    .replace(/^## (.+)$/gm, '<h3 style="font-size:13px;font-weight:700;margin:12px 0 4px;color:#A5B4FC">$1</h3>')
+    .replace(/^## (.+)$/gm, '<h3 style="font-size:13px;font-weight:700;margin:12px 0 4px;color:#5EEAD4">$1</h3>')
     .replace(/^### (.+)$/gm, '<h4 style="font-size:12px;font-weight:700;margin:10px 0 3px;color:#94A3B8">$1</h4>')
     .replace(/^---$/gm, '<hr style="border:none;border-top:1px solid #1E2A3A;margin:8px 0"/>')
     .replace(/\*\*(.+?)\*\*/g, '<strong style="color:#E2E8F0">$1</strong>')
@@ -299,9 +299,9 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
           <span style={{ fontSize: 15, fontWeight: 700, color: '#CBD5E1', letterSpacing: '0.02em' }}>Parity Review</span>
           <span style={{
             fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', padding: '2px 8px', borderRadius: 3,
-            background: effectiveCorpusReady ? 'rgba(74,222,128,0.12)' : 'rgba(99,102,241,0.12)',
+            background: effectiveCorpusReady ? 'rgba(74,222,128,0.12)' : 'rgba(20,184,166,0.12)',
             color: effectiveCorpusReady ? '#4ADE80' : '#818CF8',
-            border: `1px solid ${effectiveCorpusReady ? 'rgba(74,222,128,0.25)' : 'rgba(99,102,241,0.25)'}`,
+            border: `1px solid ${effectiveCorpusReady ? 'rgba(74,222,128,0.25)' : 'rgba(20,184,166,0.25)'}`,
           }}>
             {effectiveCorpusReady ? 'READY' : 'PENDING'}
           </span>
@@ -341,15 +341,15 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
               {chatHistory.map((msg, i) => (
                 <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: msg.role === 'analyst' ? 'flex-end' : 'flex-start' }}>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <span style={{ fontSize: 9, fontWeight: 700, color: msg.role === 'analyst' ? '#6366F1' : '#4ADE80', letterSpacing: '0.1em', fontFamily: "'IBM Plex Mono', monospace" }}>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: msg.role === 'analyst' ? '#14B8A6' : '#4ADE80', letterSpacing: '0.1em', fontFamily: "'IBM Plex Mono', monospace" }}>
                       {msg.role === 'analyst' ? 'ANALYST' : 'PARITY'}
                     </span>
                     <span style={{ fontSize: 9, color: '#2D3748', fontFamily: "'IBM Plex Mono', monospace" }}>{msg.time}</span>
                   </div>
                   <div style={{
                     maxWidth: '85%', position: 'relative',
-                    background: msg.role === 'analyst' ? 'rgba(99,102,241,0.1)' : '#0D1220',
-                    border: `1px solid ${msg.role === 'analyst' ? 'rgba(99,102,241,0.2)' : '#1E2A3A'}`,
+                    background: msg.role === 'analyst' ? 'rgba(20,184,166,0.1)' : '#0D1220',
+                    border: `1px solid ${msg.role === 'analyst' ? 'rgba(20,184,166,0.2)' : '#1E2A3A'}`,
                     borderRadius: msg.role === 'analyst' ? '8px 8px 2px 8px' : '8px 8px 8px 2px',
                     padding: '10px 14px',
                   }}>
@@ -360,7 +360,7 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
                           onClick={(e) => { e.stopPropagation(); copyToClipboard(msg.text, i) }}
                           style={{
                             position: 'absolute', top: 6, right: 6, padding: '3px 8px',
-                            background: copiedIdx === i ? 'rgba(74,222,128,0.15)' : 'rgba(99,102,241,0.08)',
+                            background: copiedIdx === i ? 'rgba(74,222,128,0.15)' : 'rgba(20,184,166,0.08)',
                             border: `1px solid ${copiedIdx === i ? 'rgba(74,222,128,0.3)' : '#1E2A3A'}`,
                             borderRadius: 3, fontSize: 9, fontWeight: 600, cursor: 'pointer',
                             color: copiedIdx === i ? '#4ADE80' : '#4A5568',
@@ -371,7 +371,7 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
                         </button>
                       </>
                     ) : (
-                      <p style={{ fontSize: 13, color: '#A5B4FC', lineHeight: 1.6, whiteSpace: 'pre-line', margin: 0, userSelect: 'text' }}>{msg.text}</p>
+                      <p style={{ fontSize: 13, color: '#5EEAD4', lineHeight: 1.6, whiteSpace: 'pre-line', margin: 0, userSelect: 'text' }}>{msg.text}</p>
                     )}
                   </div>
                 </div>
@@ -410,7 +410,7 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
                 key={chip}
                 onClick={() => { setQuestion(chip); }}
                 style={{ padding: '5px 12px', background: 'transparent', border: '1px solid #1E2A3A', borderRadius: 20, fontSize: 11, color: '#4A5568', cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif", transition: 'all 0.15s' }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '#6366F1'; (e.currentTarget as HTMLElement).style.color = '#A5B4FC'; }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '#14B8A6'; (e.currentTarget as HTMLElement).style.color = '#5EEAD4'; }}
                 onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '#1E2A3A'; (e.currentTarget as HTMLElement).style.color = '#4A5568'; }}
               >
                 {chip}
@@ -435,7 +435,7 @@ function ParityReviewChat({ dealId, corpusReady, txnTotal, statementCount }: Pro
             <button
               onClick={() => void doAsk()}
               disabled={!corpusReady || loading || !question.trim()}
-              style={{ padding: '7px 16px', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 600, cursor: !corpusReady || loading || !question.trim() ? 'not-allowed' : 'pointer', opacity: !corpusReady || loading || !question.trim() ? 0.4 : 1, fontFamily: "'IBM Plex Sans', sans-serif" }}
+              style={{ padding: '7px 16px', background: '#14B8A6', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 600, cursor: !corpusReady || loading || !question.trim() ? 'not-allowed' : 'pointer', opacity: !corpusReady || loading || !question.trim() ? 0.4 : 1, fontFamily: "'IBM Plex Sans', sans-serif" }}
             >
               {loading ? 'Computing...' : 'Send'}
             </button>

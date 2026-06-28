@@ -5,7 +5,7 @@ import { getNeedsReview, resolveTransaction, type NeedsReviewItem } from '@/lib/
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
 const ROLE_OPTIONS = [
-  { value: 'supplier', label: 'Supplier', color: '#6366F1' },
+  { value: 'supplier', label: 'Supplier', color: '#14B8A6' },
   { value: 'revenue_operational', label: 'Revenue (Operational)', color: '#4ADE80' },
   { value: 'revenue_non_operational', label: 'Revenue (Non-operational)', color: '#34D399' },
   { value: 'payroll', label: 'Payroll', color: '#F59E0B' },
@@ -130,7 +130,7 @@ function ReviewQueue({ dealId, analystInitials, onQueueUpdate }: Props) {
     return (
       <div style={{ padding: '48px 0', textAlign: 'center' }}>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-        <div style={{ width: 24, height: 24, borderRadius: '50%', borderTop: '2px solid #6366F1', borderRight: '2px solid transparent', animation: 'spin 0.8s linear infinite', margin: '0 auto 12px' }} />
+        <div style={{ width: 24, height: 24, borderRadius: '50%', borderTop: '2px solid #14B8A6', borderRight: '2px solid transparent', animation: 'spin 0.8s linear infinite', margin: '0 auto 12px' }} />
         <div style={{ fontSize: 12, color: '#374151' }}>Loading review queue…</div>
       </div>
     )
@@ -154,7 +154,7 @@ function ReviewQueue({ dealId, analystInitials, onQueueUpdate }: Props) {
         <div style={{ display: 'flex', gap: 8 }}>
           <button
             onClick={() => { setBulkMode(!bulkMode); setBulkSelected(new Set()) }}
-            style={{ padding: '5px 12px', background: bulkMode ? 'rgba(99,102,241,0.15)' : 'transparent', border: '1px solid #1E2A3A', borderRadius: 5, fontSize: 11, color: bulkMode ? '#A5B4FC' : '#4A5568', cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
+            style={{ padding: '5px 12px', background: bulkMode ? 'rgba(20,184,166,0.15)' : 'transparent', border: '1px solid #1E2A3A', borderRadius: 5, fontSize: 11, color: bulkMode ? '#5EEAD4' : '#4A5568', cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
           >
             {bulkMode ? 'Cancel bulk' : 'Bulk resolve'}
           </button>
@@ -175,8 +175,8 @@ function ReviewQueue({ dealId, analystInitials, onQueueUpdate }: Props) {
 
       {/* Bulk action bar */}
       {bulkMode && bulkSelected.size > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 6, marginBottom: 14 }}>
-          <span style={{ fontSize: 12, color: '#A5B4FC', fontWeight: 600 }}>{bulkSelected.size} selected</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: 'rgba(20,184,166,0.08)', border: '1px solid rgba(20,184,166,0.2)', borderRadius: 6, marginBottom: 14 }}>
+          <span style={{ fontSize: 12, color: '#5EEAD4', fontWeight: 600 }}>{bulkSelected.size} selected</span>
           <span style={{ fontSize: 11, color: '#4A5568' }}>→ Classify as:</span>
           <select
             value={bulkRole}
@@ -188,7 +188,7 @@ function ReviewQueue({ dealId, analystInitials, onQueueUpdate }: Props) {
           <button
             onClick={handleBulkResolve}
             disabled={bulkResolving}
-            style={{ padding: '5px 14px', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: bulkResolving ? 'not-allowed' : 'pointer', opacity: bulkResolving ? 0.6 : 1 }}
+            style={{ padding: '5px 14px', background: '#14B8A6', color: '#fff', border: 'none', borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: bulkResolving ? 'not-allowed' : 'pointer', opacity: bulkResolving ? 0.6 : 1 }}
           >
             {bulkResolving ? 'Resolving…' : `Resolve ${bulkSelected.size}`}
           </button>
@@ -220,8 +220,8 @@ function ReviewQueue({ dealId, analystInitials, onQueueUpdate }: Props) {
               >
                 <div style={{
                   width: 16, height: 16, borderRadius: 3,
-                  border: `1px solid ${bulkSelected.size === items.length && items.length > 0 ? '#6366F1' : bulkSelected.size > 0 ? '#6366F1' : '#2D3748'}`,
-                  background: bulkSelected.size === items.length && items.length > 0 ? '#6366F1' : bulkSelected.size > 0 ? 'rgba(99,102,241,0.3)' : 'transparent',
+                  border: `1px solid ${bulkSelected.size === items.length && items.length > 0 ? '#14B8A6' : bulkSelected.size > 0 ? '#14B8A6' : '#2D3748'}`,
+                  background: bulkSelected.size === items.length && items.length > 0 ? '#14B8A6' : bulkSelected.size > 0 ? 'rgba(20,184,166,0.3)' : 'transparent',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
                   {bulkSelected.size === items.length && items.length > 0 && <span style={{ color: '#fff', fontSize: 10, lineHeight: 1 }}>✓</span>}
@@ -253,18 +253,18 @@ function ReviewQueue({ dealId, analystInitials, onQueueUpdate }: Props) {
                   display: 'grid',
                   gridTemplateColumns: bulkMode ? '32px 100px 1fr 100px 120px' : '100px 1fr 100px 120px',
                   gap: 8, padding: '10px 16px', borderBottom: '1px solid #1A2235', cursor: 'pointer',
-                  background: isActive ? 'rgba(245,158,11,0.04)' : bulkSelected.has(rowId) ? 'rgba(99,102,241,0.06)' : 'transparent',
+                  background: isActive ? 'rgba(245,158,11,0.04)' : bulkSelected.has(rowId) ? 'rgba(20,184,166,0.06)' : 'transparent',
                   transition: 'background 0.15s',
                 }}
-                onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'rgba(99,102,241,0.04)' }}
+                onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'rgba(20,184,166,0.04)' }}
                 onMouseLeave={(e) => { if (!isActive && !bulkSelected.has(rowId)) e.currentTarget.style.background = 'transparent' }}
               >
                 {bulkMode && (
                   <div style={{ display: 'flex', alignItems: 'center' }}>
                     <div style={{
                       width: 16, height: 16, borderRadius: 3,
-                      border: `1px solid ${bulkSelected.has(rowId) ? '#6366F1' : '#2D3748'}`,
-                      background: bulkSelected.has(rowId) ? '#6366F1' : 'transparent',
+                      border: `1px solid ${bulkSelected.has(rowId) ? '#14B8A6' : '#2D3748'}`,
+                      background: bulkSelected.has(rowId) ? '#14B8A6' : 'transparent',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                     }}>
                       {bulkSelected.has(rowId) && <span style={{ color: '#fff', fontSize: 10, lineHeight: 1 }}>✓</span>}
@@ -311,7 +311,7 @@ function ReviewQueue({ dealId, analystInitials, onQueueUpdate }: Props) {
                     <button
                       onClick={(e) => { e.stopPropagation(); handleResolve(rowId, selectedRole) }}
                       disabled={resolving}
-                      style={{ padding: '7px 18px', background: '#6366F1', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 600, cursor: resolving ? 'not-allowed' : 'pointer', opacity: resolving ? 0.6 : 1 }}
+                      style={{ padding: '7px 18px', background: '#14B8A6', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 600, cursor: resolving ? 'not-allowed' : 'pointer', opacity: resolving ? 0.6 : 1 }}
                     >
                       {resolving ? 'Saving…' : `Classify as ${ROLE_OPTIONS.find(r => r.value === selectedRole)?.label ?? selectedRole}`}
                     </button>

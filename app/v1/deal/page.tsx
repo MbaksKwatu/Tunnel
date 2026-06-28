@@ -785,7 +785,7 @@ function V1DealPageInner() {
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                style={{ padding: '10px 20px', fontSize: 13, fontWeight: 500, color: activeTab === tab ? '#A5B4FC' : '#4A5568', background: 'transparent', border: 'none', borderBottom: activeTab === tab ? '2px solid #6366F1' : '2px solid transparent', cursor: 'pointer', transition: 'all 0.15s', fontFamily: "'IBM Plex Sans', sans-serif", marginBottom: -1 }}
+                style={{ padding: '10px 20px', fontSize: 13, fontWeight: 500, color: activeTab === tab ? '#5EEAD4' : '#4A5568', background: 'transparent', border: 'none', borderBottom: activeTab === tab ? '2px solid #14B8A6' : '2px solid transparent', cursor: 'pointer', transition: 'all 0.15s', fontFamily: "'IBM Plex Sans', sans-serif", marginBottom: -1 }}
               >
                 {TAB_LABELS[tab]}
               </button>

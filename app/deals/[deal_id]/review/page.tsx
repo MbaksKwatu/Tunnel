@@ -17,7 +17,7 @@ const COMPUTING_STEPS = [
 ]
 
 const QUERY_TYPES: { value: QueryType; label: string; color: string }[] = [
-  { value: 'classification', label: 'CLASSIFICATION', color: '#6366F1' },
+  { value: 'classification', label: 'CLASSIFICATION', color: '#14B8A6' },
   { value: 'computation',    label: 'COMPUTATION',    color: '#A855F7' },
   { value: 'pattern',        label: 'PATTERN',        color: '#14B8A6' },
 ]
@@ -54,7 +54,7 @@ function fmtTime(d: Date) {
 
 function chipStyle(idx: number): React.CSSProperties {
   if (idx === 0) return { background: 'rgba(34,197,94,0.15)', color: '#4ADE80', border: '1px solid rgba(34,197,94,0.3)' }
-  if (idx === 1) return { background: 'rgba(99,102,241,0.15)', color: '#A5B4FC', border: '1px solid rgba(99,102,241,0.3)' }
+  if (idx === 1) return { background: 'rgba(20,184,166,0.15)', color: '#5EEAD4', border: '1px solid rgba(20,184,166,0.3)' }
   return { background: 'rgba(71,85,105,0.2)', color: '#64748B', border: '1px solid rgba(71,85,105,0.3)' }
 }
 
@@ -69,14 +69,14 @@ function QueryBubble({ msg }: { msg: QueryMsg }) {
           <span className="text-xs font-mono" style={{ color: '#475569' }}>{fmtTime(msg.timestamp)} EAT</span>
           <span
             className="text-xs px-1.5 py-0.5 rounded font-mono"
-            style={{ background: qt ? `${qt.color}22` : '#6366F122', color: qt?.color ?? '#6366F1', border: `1px solid ${qt?.color ?? '#6366F1'}44` }}
+            style={{ background: qt ? `${qt.color}22` : '#14B8A622', color: qt?.color ?? '#14B8A6', border: `1px solid ${qt?.color ?? '#14B8A6'}44` }}
           >
             {msg.queryType.toUpperCase()}
           </span>
           <span
             className="text-xs px-2 py-0.5 rounded font-semibold"
             style={{
-              background: msg.userRole === 'analyst' ? 'rgba(99,102,241,0.2)' : 'rgba(251,146,60,0.2)',
+              background: msg.userRole === 'analyst' ? 'rgba(20,184,166,0.2)' : 'rgba(251,146,60,0.2)',
               color: msg.userRole === 'analyst' ? '#818CF8' : '#FB923C',
             }}
           >
@@ -85,7 +85,7 @@ function QueryBubble({ msg }: { msg: QueryMsg }) {
         </div>
         <div
           className="px-4 py-3 rounded-xl text-sm"
-          style={{ background: '#1E2942', border: '1px solid rgba(99,102,241,0.2)', color: '#F1F5F9' }}
+          style={{ background: '#1E2942', border: '1px solid rgba(20,184,166,0.2)', color: '#F1F5F9' }}
         >
           {msg.text}
         </div>
@@ -114,21 +114,21 @@ function ComputingBubble({ msg }: { msg: ComputingMsg }) {
     <div className="mb-4 ml-2">
       <div
         className="px-5 py-4 rounded-xl overflow-hidden"
-        style={{ background: '#080C18', border: '1px solid rgba(99,102,241,0.2)', maxWidth: '520px', position: 'relative' }}
+        style={{ background: '#080C18', border: '1px solid rgba(20,184,166,0.2)', maxWidth: '520px', position: 'relative' }}
       >
         {/* Scan line */}
         <div
           className="absolute top-0 left-0 right-0 h-px"
-          style={{ background: 'linear-gradient(90deg, transparent, #6366F1, transparent)', animation: 'scanline 1.4s linear infinite' }}
+          style={{ background: 'linear-gradient(90deg, transparent, #14B8A6, transparent)', animation: 'scanline 1.4s linear infinite' }}
         />
         <div className="text-xs font-mono mb-3" style={{ color: '#475569' }}>COMPUTING</div>
         <div className="space-y-1.5">
           {COMPUTING_STEPS.map((s, i) => (
             <div key={i} className="flex items-center gap-2 text-xs font-mono">
-              <span style={{ color: i === step ? '#6366F1' : i < step ? '#22C55E' : '#1E293B' }}>
+              <span style={{ color: i === step ? '#14B8A6' : i < step ? '#22C55E' : '#1E293B' }}>
                 {i < step ? '✓' : i === step ? '⦿' : '○'}
               </span>
-              <span style={{ color: i === step ? '#A5B4FC' : i < step ? '#475569' : '#1E293B', transition: 'color 0.2s' }}>
+              <span style={{ color: i === step ? '#5EEAD4' : i < step ? '#475569' : '#1E293B', transition: 'color 0.2s' }}>
                 {s}
               </span>
             </div>
@@ -173,19 +173,19 @@ function ResponseBubble({
     <div className="mb-6 ml-2" style={{ maxWidth: '680px' }}>
       <div
         className="rounded-xl overflow-hidden"
-        style={{ background: '#0D1220', border: '1px solid rgba(99,102,241,0.25)' }}
+        style={{ background: '#0D1220', border: '1px solid rgba(20,184,166,0.25)' }}
       >
         {/* Record header */}
         <div
           className="px-5 py-2.5 flex items-center justify-between"
-          style={{ background: '#080C18', borderBottom: '1px solid rgba(99,102,241,0.15)' }}
+          style={{ background: '#080C18', borderBottom: '1px solid rgba(20,184,166,0.15)' }}
         >
-          <span className="text-xs font-mono tracking-widest" style={{ color: '#6366F1' }}>
+          <span className="text-xs font-mono tracking-widest" style={{ color: '#14B8A6' }}>
             P/ INTELLIGENCE RECORD
           </span>
           <span
             className="text-xs px-1.5 py-0.5 rounded font-mono"
-            style={{ background: qt ? `${qt.color}22` : '#6366F122', color: qt?.color ?? '#6366F1' }}
+            style={{ background: qt ? `${qt.color}22` : '#14B8A622', color: qt?.color ?? '#14B8A6' }}
           >
             {msg.queryType.toUpperCase()}
           </span>
@@ -236,7 +236,7 @@ function ResponseBubble({
         {/* Log to record footer */}
         <div
           className="px-5 py-2.5 flex items-center justify-between"
-          style={{ borderTop: '1px solid rgba(99,102,241,0.1)' }}
+          style={{ borderTop: '1px solid rgba(20,184,166,0.1)' }}
         >
           <span className="text-xs font-mono" style={{ color: '#334155' }}>
             {fmtTime(msg.timestamp)} EAT
@@ -250,7 +250,7 @@ function ResponseBubble({
               onClick={handleLog}
               disabled={logging}
               className="text-xs px-3 py-1 rounded font-mono transition-opacity"
-              style={{ background: 'rgba(99,102,241,0.15)', color: '#818CF8', border: '1px solid rgba(99,102,241,0.3)', opacity: logging ? 0.6 : 1 }}
+              style={{ background: 'rgba(20,184,166,0.15)', color: '#818CF8', border: '1px solid rgba(20,184,166,0.3)', opacity: logging ? 0.6 : 1 }}
             >
               {logging ? '…' : 'Log to record'}
             </button>
@@ -362,7 +362,7 @@ export default function ReviewPage() {
   if (!authChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: '#080C18' }}>
-        <div className="w-8 h-8 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
+        <div className="w-8 h-8 rounded-full border-2 border-teal-500 border-t-transparent animate-spin" />
       </div>
     )
   }
@@ -374,10 +374,10 @@ export default function ReviewPage() {
       <style>{`@keyframes scanline { from { transform: translateX(-100%) } to { transform: translateX(100%) } }`}</style>
       <div className="flex flex-col h-screen" style={{ background: '#080C18' }}>
         {/* Top bar */}
-        <div style={{ background: '#0D1220', borderBottom: '1px solid rgba(99,102,241,0.15)', flexShrink: 0 }}>
+        <div style={{ background: '#0D1220', borderBottom: '1px solid rgba(20,184,166,0.15)', flexShrink: 0 }}>
           <div className="max-w-4xl mx-auto px-6 py-3 flex items-center gap-4 flex-wrap">
             {/* Brand */}
-            <span className="text-xs font-mono tracking-widest" style={{ color: '#6366F1', marginRight: 4 }}>
+            <span className="text-xs font-mono tracking-widest" style={{ color: '#14B8A6', marginRight: 4 }}>
               PARITY REVIEW
             </span>
 
@@ -386,9 +386,9 @@ export default function ReviewPage() {
               onClick={() => setUserRole((r) => r === 'analyst' ? 'officer' : 'analyst')}
               className="text-xs px-3 py-1 rounded font-semibold transition-colors"
               style={{
-                background: userRole === 'analyst' ? 'rgba(99,102,241,0.2)' : 'rgba(251,146,60,0.2)',
+                background: userRole === 'analyst' ? 'rgba(20,184,166,0.2)' : 'rgba(251,146,60,0.2)',
                 color: userRole === 'analyst' ? '#818CF8' : '#FB923C',
-                border: `1px solid ${userRole === 'analyst' ? 'rgba(99,102,241,0.4)' : 'rgba(251,146,60,0.4)'}`,
+                border: `1px solid ${userRole === 'analyst' ? 'rgba(20,184,166,0.4)' : 'rgba(251,146,60,0.4)'}`,
               }}
             >
               {userRole === 'analyst' ? `ANALYST · ${analystInitials}` : `CREDIT OFFICER · ${analystInitials}`}
@@ -422,7 +422,7 @@ export default function ReviewPage() {
                 onChange={(e) => setAnalystInitials(e.target.value.slice(0, 3).toUpperCase())}
                 maxLength={3}
                 className="w-12 px-2 py-1 rounded text-xs text-center uppercase font-mono outline-none"
-                style={{ background: '#131929', border: '1px solid rgba(99,102,241,0.2)', color: '#A5B4FC' }}
+                style={{ background: '#131929', border: '1px solid rgba(20,184,166,0.2)', color: '#5EEAD4' }}
                 title="Analyst initials"
               />
             </div>
@@ -449,7 +449,7 @@ export default function ReviewPage() {
                       key={s}
                       onClick={() => setQuery(s)}
                       className="text-xs px-3 py-1.5 rounded-full font-mono"
-                      style={{ background: '#0D1220', color: '#475569', border: '1px solid rgba(99,102,241,0.15)' }}
+                      style={{ background: '#0D1220', color: '#475569', border: '1px solid rgba(20,184,166,0.15)' }}
                     >
                       {s}
                     </button>
@@ -474,7 +474,7 @@ export default function ReviewPage() {
         </div>
 
         {/* Sticky input */}
-        <div style={{ background: '#0D1220', borderTop: '1px solid rgba(99,102,241,0.15)', flexShrink: 0 }}>
+        <div style={{ background: '#0D1220', borderTop: '1px solid rgba(20,184,166,0.15)', flexShrink: 0 }}>
           <div className="max-w-4xl mx-auto px-6 py-4">
             <div className="flex gap-3 items-end">
               <div className="flex-1">
@@ -497,7 +497,7 @@ export default function ReviewPage() {
                   className="w-full px-3 py-2.5 rounded-lg text-sm outline-none resize-none"
                   style={{
                     background: '#131929',
-                    border: '1px solid rgba(99,102,241,0.25)',
+                    border: '1px solid rgba(20,184,166,0.25)',
                     color: '#F1F5F9',
                     lineHeight: '1.5',
                   }}
@@ -507,7 +507,7 @@ export default function ReviewPage() {
                 onClick={handleAsk}
                 disabled={!query.trim() || asking}
                 className="px-5 py-2.5 rounded-lg font-semibold text-sm transition-opacity mb-0.5"
-                style={{ background: '#6366F1', color: '#fff', opacity: !query.trim() || asking ? 0.5 : 1, flexShrink: 0 }}
+                style={{ background: '#14B8A6', color: '#fff', opacity: !query.trim() || asking ? 0.5 : 1, flexShrink: 0 }}
               >
                 {asking ? (
                   <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
