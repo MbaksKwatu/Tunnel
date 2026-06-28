@@ -42,6 +42,21 @@ _REVENUE_ROLES = {
 # Roles excluded from expense outflows (transfers between own accounts)
 _INTERNAL_TRANSFER_ROLES = {"transfer", "internal_transfer"}
 
+# Outflow roles that are NOT operating expenses and must be excluded from the
+# expense reconciliation. Without this, the expense calc deny-listed only the
+# transfer roles above and summed EVERY other outflow, which:
+#   - double-counted loan_repayment (it has its own loan reconciliation below)
+#   - counted reversal_debit, whose mirror reversal_credit is NOT counted as
+#     revenue, so the pair did not net out
+#   - counted needs_review (unclassified) outflows as confirmed expenses
+# This asymmetry (revenue allow-listed, expenses deny-listed) inflated
+# "Expenses Observed" above "Revenue Observed". — PAR-30
+_NON_EXPENSE_OUTFLOW_ROLES = (
+    _INTERNAL_TRANSFER_ROLES
+    | _LOAN_OUTFLOW_ROLES
+    | {"reversal_debit", "needs_review"}
+)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Internal helpers
@@ -392,7 +407,7 @@ def calculate_expense_reconciliation(deal_id: str) -> Dict[str, Any]:
         abs(r["signed_amount_cents"])
         for r in txns
         if r["signed_amount_cents"] < 0
-        and r.get("role") not in _INTERNAL_TRANSFER_ROLES
+        and r.get("role") not in _NON_EXPENSE_OUTFLOW_ROLES
     )
 
     gap_cents = declared_expenses_cents - bank_outflow_cents
