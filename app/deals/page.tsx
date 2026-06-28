@@ -4,20 +4,21 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@/lib/supabase'
 import { listDeals, getDeal, listDocuments, DealListItem } from '@/lib/v1-api'
+import { ThemeToggle } from '@/components/ThemeToggle'
 
 interface PipelineStatus {
   label: string
   dot: string
 }
 
-const STATUS_UPLOADING: PipelineStatus = { label: 'Uploading documents', dot: '#64748B' }
-const STATUS_READY: PipelineStatus = { label: 'Ready to analyse', dot: '#64748B' }
+const STATUS_UPLOADING: PipelineStatus = { label: 'Uploading documents', dot: 'var(--t1)' }
+const STATUS_READY: PipelineStatus = { label: 'Ready to analyse', dot: 'var(--t1)' }
 
 function computeStatus(documentStatuses: string[], hasAnalysisRun: boolean): PipelineStatus {
   if (documentStatuses.length === 0) return STATUS_UPLOADING
-  if (documentStatuses.includes('failed')) return { label: 'Failed — retry', dot: '#EF4444' }
-  if (hasAnalysisRun) return { label: 'Analysis complete', dot: '#4ADE80' }
-  if (documentStatuses.includes('processing')) return { label: 'In progress', dot: '#F59E0B' }
+  if (documentStatuses.includes('failed')) return { label: 'Failed — retry', dot: 'var(--red)' }
+  if (hasAnalysisRun) return { label: 'Analysis complete', dot: 'var(--green)' }
+  if (documentStatuses.includes('processing')) return { label: 'In progress', dot: 'var(--amber)' }
   return STATUS_READY
 }
 
@@ -66,55 +67,58 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#080C18' }}>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-        <div style={{ width: 28, height: 28, borderRadius: '50%', borderTop: '2px solid #14B8A6', borderRight: '2px solid transparent', animation: 'spin 0.8s linear infinite' }} />
+        <div style={{ width: 28, height: 28, borderRadius: '50%', borderTop: '2px solid var(--accent)', borderRight: '2px solid transparent', animation: 'spin 0.8s linear infinite' }} />
       </div>
     )
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#080C18', display: 'flex', fontFamily: "'IBM Plex Sans', sans-serif", color: '#E2E8F0' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', fontFamily: "'IBM Plex Sans', sans-serif", color: 'var(--t0)' }}>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
 
       {/* Sidebar */}
-      <aside style={{ width: 200, background: '#0A0F1E', borderRight: '1px solid #1A2235', display: 'flex', flexDirection: 'column', padding: '20px 0', position: 'fixed', top: 0, left: 0, bottom: 0, zIndex: 50 }}>
-        <div style={{ padding: '0 16px 16px', borderBottom: '1px solid #1A2235' }}>
+      <aside style={{ width: 200, background: 'var(--s1)', borderRight: '1px solid var(--s3)', display: 'flex', flexDirection: 'column', padding: '20px 0', position: 'fixed', top: 0, left: 0, bottom: 0, zIndex: 50 }}>
+        <div style={{ padding: '0 16px 16px', borderBottom: '1px solid var(--s3)' }}>
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, fontWeight: 700, letterSpacing: '0.08em' }}>
-            <span style={{ color: '#14B8A6' }}>P/</span> <span style={{ color: '#fff' }}>PARITY</span><span style={{ fontSize: 9, verticalAlign: 'super', color: '#4A5568' }}>v2.0</span>
+            <span style={{ color: 'var(--accent)' }}>P/</span> <span style={{ color: '#fff' }}>PARITY</span><span style={{ fontSize: 9, verticalAlign: 'super', color: 'var(--t1)' }}>v2.0</span>
           </div>
-          <div style={{ fontSize: 9, color: '#2D3748', marginTop: 4, letterSpacing: '0.12em' }}>DETERMINISTIC</div>
+          <div style={{ fontSize: 9, color: 'var(--t2)', marginTop: 4, letterSpacing: '0.12em' }}>DETERMINISTIC</div>
         </div>
         {email && (
-          <div style={{ margin: '10px 16px', background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 4, padding: '4px 8px', fontSize: 10, color: '#4A5568', display: 'flex', gap: 6, alignItems: 'center' }}>
-            <span style={{ fontWeight: 700, color: '#64748B' }}>{initials}</span>
+          <div style={{ margin: '10px 16px', background: 'var(--s1)', border: '1px solid var(--b1)', borderRadius: 4, padding: '4px 8px', fontSize: 10, color: 'var(--t1)', display: 'flex', gap: 6, alignItems: 'center' }}>
+            <span style={{ fontWeight: 700, color: 'var(--t1)' }}>{initials}</span>
             <span>PARITY DEMO</span>
           </div>
         )}
         <nav style={{ flex: 1, padding: '8px 0' }}>
-          <div style={{ padding: '6px 16px', fontSize: 9, color: '#2D3748', letterSpacing: '0.12em', fontWeight: 600 }}>OPERATIONS</div>
-          <button onClick={() => {}} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '9px 16px', background: 'rgba(20,184,166,0.1)', borderLeft: '2px solid #14B8A6', border: 'none', color: '#5EEAD4', fontSize: 13, cursor: 'pointer', textAlign: 'left', fontFamily: "'IBM Plex Sans', sans-serif" }}>
-            Dashboard <span style={{ fontSize: 10, color: '#374151', fontFamily: "'IBM Plex Mono', monospace" }}>SYS</span>
+          <div style={{ padding: '6px 16px', fontSize: 9, color: 'var(--t2)', letterSpacing: '0.12em', fontWeight: 600 }}>OPERATIONS</div>
+          <button onClick={() => {}} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '9px 16px', background: 'rgba(20,184,166,0.1)', borderLeft: '2px solid var(--accent)', border: 'none', color: 'var(--accent)', fontSize: 13, cursor: 'pointer', textAlign: 'left', fontFamily: "'IBM Plex Sans', sans-serif" }}>
+            Dashboard <span style={{ fontSize: 10, color: 'var(--t2)', fontFamily: "'IBM Plex Mono', monospace" }}>SYS</span>
           </button>
-          <button onClick={() => {}} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '9px 16px', background: 'transparent', borderLeft: '2px solid transparent', border: 'none', color: '#4A5568', fontSize: 13, cursor: 'pointer', textAlign: 'left', fontFamily: "'IBM Plex Sans', sans-serif" }}>
-            Deals <span style={{ fontSize: 10, color: '#374151', fontFamily: "'IBM Plex Mono', monospace" }}>{String(activeDeals).padStart(2, '0')}</span>
+          <button onClick={() => {}} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '9px 16px', background: 'transparent', borderLeft: '2px solid transparent', border: 'none', color: 'var(--t1)', fontSize: 13, cursor: 'pointer', textAlign: 'left', fontFamily: "'IBM Plex Sans', sans-serif" }}>
+            Deals <span style={{ fontSize: 10, color: 'var(--t2)', fontFamily: "'IBM Plex Mono', monospace" }}>{String(activeDeals).padStart(2, '0')}</span>
           </button>
-          <div style={{ padding: '9px 16px', color: '#2D3748', fontSize: 13, borderLeft: '2px solid transparent', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ padding: '9px 16px', color: 'var(--t2)', fontSize: 13, borderLeft: '2px solid transparent', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             Portfolio <span style={{ fontSize: 10, fontFamily: "'IBM Plex Mono', monospace" }}>12</span>
           </div>
-          <div style={{ padding: '12px 16px 6px', fontSize: 9, color: '#2D3748', letterSpacing: '0.12em', fontWeight: 600, marginTop: 4 }}>INTELLIGENCE</div>
-          <div style={{ padding: '9px 16px', color: '#2D3748', fontSize: 13 }}>Parity Review</div>
-          <div style={{ padding: '9px 16px', color: '#2D3748', fontSize: 13 }}>Benchmarks</div>
-          <div style={{ padding: '12px 16px 6px', fontSize: 9, color: '#2D3748', letterSpacing: '0.12em', fontWeight: 600, marginTop: 4 }}>SWITCH MODE</div>
-          <div style={{ padding: '9px 16px', color: '#374151', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ padding: '12px 16px 6px', fontSize: 9, color: 'var(--t2)', letterSpacing: '0.12em', fontWeight: 600, marginTop: 4 }}>INTELLIGENCE</div>
+          <div style={{ padding: '9px 16px', color: 'var(--t2)', fontSize: 13 }}>Parity Review</div>
+          <div style={{ padding: '9px 16px', color: 'var(--t2)', fontSize: 13 }}>Benchmarks</div>
+          <div style={{ padding: '12px 16px 6px', fontSize: 9, color: 'var(--t2)', letterSpacing: '0.12em', fontWeight: 600, marginTop: 4 }}>SWITCH MODE</div>
+          <div style={{ padding: '9px 16px', color: 'var(--t2)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11 }}>&lt;&gt;</span> Credit officer view
           </div>
         </nav>
-        <div style={{ padding: '12px 16px', borderTop: '1px solid #1A2235' }}>
-          <div style={{ fontSize: 10, color: '#2D3748', fontFamily: "'IBM Plex Mono', monospace", marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</div>
+        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--s3)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div style={{ fontSize: 10, color: 'var(--t2)', fontFamily: "'IBM Plex Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</div>
+            <ThemeToggle />
+          </div>
           <button
             onClick={async () => { const sb = createBrowserClient(); if (sb) await sb.auth.signOut(); router.push('/login'); }}
-            style={{ width: '100%', padding: '6px 0', background: 'transparent', border: '1px solid #1A2235', borderRadius: 4, color: '#374151', fontSize: 12, cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
+            style={{ width: '100%', padding: '6px 0', background: 'transparent', border: '1px solid var(--s3)', borderRadius: 4, color: 'var(--t2)', fontSize: 12, cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
           >Sign out</button>
         </div>
       </aside>
@@ -122,61 +126,61 @@ export default function DashboardPage() {
       {/* Main */}
       <div style={{ marginLeft: 200, flex: 1 }}>
         {/* Top bar */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 40px', height: 48, borderBottom: '1px solid #1A2235', background: '#0A0F1E' }}>
-          <div style={{ display: 'flex', gap: 8, fontSize: 12, color: '#374151', fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.08em' }}>
-            <span style={{ color: '#14B8A6' }}>PARITY</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 40px', height: 48, borderBottom: '1px solid var(--s3)', background: 'var(--s1)' }}>
+          <div style={{ display: 'flex', gap: 8, fontSize: 12, color: 'var(--t2)', fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.08em' }}>
+            <span style={{ color: 'var(--accent)' }}>PARITY</span>
             <span>·</span>
-            <span style={{ color: '#CBD5E1' }}>DASHBOARD</span>
+            <span style={{ color: 'var(--t0)' }}>DASHBOARD</span>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             <button
               onClick={() => router.push('/deals/new')}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', background: '#14B8A6', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
             >+ New deal</button>
-            <div style={{ fontSize: 12, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace" }}>{initials} · PARITY DEMO</div>
+            <div style={{ fontSize: 12, color: 'var(--t1)', fontFamily: "'IBM Plex Mono', monospace" }}>{initials} · PARITY DEMO</div>
           </div>
         </div>
 
         <div style={{ padding: '28px 40px' }}>
           {/* Stat cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', background: '#1A2235', border: '1px solid #1A2235', borderRadius: 8, overflow: 'hidden', marginBottom: 28, gap: 1 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', background: 'var(--s3)', border: '1px solid var(--s3)', borderRadius: 8, overflow: 'hidden', marginBottom: 28, gap: 1 }}>
             {[
-              { label: 'ACTIVE DEALS', value: String(activeDeals).padStart(2, '0'), sub: '+1 this month', color: '#F1F5F9' },
-              { label: 'PENDING REVIEW', value: '01', sub: deals[0] ? (deals[0].company_name || deals[0].name || '—') as string : '—', color: '#F59E0B' },
-              { label: 'AVG ACCURACY', value: '97.3%', sub: '9,730 bps', color: '#4ADE80' },
-              { label: 'OVERRIDE RATE', value: '2.7%', sub: '↓ vs prior period', color: '#F1F5F9' },
+              { label: 'ACTIVE DEALS', value: String(activeDeals).padStart(2, '0'), sub: '+1 this month', color: 'var(--t0)' },
+              { label: 'PENDING REVIEW', value: '01', sub: deals[0] ? (deals[0].company_name || deals[0].name || '—') as string : '—', color: 'var(--amber)' },
+              { label: 'AVG ACCURACY', value: '97.3%', sub: '9,730 bps', color: 'var(--green)' },
+              { label: 'OVERRIDE RATE', value: '2.7%', sub: '↓ vs prior period', color: 'var(--t0)' },
               { label: 'ENTITY DISCOVERIES', value: '07', sub: `${activeDeals} active deals`, color: '#818CF8' },
-              { label: 'NEEDS REVIEW', value: '03', sub: 'requires action', color: '#F59E0B' },
+              { label: 'NEEDS REVIEW', value: '03', sub: 'requires action', color: 'var(--amber)' },
             ].map((s) => (
-              <div key={s.label} style={{ background: '#0D1220', padding: '16px 18px' }}>
-                <div style={{ fontSize: 9, fontWeight: 700, color: '#374151', letterSpacing: '0.1em', marginBottom: 8 }}>{s.label}</div>
+              <div key={s.label} style={{ background: 'var(--s1)', padding: '16px 18px' }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--t2)', letterSpacing: '0.1em', marginBottom: 8 }}>{s.label}</div>
                 <div style={{ fontSize: 22, fontWeight: 700, color: s.color, fontFamily: "'IBM Plex Mono', monospace", lineHeight: 1 }}>{s.value}</div>
-                <div style={{ fontSize: 10, color: '#4A5568', marginTop: 6 }}>{s.sub}</div>
+                <div style={{ fontSize: 10, color: 'var(--t1)', marginTop: 6 }}>{s.sub}</div>
               </div>
             ))}
           </div>
 
           {/* Deal Pipeline table */}
-          <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid #1A2235' }}>
-              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>DEAL PIPELINE</span>
+          <div style={{ background: 'var(--s1)', border: '1px solid var(--b1)', borderRadius: 8, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--s3)' }}>
+              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--t0)' }}>DEAL PIPELINE</span>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                <span style={{ fontSize: 11, color: '#374151', fontFamily: "'IBM Plex Mono', monospace" }}>{activeDeals} record{activeDeals !== 1 ? 's' : ''}</span>
-                <button onClick={() => router.push('/deals/new')} style={{ padding: '4px 12px', background: '#14B8A6', color: '#fff', border: 'none', borderRadius: 4, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>+ New</button>
+                <span style={{ fontSize: 11, color: 'var(--t2)', fontFamily: "'IBM Plex Mono', monospace" }}>{activeDeals} record{activeDeals !== 1 ? 's' : ''}</span>
+                <button onClick={() => router.push('/deals/new')} style={{ padding: '4px 12px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 4, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>+ New</button>
               </div>
             </div>
 
             {/* Column headers */}
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 90px 160px 70px 200px 140px 90px', padding: '10px 20px', borderBottom: '1px solid #1A2235' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 90px 160px 70px 200px 140px 90px', padding: '10px 20px', borderBottom: '1px solid var(--s3)' }}>
               {['BORROWER', 'TYPE', 'DEAL SIZE', 'ANALYST', 'STATUS', 'CONFIDENCE', 'UPDATED'].map((h) => (
-                <span key={h} style={{ fontSize: 9, fontWeight: 700, color: '#2D3748', letterSpacing: '0.1em' }}>{h}</span>
+                <span key={h} style={{ fontSize: 9, fontWeight: 700, color: 'var(--t2)', letterSpacing: '0.1em' }}>{h}</span>
               ))}
             </div>
 
             {deals.length === 0 && (
-              <div style={{ padding: '48px 20px', textAlign: 'center', color: '#374151', fontSize: 13 }}>
+              <div style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--t2)', fontSize: 13 }}>
                 No deals yet.{' '}
-                <span style={{ color: '#14B8A6', cursor: 'pointer' }} onClick={() => router.push('/deals/new')}>Create your first deal →</span>
+                <span style={{ color: 'var(--accent)', cursor: 'pointer' }} onClick={() => router.push('/deals/new')}>Create your first deal →</span>
               </div>
             )}
 
@@ -193,25 +197,25 @@ export default function DashboardPage() {
                 <div
                   key={deal.id}
                   onClick={() => router.push(`/v1/deal?deal_id=${deal.id}`)}
-                  style={{ display: 'grid', gridTemplateColumns: '2fr 90px 160px 70px 200px 140px 90px', padding: '14px 20px', borderBottom: '1px solid #1A2235', cursor: 'pointer' }}
+                  style={{ display: 'grid', gridTemplateColumns: '2fr 90px 160px 70px 200px 140px 90px', padding: '14px 20px', borderBottom: '1px solid var(--s3)', cursor: 'pointer' }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(20,184,166,0.04)')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                 >
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#F1F5F9' }}>{name}</div>
-                    <div style={{ fontSize: 11, color: '#2D3748', fontFamily: "'IBM Plex Mono', monospace", marginTop: 2 }}>{shortId} · {currency}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t0)' }}>{name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--t2)', fontFamily: "'IBM Plex Mono', monospace", marginTop: 2 }}>{shortId} · {currency}</div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: '#14B8A6', background: 'rgba(20,184,166,0.12)', padding: '2px 7px', borderRadius: 3, border: '1px solid rgba(20,184,166,0.2)', letterSpacing: '0.06em' }}>DEBT</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', background: 'rgba(20,184,166,0.12)', padding: '2px 7px', borderRadius: 3, border: '1px solid rgba(20,184,166,0.2)', letterSpacing: '0.06em' }}>DEBT</span>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', fontSize: 13, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace" }}>{currency} —</div>
-                  <div style={{ display: 'flex', alignItems: 'center', fontSize: 13, fontWeight: 600, color: '#CBD5E1' }}>{analyst}</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#64748B' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', fontSize: 13, color: 'var(--t1)', fontFamily: "'IBM Plex Mono', monospace" }}>{currency} —</div>
+                  <div style={{ display: 'flex', alignItems: 'center', fontSize: 13, fontWeight: 600, color: 'var(--t0)' }}>{analyst}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--t1)' }}>
                     <span style={{ width: 7, height: 7, borderRadius: '50%', background: status.dot, display: 'inline-block', flexShrink: 0 }} />
                     {status.label}
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', fontSize: 12, color: '#374151', fontFamily: "'IBM Plex Mono', monospace" }}>—</div>
-                  <div style={{ display: 'flex', alignItems: 'center', fontSize: 12, color: '#374151' }}>{updatedAt}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', fontSize: 12, color: 'var(--t2)', fontFamily: "'IBM Plex Mono', monospace" }}>—</div>
+                  <div style={{ display: 'flex', alignItems: 'center', fontSize: 12, color: 'var(--t2)' }}>{updatedAt}</div>
                 </div>
               )
             })}
@@ -220,12 +224,12 @@ export default function DashboardPage() {
           {/* Legend */}
           <div style={{ display: 'flex', gap: 24, marginTop: 14, flexWrap: 'wrap' }}>
             {[
-              { dot: '#4ADE80', label: 'VERIFIED — bank-derived' },
+              { dot: 'var(--green)', label: 'VERIFIED — bank-derived' },
               { dot: '#818CF8', label: 'INFERRED — model output' },
-              { dot: '#F59E0B', label: 'NEEDS REVIEW — analyst action' },
-              { dot: '#EF4444', label: 'FLAGGED — requires action' },
+              { dot: 'var(--amber)', label: 'NEEDS REVIEW — analyst action' },
+              { dot: 'var(--red)', label: 'FLAGGED — requires action' },
             ].map((l) => (
-              <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: '#374151' }}>
+              <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: 'var(--t2)' }}>
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: l.dot, display: 'inline-block' }} />
                 {l.label}
               </div>
