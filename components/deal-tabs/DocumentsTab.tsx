@@ -26,7 +26,7 @@ const FileRow = ({
 }) => {
   const [removing, setRemoving] = useState(false);
   const statusLabel = { ready: 'INDEXED', processing: 'PROCESSING', uploading: 'UPLOADING', failed: isUnknownFormat ? 'NO PARSER' : 'FAILED' }[item.status];
-  const statusColor = { ready: '#4ADE80', processing: '#818CF8', uploading: '#818CF8', failed: isUnknownFormat ? '#F59E0B' : '#F87171' }[item.status];
+  const statusColor = { ready: 'var(--green)', processing: '#818CF8', uploading: '#818CF8', failed: isUnknownFormat ? 'var(--amber)' : 'var(--red)' }[item.status];
   const statusBg = { ready: 'rgba(74,222,128,0.08)', processing: 'rgba(129,140,248,0.12)', uploading: 'rgba(129,140,248,0.12)', failed: isUnknownFormat ? 'rgba(245,158,11,0.1)' : 'rgba(248,113,113,0.12)' }[item.status];
 
   const handleRemove = async () => {
@@ -45,21 +45,21 @@ const FileRow = ({
   
 
   return (
-    <div style={{ borderBottom: '1px solid #1A2235' }}>
+    <div style={{ borderBottom: '1px solid var(--s3)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0' }}>
-        <span style={{ width: 20, height: 20, borderRadius: 4, background: item.status === 'ready' ? 'rgba(74,222,128,0.15)' : '#1A2235', border: `1px solid ${item.status === 'ready' ? accent : isUnknownFormat ? '#F59E0B' : '#2D3748'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <span style={{ width: 20, height: 20, borderRadius: 4, background: item.status === 'ready' ? 'rgba(74,222,128,0.15)' : 'var(--s3)', border: `1px solid ${item.status === 'ready' ? accent : isUnknownFormat ? 'var(--amber)' : 'var(--t2)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           {item.status === 'ready' && <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 5.5l2.5 2.5L9 3" stroke={accent} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
           {(item.status === 'processing' || item.status === 'uploading') && <span style={{ width: 8, height: 8, borderRadius: '50%', borderTop: `2px solid ${accent}`, borderRight: `2px solid transparent`, animation: 'spin 0.8s linear infinite', display: 'inline-block' }} />}
-          {item.status === 'failed' && <span style={{ fontSize: 10, color: isUnknownFormat ? '#F59E0B' : '#F87171', fontWeight: 700 }}>!</span>}
+          {item.status === 'failed' && <span style={{ fontSize: 10, color: isUnknownFormat ? 'var(--amber)' : 'var(--red)', fontWeight: 700 }}>!</span>}
         </span>
-        <span style={{ flex: 1, fontSize: 13, color: '#CBD5E1', fontFamily: "'IBM Plex Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.fileName}</span>
+        <span style={{ flex: 1, fontSize: 13, color: 'var(--t0)', fontFamily: "'IBM Plex Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.fileName}</span>
         <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: statusColor, background: statusBg, padding: '2px 7px', borderRadius: 3, flexShrink: 0 }}>{statusLabel}</span>
         {canRemove && onRemove && item.status !== 'uploading' && (
           <button
             onClick={handleRemove}
             disabled={removing}
             title="Remove document"
-            style={{ marginLeft: 4, padding: '2px 6px', fontSize: 11, color: removing ? '#4A5568' : '#64748B', background: 'transparent', border: 'none', cursor: removing ? 'not-allowed' : 'pointer', borderRadius: 3, lineHeight: 1, flexShrink: 0 }}
+            style={{ marginLeft: 4, padding: '2px 6px', fontSize: 11, color: removing ? 'var(--t1)' : 'var(--t1)', background: 'transparent', border: 'none', cursor: removing ? 'not-allowed' : 'pointer', borderRadius: 3, lineHeight: 1, flexShrink: 0 }}
           >
             {removing ? '…' : '✕'}
           </button>
@@ -68,10 +68,10 @@ const FileRow = ({
       {/* Inline CTA for unsupported bank format */}
       {item.status === 'failed' && isUnknownFormat && onRequestParser && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 10, paddingLeft: 30 }}>
-          <span style={{ fontSize: 11, color: '#64748B' }}>Format not supported —</span>
+          <span style={{ fontSize: 11, color: 'var(--t1)' }}>Format not supported —</span>
           <button
             onClick={onRequestParser}
-            style={{ fontSize: 11, fontWeight: 600, color: '#F59E0B', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 4, padding: '3px 10px', cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
+            style={{ fontSize: 11, fontWeight: 600, color: 'var(--amber)', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 4, padding: '3px 10px', cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
           >
             Request parser →
           </button>
@@ -89,10 +89,10 @@ const DropZone = ({ onFileDrop, label, formats }: { onFileDrop: (f: File) => voi
       onDragLeave={() => setDragging(false)}
       onDrop={(e) => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) onFileDrop(f); }}
       onClick={() => { const el = document.createElement('input'); el.type = 'file'; el.accept = '.pdf,.csv,.xlsx,.docx'; el.onchange = (ev) => { const f = (ev.target as HTMLInputElement).files?.[0]; if (f) onFileDrop(f); }; el.click(); }}
-      style={{ border: `1px dashed ${dragging ? '#14B8A6' : '#2D3748'}`, borderRadius: 6, padding: '14px 12px', textAlign: 'center', cursor: 'pointer', background: dragging ? 'rgba(20,184,166,0.05)' : 'transparent', transition: 'all 0.15s', marginTop: 8 }}
+      style={{ border: `1px dashed ${dragging ? 'var(--accent)' : 'var(--t2)'}`, borderRadius: 6, padding: '14px 12px', textAlign: 'center', cursor: 'pointer', background: dragging ? 'rgba(20,184,166,0.05)' : 'transparent', transition: 'all 0.15s', marginTop: 8 }}
     >
-      <div style={{ fontSize: 12, color: '#4A5568' }}>+ {label}</div>
-      <div style={{ fontSize: 10, color: '#2D3748', marginTop: 4, letterSpacing: '0.05em' }}>{formats}</div>
+      <div style={{ fontSize: 12, color: 'var(--t1)' }}>+ {label}</div>
+      <div style={{ fontSize: 10, color: 'var(--t2)', marginTop: 4, letterSpacing: '0.05em' }}>{formats}</div>
     </div>
   );
 };
@@ -191,7 +191,7 @@ export default function DocumentsTab({
   return (
     <div>
       {!deal && (
-        <div style={{ padding: '48px 0', textAlign: 'center', color: '#374151' }}>
+        <div style={{ padding: '48px 0', textAlign: 'center', color: 'var(--t2)' }}>
           <div style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace" }}>No deal loaded — navigate from Deals →</div>
         </div>
       )}
@@ -200,11 +200,11 @@ export default function DocumentsTab({
           {/* Two-column: Bank Statements + Audited Accounts */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
             {/* Bank Statements */}
-            <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: 20, borderTop: '2px solid #4ADE80' }}>
+            <div style={{ background: 'var(--s1)', border: '1px solid var(--b1)', borderRadius: 8, padding: 20, borderTop: '2px solid var(--green)' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>BANK STATEMENTS</span>
+                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--t0)' }}>BANK STATEMENTS</span>
                 {bankQueue.length > 0 && (
-                  <span style={{ fontSize: 11, color: '#4ADE80', fontFamily: "'IBM Plex Mono', monospace" }}>
+                  <span style={{ fontSize: 11, color: 'var(--green)', fontFamily: "'IBM Plex Mono', monospace" }}>
                     {bankReady} / {bankQueue.length} ready
                   </span>
                 )}
@@ -213,7 +213,7 @@ export default function DocumentsTab({
                 <FileRow
                   key={item.id}
                   item={item}
-                  accent="#4ADE80"
+                  accent="var(--green)"
                   isUnknownFormat={unknownFormatDocIds.has(item.id)}
                   onRequestParser={() => onRequestParser({ docId: item.id, fileName: item.fileName, errorMessage: 'Bank format not recognised' })}
                   canRemove={analysisState === 'idle' || item.status === 'failed'}
@@ -226,11 +226,11 @@ export default function DocumentsTab({
             </div>
 
             {/* Audited / Management Accounts */}
-            <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: 20, borderTop: '2px solid #4ADE80' }}>
+            <div style={{ background: 'var(--s1)', border: '1px solid var(--b1)', borderRadius: 8, padding: 20, borderTop: '2px solid var(--green)' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>FINANCIAL ACCOUNTS</span>
+                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--t0)' }}>FINANCIAL ACCOUNTS</span>
                 {auditedFinancialsList.length > 0 && (
-                  <span style={{ fontSize: 11, color: '#4ADE80', fontFamily: "'IBM Plex Mono', monospace" }}>
+                  <span style={{ fontSize: 11, color: 'var(--green)', fontFamily: "'IBM Plex Mono', monospace" }}>
                     {auditedFinancialsList.length} FY record{auditedFinancialsList.length > 1 ? 's' : ''}
                   </span>
                 )}
@@ -239,7 +239,7 @@ export default function DocumentsTab({
               {/* Declaration type selector */}
               {!auditedConfirmForm && (
                 <div style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 10, color: '#64748B', marginBottom: 6, letterSpacing: '0.05em' }}>DECLARATION TYPE</div>
+                  <div style={{ fontSize: 10, color: 'var(--t1)', marginBottom: 6, letterSpacing: '0.05em' }}>DECLARATION TYPE</div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     {(['audited', 'management'] as const).map((type) => (
                       <button
@@ -252,9 +252,9 @@ export default function DocumentsTab({
                           fontSize: 11,
                           fontWeight: 600,
                           borderRadius: 5,
-                          border: declarationType === type ? '1px solid #14B8A6' : '1px solid #1E2A3A',
+                          border: declarationType === type ? '1px solid var(--accent)' : '1px solid var(--b1)',
                           background: declarationType === type ? 'rgba(20,184,166,0.12)' : 'transparent',
-                          color: declarationType === type ? '#5EEAD4' : '#4A5568',
+                          color: declarationType === type ? 'var(--accent)' : 'var(--t1)',
                           cursor: 'pointer',
                           letterSpacing: '0.05em',
                         }}
@@ -265,7 +265,7 @@ export default function DocumentsTab({
                   </div>
                   {declarationType === 'management' && (
                     <div style={{ marginTop: 8, padding: '8px 10px', background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 5 }}>
-                      <div style={{ fontSize: 11, color: '#FCD34D', fontWeight: 600, marginBottom: 2 }}>Management accounts — Parity Review required</div>
+                      <div style={{ fontSize: 11, color: 'var(--amber)', fontWeight: 600, marginBottom: 2 }}>Management accounts — Parity Review required</div>
                       <div style={{ fontSize: 10, color: '#92400E' }}>Internally prepared statements apply stricter variance thresholds. Snapshot generation is blocked until Parity Review is complete.</div>
                     </div>
                   )}
@@ -274,42 +274,42 @@ export default function DocumentsTab({
 
               {/* Existing extracted records */}
                 {auditedFinancialsList.map((af) => (
-                  <div key={af.financial_year} style={{ background: '#0A0F1C', border: '1px solid #1E2A3A', borderRadius: 6, padding: '10px 12px', marginBottom: 8 }}>
+                  <div key={af.financial_year} style={{ background: 'var(--s1)', border: '1px solid var(--b1)', borderRadius: 6, padding: '10px 12px', marginBottom: 8 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: '#E2E8F0', fontFamily: "'IBM Plex Mono', monospace" }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--t0)', fontFamily: "'IBM Plex Mono', monospace" }}>
                           FY {af.financial_year ?? '—'}
                         </span>
                         {af.declaration_type === 'management' && (
-                          <span style={{ fontSize: 9, background: 'rgba(251,191,36,0.15)', color: '#FCD34D', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 3, padding: '1px 5px', letterSpacing: '0.05em' }}>MGMT</span>
+                          <span style={{ fontSize: 9, background: 'rgba(251,191,36,0.15)', color: 'var(--amber)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 3, padding: '1px 5px', letterSpacing: '0.05em' }}>MGMT</span>
                         )}
                         {!af.confirmed_at && (
-                          <span style={{ fontSize: 9, background: 'rgba(245,158,11,0.12)', color: '#F59E0B', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 3, padding: '1px 5px', letterSpacing: '0.05em' }}>UNCONFIRMED</span>
+                          <span style={{ fontSize: 9, background: 'rgba(245,158,11,0.12)', color: 'var(--amber)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 3, padding: '1px 5px', letterSpacing: '0.05em' }}>UNCONFIRMED</span>
                         )}
                       </div>
-                      <span style={{ fontSize: 10, color: af.extraction_confidence && af.extraction_confidence >= 70 ? '#4ADE80' : '#F59E0B', fontFamily: "'IBM Plex Mono', monospace" }}>
+                      <span style={{ fontSize: 10, color: af.extraction_confidence && af.extraction_confidence >= 70 ? 'var(--green)' : 'var(--amber)', fontFamily: "'IBM Plex Mono', monospace" }}>
                         {af.extraction_confidence != null ? `${af.extraction_confidence}% confidence` : 'manual'}
                       </span>
                     </div>
                     <div style={{ marginTop: 6, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px' }}>
                       {af.turnover_cents != null && (
-                        <span style={{ fontSize: 11, color: '#94A3B8' }}>Revenue: KES {(af.turnover_cents / 100).toLocaleString()}</span>
+                        <span style={{ fontSize: 11, color: 'var(--t1)' }}>Revenue: KES {(af.turnover_cents / 100).toLocaleString()}</span>
                       )}
                       {af.cash_and_equivalents_cents != null && (
-                        <span style={{ fontSize: 11, color: '#94A3B8' }}>Cash: KES {(af.cash_and_equivalents_cents / 100).toLocaleString()}</span>
+                        <span style={{ fontSize: 11, color: 'var(--t1)' }}>Cash: KES {(af.cash_and_equivalents_cents / 100).toLocaleString()}</span>
                       )}
                       {af.profit_after_tax_cents != null && (
-                        <span style={{ fontSize: 11, color: '#94A3B8' }}>PAT: KES {(af.profit_after_tax_cents / 100).toLocaleString()}</span>
+                        <span style={{ fontSize: 11, color: 'var(--t1)' }}>PAT: KES {(af.profit_after_tax_cents / 100).toLocaleString()}</span>
                       )}
                       {af.total_assets_cents != null && (
-                        <span style={{ fontSize: 11, color: '#94A3B8' }}>Assets: KES {(af.total_assets_cents / 100).toLocaleString()}</span>
+                        <span style={{ fontSize: 11, color: 'var(--t1)' }}>Assets: KES {(af.total_assets_cents / 100).toLocaleString()}</span>
                       )}
                     </div>
                     <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 14 }}>
                       <button
                         type="button"
                         onClick={() => setAuditedConfirmForm({ ...af })}
-                        style={{ fontSize: 10, color: '#14B8A6', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                        style={{ fontSize: 10, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                       >
                         Edit details →
                       </button>
@@ -320,7 +320,7 @@ export default function DocumentsTab({
                           setAfRemoveReason('');
                           setAfRemoveError('');
                         }}
-                        style={{ fontSize: 10, color: '#F87171', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                        style={{ fontSize: 10, color: 'var(--red)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                       >
                         Remove
                       </button>
@@ -338,17 +338,17 @@ export default function DocumentsTab({
                           value={afRemoveReason}
                           onChange={(e) => setAfRemoveReason(e.target.value)}
                           placeholder={af.confirmed_at ? 'Reason (required)' : 'Reason (optional)'}
-                          style={{ width: '100%', boxSizing: 'border-box', fontSize: 11, padding: '6px 8px', background: '#0A0F1C', border: '1px solid #2D3748', borderRadius: 4, color: '#E2E8F0', marginBottom: 6 }}
+                          style={{ width: '100%', boxSizing: 'border-box', fontSize: 11, padding: '6px 8px', background: 'var(--s1)', border: '1px solid var(--t2)', borderRadius: 4, color: 'var(--t0)', marginBottom: 6 }}
                         />
                         {afRemoveError && (
-                          <div style={{ fontSize: 10, color: '#F87171', marginBottom: 6 }}>{afRemoveError}</div>
+                          <div style={{ fontSize: 10, color: 'var(--red)', marginBottom: 6 }}>{afRemoveError}</div>
                         )}
                         <div style={{ display: 'flex', gap: 8 }}>
                           <button
                             type="button"
                             disabled={afRemoving || (!!af.confirmed_at && !afRemoveReason.trim())}
                             onClick={() => handleRemoveAuditedFinancials(af)}
-                            style={{ fontSize: 10, fontWeight: 600, color: '#fff', background: afRemoving || (!!af.confirmed_at && !afRemoveReason.trim()) ? '#7F1D1D' : '#DC2626', border: 'none', borderRadius: 4, padding: '5px 10px', cursor: afRemoving || (!!af.confirmed_at && !afRemoveReason.trim()) ? 'not-allowed' : 'pointer' }}
+                            style={{ fontSize: 10, fontWeight: 600, color: '#fff', background: afRemoving || (!!af.confirmed_at && !afRemoveReason.trim()) ? '#7F1D1D' : 'var(--red)', border: 'none', borderRadius: 4, padding: '5px 10px', cursor: afRemoving || (!!af.confirmed_at && !afRemoveReason.trim()) ? 'not-allowed' : 'pointer' }}
                           >
                             {afRemoving ? 'Removing…' : af.confirmed_at ? 'Supersede & remove' : 'Remove'}
                           </button>
@@ -356,7 +356,7 @@ export default function DocumentsTab({
                             type="button"
                             disabled={afRemoving}
                             onClick={() => { setAfRemoveTarget(null); setAfRemoveReason(''); setAfRemoveError(''); }}
-                            style={{ fontSize: 10, color: '#94A3B8', background: 'none', border: '1px solid #2D3748', borderRadius: 4, padding: '5px 10px', cursor: 'pointer' }}
+                            style={{ fontSize: 10, color: 'var(--t1)', background: 'none', border: '1px solid var(--t2)', borderRadius: 4, padding: '5px 10px', cursor: 'pointer' }}
                           >
                             Cancel
                           </button>
@@ -369,8 +369,8 @@ export default function DocumentsTab({
               {/* Upload zone */}
               {!auditedConfirmForm && (
                 auditedUploading ? (
-                  <div style={{ padding: '14px 12px', textAlign: 'center', border: '1px dashed #2D3748', borderRadius: 6, marginTop: 8 }}>
-                    <span style={{ fontSize: 12, color: '#14B8A6' }}>
+                  <div style={{ padding: '14px 12px', textAlign: 'center', border: '1px dashed var(--t2)', borderRadius: 6, marginTop: 8 }}>
+                    <span style={{ fontSize: 12, color: 'var(--accent)' }}>
                       {declarationType === 'management' ? 'Processing management accounts…' : 'Extracting financial data…'}
                     </span>
                   </div>
@@ -385,20 +385,20 @@ export default function DocumentsTab({
 
               {/* Upload error */}
               {auditedUploadError && !auditedConfirmForm && (
-                <p style={{ fontSize: 11, color: '#F87171', marginTop: 6 }}>{auditedUploadError} — fill in details manually below</p>
+                <p style={{ fontSize: 11, color: 'var(--red)', marginTop: 6 }}>{auditedUploadError} — fill in details manually below</p>
               )}
 
               {/* Confirmation / manual fill form */}
               {auditedConfirmForm && (
-                <div style={{ background: '#0A0F1C', border: '1px solid #14B8A6', borderRadius: 8, padding: 16, marginTop: 12 }}>
+                <div style={{ background: 'var(--s1)', border: '1px solid var(--accent)', borderRadius: 8, padding: 16, marginTop: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#5EEAD4', letterSpacing: '0.08em' }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.08em' }}>
                       {auditedConfirmForm.extraction_confidence != null
                         ? `CONFIRM EXTRACTED DETAILS — ${auditedConfirmForm.extraction_confidence}% confidence`
                         : 'ENTER FINANCIAL DETAILS'}
                     </div>
                     {auditedConfirmForm.declaration_type === 'management' && (
-                      <span style={{ fontSize: 9, background: 'rgba(251,191,36,0.15)', color: '#FCD34D', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 3, padding: '2px 6px', letterSpacing: '0.05em' }}>MANAGEMENT</span>
+                      <span style={{ fontSize: 9, background: 'rgba(251,191,36,0.15)', color: 'var(--amber)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 3, padding: '2px 6px', letterSpacing: '0.05em' }}>MANAGEMENT</span>
                     )}
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -409,18 +409,18 @@ export default function DocumentsTab({
                       { key: 'financial_year_end', label: 'FY end date', type: 'text', placeholder: 'YYYY-MM-DD' },
                     ] as const).map(({ key, label, type, placeholder }) => (
                       <div key={key}>
-                        <label style={{ fontSize: 10, color: '#64748B', display: 'block', marginBottom: 4 }}>{label}</label>
+                        <label style={{ fontSize: 10, color: 'var(--t1)', display: 'block', marginBottom: 4 }}>{label}</label>
                         <input
                           type={type}
                           value={(auditedConfirmForm[key as keyof AuditedFinancialsRecord] as string | undefined) ?? ''}
                           onChange={(e) => setAuditedConfirmForm((prev) => prev ? { ...prev, [key]: e.target.value } : prev)}
                           placeholder={placeholder}
-                          style={{ width: '100%', background: '#131929', border: '1px solid rgba(20,184,166,0.25)', borderRadius: 5, padding: '6px 8px', fontSize: 12, color: '#E2E8F0', outline: 'none', boxSizing: 'border-box' }}
+                          style={{ width: '100%', background: 'var(--s2)', border: '1px solid rgba(20,184,166,0.25)', borderRadius: 5, padding: '6px 8px', fontSize: 12, color: 'var(--t0)', outline: 'none', boxSizing: 'border-box' }}
                         />
                       </div>
                     ))}
                   </div>
-                  <div style={{ fontSize: 10, color: '#64748B', marginTop: 10, marginBottom: 6 }}>Amounts in KES (whole numbers)</div>
+                  <div style={{ fontSize: 10, color: 'var(--t1)', marginTop: 10, marginBottom: 6 }}>Amounts in KES (whole numbers)</div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     {([
                       { key: 'turnover_cents', label: 'Annual revenue (KES)' },
@@ -434,7 +434,7 @@ export default function DocumentsTab({
                       const displayVal = rawVal != null ? String(Math.round((rawVal as number) / 100)) : '';
                       return (
                         <div key={key}>
-                          <label style={{ fontSize: 10, color: '#64748B', display: 'block', marginBottom: 4 }}>{label}</label>
+                          <label style={{ fontSize: 10, color: 'var(--t1)', display: 'block', marginBottom: 4 }}>{label}</label>
                           <input
                             type="text"
                             value={displayVal}
@@ -443,7 +443,7 @@ export default function DocumentsTab({
                               setAuditedConfirmForm((prev) => prev ? { ...prev, [key]: isNaN(kes) ? null : Math.round(kes * 100) } : prev);
                             }}
                             placeholder="0"
-                            style={{ width: '100%', background: '#131929', border: '1px solid rgba(20,184,166,0.25)', borderRadius: 5, padding: '6px 8px', fontSize: 12, color: '#E2E8F0', outline: 'none', boxSizing: 'border-box' }}
+                            style={{ width: '100%', background: 'var(--s2)', border: '1px solid rgba(20,184,166,0.25)', borderRadius: 5, padding: '6px 8px', fontSize: 12, color: 'var(--t0)', outline: 'none', boxSizing: 'border-box' }}
                           />
                         </div>
                       );
@@ -470,14 +470,14 @@ export default function DocumentsTab({
                           setAuditedSaving(false);
                         }
                       }}
-                      style={{ flex: 1, padding: '8px 0', background: '#14B8A6', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: auditedSaving ? 'not-allowed' : 'pointer', opacity: auditedSaving ? 0.6 : 1 }}
+                      style={{ flex: 1, padding: '8px 0', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: auditedSaving ? 'not-allowed' : 'pointer', opacity: auditedSaving ? 0.6 : 1 }}
                     >
                       {auditedSaving ? 'Saving…' : 'Save financial details'}
                     </button>
                     <button
                       type="button"
                       onClick={() => { setAuditedConfirmForm(null); setAuditedUploadError(''); }}
-                      style={{ padding: '8px 14px', background: 'transparent', color: '#64748B', border: '1px solid #1E2A3A', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
+                      style={{ padding: '8px 14px', background: 'transparent', color: 'var(--t1)', border: '1px solid var(--b1)', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
                     >
                       Cancel
                     </button>
@@ -488,22 +488,22 @@ export default function DocumentsTab({
           </div>
 
           {/* Application Documents */}
-          <div style={{ background: '#0D1220', border: '1px solid #1E2A3A', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+          <div style={{ background: 'var(--s1)', border: '1px solid var(--b1)', borderRadius: 8, padding: 20, marginBottom: 24 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#CBD5E1' }}>APPLICATION DOCUMENTS</span>
-              <span style={{ fontSize: 11, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace" }}>optional</span>
+              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--t0)' }}>APPLICATION DOCUMENTS</span>
+              <span style={{ fontSize: 11, color: 'var(--t1)', fontFamily: "'IBM Plex Mono', monospace" }}>optional</span>
             </div>
             {[
               { label: 'Business registration certificate', formats: 'PDF · DOCX' },
               { label: 'KRA PIN certificate', formats: 'PDF' },
               { label: 'Director ID / Passport', formats: 'PDF · JPG' },
             ].map((doc) => (
-              <div key={doc.label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid #1A2235' }}>
-                <span style={{ width: 20, height: 20, borderRadius: 4, background: '#0D1220', border: '1px dashed #2D3748', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <span style={{ fontSize: 11, color: '#374151' }}>—</span>
+              <div key={doc.label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid var(--s3)' }}>
+                <span style={{ width: 20, height: 20, borderRadius: 4, background: 'var(--s1)', border: '1px dashed var(--t2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <span style={{ fontSize: 11, color: 'var(--t2)' }}>—</span>
                 </span>
-                <span style={{ flex: 1, fontSize: 13, color: '#4A5568' }}>{doc.label}</span>
-                <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: '#374151', background: '#0D1220', border: '1px solid #1E2A3A', padding: '2px 7px', borderRadius: 3 }}>PENDING</span>
+                <span style={{ flex: 1, fontSize: 13, color: 'var(--t1)' }}>{doc.label}</span>
+                <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--t2)', background: 'var(--s1)', border: '1px solid var(--b1)', padding: '2px 7px', borderRadius: 3 }}>PENDING</span>
               </div>
             ))}
           </div>
@@ -513,23 +513,23 @@ export default function DocumentsTab({
             <button
               onClick={onInitialiseAnalysis}
               disabled={statementQueue.length === 0 || queueHasPending || isProcessing || !!auditedConfirmForm}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 20px', background: statementQueue.length === 0 || queueHasPending || isProcessing || !!auditedConfirmForm ? '#1A2235' : '#14B8A6', color: statementQueue.length === 0 || queueHasPending || isProcessing || !!auditedConfirmForm ? '#374151' : '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: statementQueue.length === 0 || queueHasPending || isProcessing || !!auditedConfirmForm ? 'not-allowed' : 'pointer', fontFamily: "'IBM Plex Sans', sans-serif", transition: 'background 0.15s' }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 20px', background: statementQueue.length === 0 || queueHasPending || isProcessing || !!auditedConfirmForm ? 'var(--s3)' : 'var(--accent)', color: statementQueue.length === 0 || queueHasPending || isProcessing || !!auditedConfirmForm ? 'var(--t2)' : '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: statementQueue.length === 0 || queueHasPending || isProcessing || !!auditedConfirmForm ? 'not-allowed' : 'pointer', fontFamily: "'IBM Plex Sans', sans-serif", transition: 'background 0.15s' }}
             >
               {isProcessing ? 'Processing…' : 'Initialise analysis pipeline'}
               {!isProcessing && <span style={{ fontSize: 16 }}>→</span>}
             </button>
             {statementQueue.length > 0 && (
-              <span style={{ fontSize: 12, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace" }}>
+              <span style={{ fontSize: 12, color: 'var(--t1)', fontFamily: "'IBM Plex Mono', monospace" }}>
                 {statementQueue.filter(i => i.status === 'ready').length} documents indexed{queueHasPending ? ` · ${statementQueue.filter(i => i.status === 'processing' || i.status === 'uploading').length} pending` : ''}
               </span>
             )}
           </div>
           {auditedConfirmForm && (
-            <div style={{ marginTop: 12, fontSize: 12, color: '#F59E0B', fontFamily: "'IBM Plex Mono', monospace" }}>
+            <div style={{ marginTop: 12, fontSize: 12, color: 'var(--amber)', fontFamily: "'IBM Plex Mono', monospace" }}>
               Save or cancel the financial details form above before initialising analysis.
             </div>
           )}
-          {errorMsg && <div style={{ marginTop: 12, fontSize: 12, color: '#F87171', fontFamily: "'IBM Plex Mono', monospace" }}>{errorMsg}</div>}
+          {errorMsg && <div style={{ marginTop: 12, fontSize: 12, color: 'var(--red)', fontFamily: "'IBM Plex Mono', monospace" }}>{errorMsg}</div>}
         </>
       )}
     </div>

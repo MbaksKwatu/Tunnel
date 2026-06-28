@@ -2,19 +2,67 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── LIGHT MODE (default) ── */
 :root {
-  --foreground-rgb: 255, 255, 255;
-  --background-rgb: 13, 15, 18;
-  --accent: #14B8A6;
+  --bg:           #F8F6F1;
+  --s1:           #FFFFFF;
+  --s2:           #F1EEE8;
+  --s3:           #EDE9E0;
+  --s4:           #E5E0D6;
+  --b1:           rgba(0,0,0,.08);
+  --b2:           rgba(0,0,0,.13);
+  --t0:           #111111;
+  --t1:           #555555;
+  --t2:           #888888;
+  --accent:       #0D9488;
+  --accent-hover: #0A7068;
+  --green:        #15803D;
+  --green-d:      rgba(21,128,61,.09);
+  --amber:        #C8960C;
+  --amber-d:      rgba(200,150,12,.09);
+  --red:          #DC2626;
+  --red-d:        rgba(220,38,38,.07);
+  /* Fonts (set by PAR-29, keep them) */
+  --font-sans:    'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono:    'IBM Plex Mono', 'Courier New', monospace;
+}
+
+/* ── DARK MODE ── */
+.dark {
+  --bg:           #080C18;
+  --s1:           #0D1220;
+  --s2:           #111827;
+  --s3:           #1A2035;
+  --s4:           #1F2940;
+  --b1:           rgba(255,255,255,.07);
+  --b2:           rgba(255,255,255,.12);
+  --t0:           #F9FAFB;
+  --t1:           #9CA3AF;
+  --t2:           #4B5563;
+  --accent:       #14B8A6;
   --accent-hover: #0D9488;
-  --bg-primary: #080C18;
-  --teal: #14B8A6;
-  --teal-dark: #0D9488;
+  --green:        #10B981;
+  --green-d:      rgba(16,185,129,.12);
+  --amber:        #F59E0B;
+  --amber-d:      rgba(245,158,11,.12);
+  --red:          #EF4444;
+  --red-d:        rgba(239,68,68,.09);
 }
 
 body {
-  color: rgb(var(--foreground-rgb));
-  background: rgb(var(--background-rgb));
+  color: var(--t0);
+  background: var(--bg);
+}
+
+*, *::before, *::after {
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+
+svg, img, canvas, video {
+  transition: none;
 }
 
 @layer utilities {
