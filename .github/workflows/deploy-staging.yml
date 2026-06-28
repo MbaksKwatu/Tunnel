@@ -6,6 +6,22 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      # Not secret — same project/org IDs already in the (gitignored)
+      # .vercel/project.json from `vercel link`. Setting them here makes
+      # the CLI treat the project as already linked, which skips the
+      # "Searching for existing projects… Detected services…" auto-link
+      # flow entirely. That flow is the actual bug: with no linked project
+      # in a fresh CI checkout, the CLI auto-detects this repo as a
+      # monorepo (Next.js root + backend/ FastAPI app) and derives a
+      # composite service name containing "---", which Vercel rejects
+      # outright (400, "cannot contain the sequence '---'") — confirmed
+      # on every run of this workflow since it was added (all failed in
+      # ~25s at this exact step). The CLI versions in this range have no
+      # `--name` flag to override the derived name directly; skipping
+      # the auto-link path is the actual fix.
+      VERCEL_ORG_ID: team_XB5VRCY5Aw7WZHX6VmCoJQ1d
+      VERCEL_PROJECT_ID: prj_tFcVwlw0XAJMP0zH8QfmMmG2WLkf
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,13 +36,6 @@ jobs:
       # `vercel deploy --prod` does the build AND the promotion in one
       # deterministic step, same as the manual command that fixed this
       # once already — now it runs on every push instead of by hand.
-      # Pinned, not @latest: 54.14.5 added multi-service monorepo
-      # auto-detection that saw this repo's Next.js root + backend/
-      # FastAPI app and tried to derive a composite service name
-      # containing "---", which Vercel rejects outright (400,
-      # "cannot contain the sequence '---'"). 52.0.0 is what was
-      # actually tested manually against this exact project/repo
-      # before this workflow was written — use what was verified.
       - name: Install Vercel CLI
         run: npm install -g vercel@52.0.0
       - name: Deploy to Vercel production (staging project)
