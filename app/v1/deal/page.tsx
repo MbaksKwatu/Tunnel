@@ -727,7 +727,7 @@ function V1DealPageInner() {
   const TAB_LABELS: Record<string, string> = { documents: 'Documents', analysis: 'Analysis', review: 'Parity Review', queue: 'Review Queue', snapshot: 'Snapshot' };
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: '#080C18', fontFamily: "'IBM Plex Sans', sans-serif", color: '#E2E8F0' }}>
+    <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)', fontFamily: "'IBM Plex Sans', sans-serif", color: 'var(--t0)' }}>
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
@@ -746,12 +746,12 @@ function V1DealPageInner() {
       {/* Main */}
       <div style={{ marginLeft: 200, flex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
         {/* Top bar */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 40px', height: 48, borderBottom: '1px solid #1A2235', background: '#0A0F1E', flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151', fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.08em' }}>
-            <span style={{ cursor: 'pointer', color: '#4A5568' }} onClick={() => router.push('/deals/new')}>DEALS</span>
-            {dealShortId !== '—' && <><span>·</span><span style={{ color: '#4A5568' }}>{dealShortId}</span></>}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 40px', height: 48, borderBottom: '1px solid var(--s3)', background: 'var(--s2)', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--t2)', fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.08em' }}>
+            <span style={{ cursor: 'pointer', color: 'var(--t2)' }} onClick={() => router.push('/deals/new')}>DEALS</span>
+            {dealShortId !== '—' && <><span>·</span><span style={{ color: 'var(--t2)' }}>{dealShortId}</span></>}
             <span>·</span>
-            <span style={{ color: '#CBD5E1' }}>{TAB_LABELS[activeTab].toUpperCase()}</span>
+            <span style={{ color: 'var(--t1)' }}>{TAB_LABELS[activeTab].toUpperCase()}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             {isProcessing && (
@@ -761,8 +761,8 @@ function V1DealPageInner() {
               </div>
             )}
             {analysisState === 'done' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: '#4ADE80', fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.1em' }}>
-                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#4ADE80', display: 'inline-block' }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: 'var(--green)', fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.1em' }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--green)', display: 'inline-block' }} />
                 COMPLETE
               </div>
             )}
@@ -773,27 +773,27 @@ function V1DealPageInner() {
         <div style={{ flex: 1, padding: '32px 40px 48px', maxWidth: 1100, width: '100%' }}>
           {/* Deal header */}
           <div style={{ marginBottom: 24 }}>
-            <h1 style={{ fontSize: 22, fontWeight: 700, color: '#F1F5F9', margin: 0, letterSpacing: '-0.01em' }}>
+            <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--t0)', margin: 0, letterSpacing: '-0.01em' }}>
               {deal?.name || dealName || 'New Deal'}
             </h1>
             {dealId && (
-              <div style={{ marginTop: 6, fontSize: 12, color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace", display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ marginTop: 6, fontSize: 12, color: 'var(--t2)', fontFamily: "'IBM Plex Mono', monospace", display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                 <span>{dealShortId}</span>
-                <span style={{ color: '#1E2A3A' }}>·</span>
+                <span style={{ color: 'var(--b1)' }}>·</span>
                 <span>{currency ?? deal?.currency ?? 'KES'}</span>
-                {statementQueue.length > 0 && <><span style={{ color: '#1E2A3A' }}>·</span><span>{statementQueue.length} document{statementQueue.length !== 1 ? 's' : ''}</span></>}
-                {rawTransactions.length > 0 && <><span style={{ color: '#1E2A3A' }}>·</span><span>{rawTransactions.length} transactions</span></>}
+                {statementQueue.length > 0 && <><span style={{ color: 'var(--b1)' }}>·</span><span>{statementQueue.length} document{statementQueue.length !== 1 ? 's' : ''}</span></>}
+                {rawTransactions.length > 0 && <><span style={{ color: 'var(--b1)' }}>·</span><span>{rawTransactions.length} transactions</span></>}
               </div>
             )}
           </div>
 
           {/* Tab nav */}
-          <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid #1A2235', marginBottom: 28 }}>
+          <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--s3)', marginBottom: 28 }}>
             {TABS.map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                style={{ padding: '10px 20px', fontSize: 13, fontWeight: 500, color: activeTab === tab ? '#5EEAD4' : '#4A5568', background: 'transparent', border: 'none', borderBottom: activeTab === tab ? '2px solid #14B8A6' : '2px solid transparent', cursor: 'pointer', transition: 'all 0.15s', fontFamily: "'IBM Plex Sans', sans-serif", marginBottom: -1 }}
+                style={{ padding: '10px 20px', fontSize: 13, fontWeight: 500, color: activeTab === tab ? 'var(--accent)' : 'var(--t2)', background: 'transparent', border: 'none', borderBottom: activeTab === tab ? '2px solid var(--accent)' : '2px solid transparent', cursor: 'pointer', transition: 'all 0.15s', fontFamily: "'IBM Plex Sans', sans-serif", marginBottom: -1 }}
               >
                 {TAB_LABELS[tab]}
               </button>
@@ -927,7 +927,7 @@ function V1DealPageInner() {
 
 export default function V1DealPage() {
   return (
-    <Suspense fallback={<div style={{ minHeight: '100vh', background: '#080C18', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4A5568', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 }}>LOADING…</div>}>
+    <Suspense fallback={<div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t2)', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 }}>LOADING…</div>}>
       <V1DealPageInner />
     </Suspense>
   );

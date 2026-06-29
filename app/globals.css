@@ -4,52 +4,101 @@
 
 /* ── LIGHT MODE (default) ── */
 :root {
+  /* Surfaces */
   --bg:           #F8F6F1;
   --s1:           #FFFFFF;
   --s2:           #F1EEE8;
   --s3:           #EDE9E0;
   --s4:           #E5E0D6;
+  /* Borders */
+  --b0:           rgba(0,0,0,.03);
   --b1:           rgba(0,0,0,.08);
   --b2:           rgba(0,0,0,.13);
+  /* Text */
   --t0:           #111111;
   --t1:           #555555;
   --t2:           #888888;
+  --t3:           #D1D5DB;
+  /* Accent — teal */
   --accent:       #0D9488;
   --accent-hover: #0A7068;
+  --teal:         var(--accent);
+  --accent-lt:    var(--accent);
+  --ad:           rgba(13,148,136,.10);
+  --ab:           rgba(13,148,136,.28);
+  /* Semantic — green */
   --green:        #15803D;
   --green-d:      rgba(21,128,61,.09);
+  --v:            var(--green);
+  --vd:           var(--green-d);
+  --vb:           rgba(21,128,61,.28);
+  /* Semantic — amber */
   --amber:        #C8960C;
   --amber-d:      rgba(200,150,12,.09);
+  --o:            var(--amber);
+  --od:           var(--amber-d);
+  --ob:           rgba(200,150,12,.28);
+  /* Semantic — red */
   --red:          #DC2626;
   --red-d:        rgba(220,38,38,.07);
+  --f:            var(--red);
+  --fd:           var(--red-d);
+  --fb:           rgba(220,38,38,.25);
   /* Fonts (set by PAR-29, keep them) */
   --font-sans:    'IBM Plex Sans', system-ui, sans-serif;
   --font-mono:    'IBM Plex Mono', 'Courier New', monospace;
+  /* Radius */
+  --r:            5px;
+  --rm:           7px;
 }
 
 /* ── DARK MODE ── */
 .dark {
+  /* Surfaces */
   --bg:           #080C18;
   --s1:           #0D1220;
   --s2:           #111827;
   --s3:           #1A2035;
   --s4:           #1F2940;
+  /* Borders */
+  --b0:           rgba(255,255,255,.03);
   --b1:           rgba(255,255,255,.07);
   --b2:           rgba(255,255,255,.12);
+  /* Text */
   --t0:           #F9FAFB;
   --t1:           #9CA3AF;
   --t2:           #4B5563;
+  --t3:           #1F2937;
+  /* Accent — teal */
   --accent:       #14B8A6;
   --accent-hover: #0D9488;
+  --teal:         var(--accent);
+  --accent-lt:    var(--accent);
+  --ad:           rgba(20,184,166,.10);
+  --ab:           rgba(20,184,166,.25);
+  /* Semantic — green */
   --green:        #10B981;
   --green-d:      rgba(16,185,129,.12);
+  --v:            var(--green);
+  --vd:           var(--green-d);
+  --vb:           rgba(16,185,129,.25);
+  /* Semantic — amber */
   --amber:        #F59E0B;
   --amber-d:      rgba(245,158,11,.12);
+  --o:            var(--amber);
+  --od:           var(--amber-d);
+  --ob:           rgba(245,158,11,.25);
+  /* Semantic — red */
   --red:          #EF4444;
   --red-d:        rgba(239,68,68,.09);
+  --f:            var(--red);
+  --fd:           var(--red-d);
+  --fb:           rgba(239,68,68,.25);
 }
 
 body {
+  font-family: var(--font-sans, 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif);
+  -webkit-font-smoothing: antialiased;
   color: var(--t0);
   background: var(--bg);
 }
