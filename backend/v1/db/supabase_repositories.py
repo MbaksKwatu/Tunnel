@@ -491,16 +491,48 @@ class SnapshotsRepo(SnapshotsRepository, BaseRepo):
             return None
         return decode_snapshot_row(rows[0])
 
+    # Every column on pds_snapshots EXCEPT canonical_json. canonical_json is a
+    # multi-MB blob (~4.5 MB/row); selecting it for list/aggregate reads pushes the
+    # query past the 8s authenticated-role statement_timeout and PostgREST returns
+    # 500 (PAR-33). List/metadata consumers never read it, so we never fetch it here.
+    _METADATA_COLUMNS = (
+        "id, deal_id, analysis_run_id, schema_version, config_version, "
+        "sha256_hash, created_by, created_at, financial_state_hash"
+    )
+
     def list_snapshots(self, deal_id: str) -> Sequence[Dict[str, Any]]:
-        rows = self.select_eq("deal_id", deal_id)
-        return [decode_snapshot_row(r) or r for r in rows]
+        # Metadata only — no canonical_json. Callers (GET /deals/{id},
+        # GET /deals/{id}/snapshots) return this list to the UI, which renders
+        # hashes/dates, not the canonical payload. Pulling canonical_json here is
+        # what made the deals list 500 under concurrent per-deal fetches.
+        rows = (
+            self.client.table(self.table)
+            .select(self._METADATA_COLUMNS)
+            .eq("deal_id", deal_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return rows.data or []
 
     def get_latest_snapshot(self, deal_id: str) -> Optional[Dict[str, Any]]:
-        rows = self.select_eq("deal_id", deal_id)
-        if not rows:
+        # Fetch exactly the latest row at the DB (uses idx_pds_snapshots_deal on
+        # (deal_id, created_at DESC)) instead of pulling every snapshot row and
+        # taking max() in Python. A 2-snapshot deal was ~9 MB over the wire and
+        # blew the 8s statement_timeout; this is a single ~4.5 MB row. canonical_json
+        # is kept because the heavy consumers (PDF render, enrichment, analytics,
+        # parity-review) read it.
+        rows = (
+            self.client.table(self.table)
+            .select("*")
+            .eq("deal_id", deal_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        data = rows.data or []
+        if not data:
             return None
-        latest = max(rows, key=lambda r: r.get("created_at") or "")
-        return decode_snapshot_row(latest)
+        return decode_snapshot_row(data[0])
 
     def get_all_snapshots_for_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         # For snapshots, don't paginate - there are only a few per deal
