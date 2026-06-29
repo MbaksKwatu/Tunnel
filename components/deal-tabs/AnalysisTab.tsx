@@ -389,7 +389,6 @@ export default function AnalysisTab({
                     const rows = entityBreakdown.filter((r) =>
                       section.role ? r.role === section.role : (section.roles ?? []).includes(r.role)
                     ).slice(0, 5);
-                    const total = rows.reduce((s, r) => s + r.totalAbsCents, 0);
                     return (
                       <div key={section.label} style={{ background: 'var(--s1)', border: '1px solid var(--b1)', borderRadius: 8, overflow: 'hidden' }}>
                         <div onClick={() => {
@@ -398,15 +397,16 @@ export default function AnalysisTab({
                           );
                           const allTxns = (rawTransactions as Array<Record<string, unknown>>).filter(t => {
                             const eid = String(t.entity_id ?? '');
-                            return allRows.some(r => r.entityId === eid);
+                            const ename = String(t.entity_name ?? '');
+                            return allRows.some(r => r.entityId === eid || r.entityName === ename);
                           }).sort((a, b) => Math.abs(Number(b.signed_amount_cents ?? 0)) - Math.abs(Number(a.signed_amount_cents ?? 0)));
                           onDrill({ title: section.label, color: section.color, rows: allTxns, type: 'txn' });
-                        }} style={{ padding: '12px 16px', borderBottom: '1px solid var(--s3)', borderLeft: `3px solid ${section.color}`, cursor: 'pointer', transition: 'background 0.15s' }}
+                        }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid var(--s3)', borderLeft: `3px solid ${section.color}`, cursor: 'pointer', transition: 'background 0.15s' }}
                           onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(20,184,166,0.06)')}
                           onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                         >
                           <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--t0)' }}>{section.label}</span>
-                          <span style={{ fontSize: 9, color: 'var(--t2)', marginLeft: 8 }}>click to view all</span>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--accent)', background: 'rgba(20,184,166,0.1)', border: '1px solid rgba(20,184,166,0.3)', borderRadius: 4, padding: '2px 8px', letterSpacing: '0.02em', flexShrink: 0 }}>View all →</span>
                         </div>
                         <div style={{ padding: '4px 0' }}>
                           {rows.length === 0 && <div style={{ padding: '12px 16px', fontSize: 12, color: 'var(--t2)' }}>None detected</div>}
@@ -425,12 +425,6 @@ export default function AnalysisTab({
                               <span style={{ fontSize: 12, color: 'var(--t1)', fontFamily: "'IBM Plex Mono', monospace", flexShrink: 0 }}>{formatCents(r.totalAbsCents)}</span>
                             </div>
                           ))}
-                          {rows.length > 0 && (
-                            <div style={{ padding: '9px 16px', display: 'flex', justifyContent: 'space-between' }}>
-                              <span style={{ fontSize: 11, color: 'var(--t2)' }}>Total</span>
-                              <span style={{ fontSize: 12, fontWeight: 700, color: section.color, fontFamily: "'IBM Plex Mono', monospace" }}>{formatCents(total)}</span>
-                            </div>
-                          )}
                         </div>
                       </div>
                     );
@@ -456,12 +450,12 @@ export default function AnalysisTab({
                             .filter(section.filter)
                             .sort((a, b) => Math.abs(Number(b.signed_amount_cents ?? 0)) - Math.abs(Number(a.signed_amount_cents ?? 0)));
                           onDrill({ title: section.label, color: section.color, rows: allTxns, type: 'txn' });
-                        }} style={{ padding: '12px 16px', borderBottom: '1px solid var(--s3)', borderLeft: `3px solid ${section.color}`, cursor: 'pointer', transition: 'background 0.15s' }}
+                        }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid var(--s3)', borderLeft: `3px solid ${section.color}`, cursor: 'pointer', transition: 'background 0.15s' }}
                           onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(20,184,166,0.06)')}
                           onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                         >
                           <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--t0)' }}>{section.label}</span>
-                          <span style={{ fontSize: 9, color: 'var(--t2)', marginLeft: 8 }}>click to view all</span>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--accent)', background: 'rgba(20,184,166,0.1)', border: '1px solid rgba(20,184,166,0.3)', borderRadius: 4, padding: '2px 8px', letterSpacing: '0.02em', flexShrink: 0 }}>View all →</span>
                         </div>
                         <div style={{ padding: '4px 0' }}>
                           {txns.map((t, i) => (

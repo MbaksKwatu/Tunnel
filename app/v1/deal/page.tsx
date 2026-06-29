@@ -21,12 +21,14 @@ import {
   // askParityReview moved to ParityReviewChat component
   exportTransactionsCsv,
   getNeedsReview,
+  listDeals,
   getMonthlyCashflow,
   getReconciliation,
+  getDeal,
   downloadReport,
   getLatestAnalysis,
 } from '@/lib/v1-api';
-import { useDealsListQuery, useDealDetailQuery } from '@/lib/queries/deals';
+import type { DealListItem } from '@/lib/v1-api';
 import { BatchUpload } from '@/components/BatchUpload';
 import DocumentsTab from '@/components/deal-tabs/DocumentsTab';
 import AnalysisTab from '@/components/deal-tabs/AnalysisTab';
@@ -61,7 +63,7 @@ function V1DealPageInner() {
       if (!session) { router.replace('/login'); return; }
       const email = session.user.email ?? '';
       if (email) setUserInitials(email.slice(0, 2).toUpperCase());
-      setUserId(session.user.id);
+      listDeals(session.user.id).then(r => setSidebarDeals(r.deals)).catch(() => {});
     });
   }, [router]);
 
@@ -71,19 +73,14 @@ function V1DealPageInner() {
     if (!urlDealId || deal) return;
     setDeal({ id: urlDealId });
     void refreshBatchUploadCount(urlDealId);
+    // Initial setDeal above only has `id` (from the URL param) — rehydrate the
+    // rest of the row (name, currency, etc.) from the backend so an existing
+    // deal opened by URL isn't missing fields a freshly-created deal already has.
+    getDeal(urlDealId)
+      .then(({ deal: fullDeal }) => setDeal((prev) => (prev ? { ...prev, ...fullDeal } : fullDeal)))
+      .catch((e) => console.error('getDeal failed:', e));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
-
-  // Rehydrate the rest of the row (name, currency, etc.) for a deal opened by URL —
-  // shares the ['deal', id] cache with /deals so re-opening a recently-listed deal
-  // doesn't re-fetch. Initial setDeal above only has `id` from the URL param.
-  const urlDealId = searchParams.get('deal_id');
-  const { data: dealDetailData } = useDealDetailQuery(urlDealId ?? undefined);
-  useEffect(() => {
-    if (dealDetailData?.deal) {
-      setDeal((prev) => (prev ? { ...prev, ...dealDetailData.deal } : dealDetailData.deal));
-    }
-  }, [dealDetailData]);
 
   const [file, setFile] = useState<File | null>(null);
   const [currency, setCurrency] = useState<string | null>(null);
@@ -134,14 +131,9 @@ function V1DealPageInner() {
   const checkedFailedDocs = useRef<Set<string>>(new Set());
   // Tracks doc IDs confirmed as "unsupported format" — used to show inline CTA in FileRow
   const [unknownFormatDocIds, setUnknownFormatDocIds] = useState<Set<string>>(new Set());
-  const [userId, setUserId] = useState<string | undefined>(undefined);
+  const [sidebarDeals, setSidebarDeals] = useState<DealListItem[]>([]);
   const [userInitials, setUserInitials] = useState('AN');
   const rehydratedDealId = useRef<string | null>(null);
-
-  // Shares the ['deals', userId] cache with /deals — navigating between them
-  // within staleTime reads from cache instead of re-fetching.
-  const { data: dealsListData } = useDealsListQuery(userId);
-  const sidebarDeals = dealsListData?.deals ?? [];
 
   // Derive real currency from the already-loaded deal list (no separate fetch needed)
   useEffect(() => {
