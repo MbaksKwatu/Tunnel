@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { useQueries } from '@tanstack/react-query'
 import { createBrowserClient } from '@/lib/supabase'
-import { listDeals, getDeal, listDocuments, DealListItem } from '@/lib/v1-api'
+import { getDeal, listDocuments } from '@/lib/v1-api'
+import { useDealsListQuery, dealDetailKey, dealDocumentsKey } from '@/lib/queries/deals'
 import { ThemeToggle } from '@/components/ThemeToggle'
 
 interface PipelineStatus {
@@ -25,42 +27,52 @@ function computeStatus(documentStatuses: string[], hasAnalysisRun: boolean): Pip
 export default function DashboardPage() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
-  const [deals, setDeals] = useState<DealListItem[]>([])
-  const [statuses, setStatuses] = useState<Record<string, PipelineStatus>>({})
-  const [loading, setLoading] = useState(true)
+  const [userId, setUserId] = useState<string | undefined>(undefined)
 
   useEffect(() => {
     const supabase = createBrowserClient()
     if (!supabase) { router.replace('/login'); return }
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) { router.replace('/login'); return }
       setUser(session.user)
-      try {
-        const result = await listDeals(session.user.id)
-        setDeals(result.deals)
-        const entries = await Promise.all(
-          result.deals.map(async (deal) => {
-            try {
-              const [dealDetail, docsResult] = await Promise.all([
-                getDeal(deal.id),
-                listDocuments(deal.id),
-              ])
-              const status = computeStatus(
-                docsResult.documents.map((d) => d.status),
-                dealDetail.analysis_runs.length > 0
-              )
-              return [deal.id, status] as const
-            } catch {
-              return [deal.id, STATUS_UPLOADING] as const
-            }
-          })
-        )
-        setStatuses(Object.fromEntries(entries))
-      } catch { /* ignore */ }
-      setLoading(false)
+      setUserId(session.user.id)
     })
   }, [router])
 
+  // Shares the ['deals', userId] cache with /v1/deal — re-opening the dashboard
+  // after viewing a deal reads from cache instead of re-fetching within staleTime.
+  const dealsQuery = useDealsListQuery(userId)
+  const deals = dealsQuery.data?.deals ?? []
+
+  // Per-deal status, also cache-shared with /v1/deal (['deal', id] / ['documents', id]) —
+  // opening a deal you just saw on this dashboard won't re-fetch its detail/documents.
+  const dealDetailQueries = useQueries({
+    queries: deals.map((d) => ({
+      queryKey: dealDetailKey(d.id),
+      queryFn: () => getDeal(d.id),
+      enabled: !!d.id,
+    })),
+  })
+  const dealDocumentsQueries = useQueries({
+    queries: deals.map((d) => ({
+      queryKey: dealDocumentsKey(d.id),
+      queryFn: () => listDocuments(d.id),
+      enabled: !!d.id,
+    })),
+  })
+
+  const statuses: Record<string, PipelineStatus> = {}
+  deals.forEach((d, i) => {
+    const detail = dealDetailQueries[i]?.data
+    const docs = dealDocumentsQueries[i]?.data
+    if (!detail || !docs) return
+    statuses[d.id] = computeStatus(
+      docs.documents.map((doc) => doc.status),
+      detail.analysis_runs.length > 0
+    )
+  })
+
+  const loading = dealsQuery.isLoading
   const email = user?.email ?? ''
   const initials = email ? email.slice(0, 2).toUpperCase() : 'AN'
   const activeDeals = deals.length
