@@ -15,10 +15,37 @@ the result boundary.
 """
 from __future__ import annotations
 
+import contextvars
 import logging
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Request-scoped read cache. The five reconciliation sub-calculations each
+# independently re-fetch the same audited-financials row and the same
+# fiscal-year transaction set (revenue/expenses/loans all pull the identical
+# windowed transactions, ~12 paginated round-trips apiece). Within a single
+# generate_reconciliation_section() run those reads are deterministic, so we
+# memoize them in a ContextVar the orchestrator sets up and tears down. This is
+# a pure read cache — it changes no reconciliation math, only how many times the
+# same rows are fetched. ContextVar (not a module global) keeps it per-execution
+# and avoids cross-request staleness.
+_recon_read_cache: contextvars.ContextVar[Optional[Dict[Any, Any]]] = (
+    contextvars.ContextVar("_recon_read_cache", default=None)
+)
+
+
+def _cache_get(key: Any) -> Any:
+    cache = _recon_read_cache.get()
+    if cache is None:
+        return None
+    return cache.get(key)
+
+
+def _cache_put(key: Any, value: Any) -> None:
+    cache = _recon_read_cache.get()
+    if cache is not None:
+        cache[key] = value
 
 # Tolerance below which variance is "EXACT_MATCH" (KES 10 = 1000 cents)
 _EXACT_MATCH_CENTS = 1_000
@@ -72,6 +99,11 @@ def _get_audited_financials(deal_id: str) -> Dict[str, Any]:
     Return the most recent audited financials row for this deal.
     Raises ValueError if not found.
     """
+    cache_key = ("audited_financials", deal_id)
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     sb = _get_supabase()
     res = (
         sb.table("pds_audited_financials")
@@ -86,6 +118,7 @@ def _get_audited_financials(deal_id: str) -> Dict[str, Any]:
             f"No audited financials found for deal {deal_id}. "
             "Upload audited statements before running reconciliation."
         )
+    _cache_put(cache_key, res.data[0])
     return res.data[0]
 
 
@@ -100,6 +133,11 @@ def _get_fiscal_year_transactions(
     Returns a list of dicts with keys: txn_date, signed_amount_cents, role,
     document_id, account_id, balance_cents (may be None).
     """
+    cache_key = ("fiscal_year_txns", deal_id, fiscal_start, fiscal_end)
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     sb = _get_supabase()
 
     # Paginate raw transactions in fiscal window
@@ -123,6 +161,7 @@ def _get_fiscal_year_transactions(
         offset += PAGE
 
     if not txn_rows:
+        _cache_put(cache_key, [])
         return []
 
     # Build txn_id → role map from pds_txn_entity_map.
@@ -152,6 +191,7 @@ def _get_fiscal_year_transactions(
     for row in txn_rows:
         row["role"] = role_map.get(row.get("id", ""), "")
 
+    _cache_put(cache_key, txn_rows)
     return txn_rows
 
 
