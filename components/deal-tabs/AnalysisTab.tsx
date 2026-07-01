@@ -82,8 +82,8 @@ export default function AnalysisTab({
             </div>
             {confPct && (
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                <span style={{ fontSize: 28, fontWeight: 700, color: 'var(--green)', fontFamily: "'IBM Plex Mono', monospace", lineHeight: 1 }}>{confPct}</span>
-                <span style={{ fontSize: 11, color: 'var(--t1)' }}>% CONFIDENCE</span>
+                {/* <span style={{ fontSize: 28, fontWeight: 700, color: 'var(--green)', fontFamily: "'IBM Plex Mono', monospace", lineHeight: 1 }}>{confPct}</span> */}
+                <span style={{ fontSize: 11, color: 'var(--t1)' }}> CONFIDENCE</span>
                 {tier && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--green)', background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.3)', padding: '2px 8px', borderRadius: 3, letterSpacing: '0.08em' }}>{tier.toUpperCase()}</span>}
               </div>
             )}
@@ -287,20 +287,20 @@ export default function AnalysisTab({
                       <span style={{ fontSize: 10, color: reconColor, background: `${reconColor}18`, border: `1px solid ${reconColor}33`, padding: '2px 8px', borderRadius: 3, letterSpacing: '0.06em' }}>{run.reconciliation_status}</span>
                     </div>
                     <div style={{ padding: '0 20px' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px 1fr', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--s3)' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 190px 1.4fr', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--s3)' }}>
                         {['CHECK', 'RESULT', 'BASIS'].map((h) => <span key={h} style={{ fontSize: 10, fontWeight: 700, color: 'var(--t2)', letterSpacing: '0.1em' }}>{h}</span>)}
                       </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px 1fr', gap: 12, padding: '11px 0', borderBottom: '1px solid var(--s3)', alignItems: 'center' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 190px 1.4fr', gap: 12, padding: '11px 0', borderBottom: '1px solid var(--s3)', alignItems: 'center' }}>
                         <span style={{ fontSize: 13, color: 'var(--t0)' }}>Accrual Revenue vs Bank Inflow</span>
-                        <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, color: run.reconciliation_pct_bp != null ? 'var(--green)' : 'var(--t1)' }}>
+                        <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, color: run.reconciliation_pct_bp != null ? 'var(--green)' : 'var(--t1)', whiteSpace: 'nowrap' }}>
                           {run.reconciliation_pct_bp != null ? `${(run.reconciliation_pct_bp / 100).toFixed(1)}%` : '—'}
                         </span>
                         <span style={{ fontSize: 12, color: 'var(--t1)' }}>{RECON_BASIS[run.reconciliation_status] ?? '—'}</span>
                       </div>
                       {detailRows.map((row) => (
-                        <div key={row.check} style={{ display: 'grid', gridTemplateColumns: '1fr 140px 1fr', gap: 12, padding: '11px 0', borderBottom: '1px solid var(--s3)', alignItems: 'center' }}>
+                        <div key={row.check} style={{ display: 'grid', gridTemplateColumns: '1fr 190px 1.4fr', gap: 12, padding: '11px 0', borderBottom: '1px solid var(--s3)', alignItems: 'center' }}>
                           <span style={{ fontSize: 13, color: 'var(--t0)' }}>{row.check}</span>
-                          <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, color: row.color ?? 'var(--t0)' }}>{row.result}</span>
+                          <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, color: row.color ?? 'var(--t0)', whiteSpace: 'nowrap' }}>{row.result}</span>
                           <span style={{ fontSize: 12, color: 'var(--t1)' }}>{row.basis}</span>
                         </div>
                       ))}
