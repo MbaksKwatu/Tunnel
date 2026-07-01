@@ -21,7 +21,7 @@ export default function TransactionDrillModal({ drillModal, onClose, formatCents
           <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: 'var(--t2)', fontSize: 18, cursor: 'pointer', padding: '0 0 0 12px', lineHeight: 1 }}>×</button>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr 120px', gap: 8, padding: '10px 24px', borderBottom: '1px solid var(--s3)', flexShrink: 0 }}>
-          {['DATE', 'DESCRIPTION', 'AMOUNT'].map((h) => <span key={h} style={{ fontSize: 9, fontWeight: 700, color: 'var(--b1)', letterSpacing: '0.1em' }}>{h}</span>)}
+          {['DATE', 'DESCRIPTION', 'AMOUNT'].map((h) => <span key={h} style={{ fontSize: 9, fontWeight: 700, color: 'var(--t1)', letterSpacing: '0.1em' }}>{h}</span>)}
         </div>
         <div style={{ overflowY: 'auto', flex: 1 }}>
           {drillModal.rows.length === 0 && (
