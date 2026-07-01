@@ -78,3 +78,77 @@ class TestAbsaExtractor:
                 assert isinstance(t.credit_cents, int)
             if t.balance_cents is not None:
                 assert isinstance(t.balance_cents, int)
+
+
+# ── Corporate and Business Banking template ──────────────────────────────────
+# Real Absa template with a second Value Date column (same x0 < 120 zone as
+# Transaction Date) and an end-of-statement "Total <debit> <credit>" recap
+# row with no date/description. Both previously caused 0 rows extracted —
+# see absa_extractor.py module docstring and the row-skip guard for why.
+
+CORP_SAMPLES = "/Users/mbakswatu/Desktop/Deedfilesmusa"
+CORP_ABSA_PDF = f"{CORP_SAMPLES}/Acc Act Deed Dec 2025 to May 2026.pdf"
+
+
+def _can_open_corp_absa_pdf() -> bool:
+    import pathlib
+    if not pathlib.Path(CORP_ABSA_PDF).exists():
+        return False
+    try:
+        import pdfplumber
+        with pdfplumber.open(CORP_ABSA_PDF) as pdf:
+            _ = pdf.pages[0].extract_text()
+        return True
+    except Exception:
+        return False
+
+
+def _to_cents(raw: str) -> int:
+    if not raw:
+        return 0
+    clean = raw.replace(",", "").strip()
+    if "." in clean:
+        whole, frac = clean.split(".", 1)
+        frac = (frac + "00")[:2]
+        return int(whole or 0) * 100 + int(frac)
+    return int(clean) * 100
+
+
+@pytest.mark.skipif(not _can_open_corp_absa_pdf(), reason="Corporate Absa fixture missing or unreadable")
+class TestAbsaCorporateTemplate:
+    def test_detect_absa(self):
+        assert detect_absa(CORP_ABSA_PDF) is True
+
+    def test_file_not_rejected(self):
+        result = extract_absa_pdf(CORP_ABSA_PDF)
+        assert result.extraction_status in ("success", "needs_review")
+        assert len(result.raw_transactions) > 0
+
+    def test_value_date_does_not_corrupt_transaction_date(self):
+        """Every row's date_raw must be a single ISO date, never two dates
+        concatenated (the dual-date-column bug)."""
+        result = extract_absa_pdf(CORP_ABSA_PDF)
+        for t in result.raw_transactions:
+            assert t.date_raw.count("-") == 2
+
+    def test_totals_match_statement_declared_figures(self):
+        """Strongest available accuracy signal: this statement declares its
+        own Total money in / Total money out on the account summary line —
+        sum of extracted credits/debits must match exactly."""
+        result = extract_absa_pdf(CORP_ABSA_PDF)
+        total_debit = sum(_to_cents(t.debit_raw) for t in result.raw_transactions)
+        total_credit = sum(_to_cents(t.credit_raw) for t in result.raw_transactions)
+        assert total_debit == 607080630   # KES 6,070,806.30
+        assert total_credit == 610881760  # KES 6,108,817.60
+
+    def test_closing_balance_matches_statement(self):
+        result = extract_absa_pdf(CORP_ABSA_PDF)
+        # Rows are listed newest-first in this template.
+        assert result.raw_transactions[0].balance_raw.replace(",", "") == "88152.20"
+
+    def test_no_phantom_total_row(self):
+        """The end-of-statement recap row (no date, no description, both
+        debit and credit populated) must never appear as a transaction."""
+        result = extract_absa_pdf(CORP_ABSA_PDF)
+        for t in result.raw_transactions:
+            assert not (t.debit_raw and t.credit_raw and not t.description.strip())

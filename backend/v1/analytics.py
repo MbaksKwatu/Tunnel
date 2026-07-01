@@ -38,6 +38,18 @@ _EXPENSE_ROLES = frozenset({
     "merchant_payment",
 })
 
+# Below this absolute prior-month net (cents), a MoM % swing is too noisy to
+# be meaningful (e.g. -100% from a near-zero base) — ported from
+# parity-ingestion/app/analytics.py::_MOM_RELIABLE_THRESHOLD_CENTS.
+_MOM_RELIABLE_THRESHOLD_CENTS = 1_000_000
+
+
+def _mom_change_bps(prev_net: int, net: int) -> int:
+    """Month-on-month change in basis points. Returns 0 if prev_net is zero."""
+    if prev_net == 0:
+        return 0
+    return int((net - prev_net) * 10000 // prev_net)
+
 
 def annual_revenue_summary(transactions: list[dict]) -> dict:
     """
@@ -252,14 +264,24 @@ def monthly_cashflow(transactions: list[dict]) -> list[dict]:
             monthly_out[month] = monthly_out.get(month, 0) + abs(amount)
 
     result = []
+    prev_net: int | None = None
     for month in sorted(months_seen):
         inflow = monthly_in.get(month, 0)
         outflow = monthly_out.get(month, 0)
         net = inflow - outflow
+        if prev_net is None:
+            mom_change_bps = None
+            mom_reliable = False
+        else:
+            mom_change_bps = _mom_change_bps(prev_net, net)
+            mom_reliable = abs(prev_net) >= _MOM_RELIABLE_THRESHOLD_CENTS
         result.append({
             "month": month,
             "inflow_cents": inflow,
             "outflow_cents": outflow,
             "net_cents": net,
+            "mom_change_bps": mom_change_bps,
+            "mom_reliable": mom_reliable,
         })
+        prev_net = net
     return result

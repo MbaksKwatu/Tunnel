@@ -106,12 +106,23 @@ def _fmt_kes_millions(cents: int) -> str:
     return f"KES {cents / 100 / 1_000_000:.1f}M"
 
 
-def _status_to_badge(status: str):
+_BADGE_VARIANCE_CLASS = {"b-exact": "ok", "b-ok": "ok", "b-warn": "gap", "b-variance": "bad"}
+
+
+def _status_to_badge(status: str, coverage_incomplete: bool = False):
+    """
+    Maps a reconciliation status to a (badge_class, badge_label) pair.
+    coverage_incomplete distinguishes a gap explainable by missing bank
+    statement coverage (amber b-warn) from a gap on otherwise-complete data,
+    which is treated as a genuine unexplained variance (red b-variance).
+    """
     if status == "EXACT_MATCH":
         return ("b-exact", "Exact match")
     if status in ("ACCEPTABLE", "ACCEPTABLE_VARIANCE", "HEALTHY"):
         return ("b-ok", "Acceptable")
-    return ("b-watch", "Variance")
+    if coverage_incomplete:
+        return ("b-warn", "Gap · coverage incomplete")
+    return ("b-variance", "Variance")
 
 
 def _make_qr_svg(url: str) -> str:
@@ -232,16 +243,49 @@ def render_snapshot_html(
     txns = [{
         "txn_date": t["txn_date"],
         "signed":   t["signed_amount_cents"] or 0,
-        "abs":      t["abs_amount_cents"] or 0,
+        # abs_amount_cents was NULL on every row platform-wide until the
+        # ingestion fix that stopped stripping it before insert (it was
+        # never actually a DB-generated column). Derive it here too, so
+        # rows ingested before that fix still render correctly rather than
+        # silently zeroing outflow composition and loan activity totals.
+        "abs":      t["abs_amount_cents"] if t["abs_amount_cents"] is not None else abs(t["signed_amount_cents"] or 0),
         "desc":     t["normalized_descriptor"] or "",
         "balance":  t["balance_cents"],
         "role":     role_by_txn.get(t["id"], "other"),
     } for t in txn_rows]
 
-    # 6. Reconciliation engine (only when audited financials present)
+    # 6. Reconciliation engine (only when audited financials present).
+    #    Prefer the reconciliation section SEALED into the snapshot's canonical_json so
+    #    the PDF renders the hashed values rather than a live recompute that can drift
+    #    from the snapshot. Legacy snapshots written before recon_section was sealed fall
+    #    back to a live recompute.
     recon_section: Dict = {}
     if recon_available:
-        recon_section = generate_reconciliation_section(deal_id)
+        sealed_recon = canonical.get("recon_section")
+        recon_section = sealed_recon if sealed_recon else generate_reconciliation_section(deal_id)
+
+    # 6b. Account coverage advisory — declared accounts (audited Note 11 cash
+    #     breakdown) vs submitted statements. Reuse the value already computed
+    #     inside the reconciliation section when present. In observed-only state
+    #     there are no audited financials to declare accounts against, so the
+    #     advisory is unavailable (calculate_account_coverage requires them) —
+    #     leave it empty and the template renders an "awaiting" stub.
+    if recon_available:
+        acct_cov_raw: Dict = recon_section.get("account_coverage") or {}
+    else:
+        acct_cov_raw = {}
+
+    # ── Active year ────────────────────────────────────────────────────────
+    # Drives every "this year" filter below (avg revenue, loan frequency,
+    # cashflow rows/notes). Use the declared audited financial year when
+    # present, else the most recent transaction's year — never a hardcoded
+    # year, which previously zeroed these metrics for any deal whose
+    # transactions weren't dated 2025.
+    if recon_available and af.get("financial_year"):
+        active_year = str(af["financial_year"])
+    else:
+        _txn_years = [(t["txn_date"] or "")[:4] for t in txns if t["txn_date"]]
+        active_year = max(_txn_years) if _txn_years else ""
 
     # ── Computed metrics ──────────────────────────────────────────────────────
 
@@ -250,7 +294,7 @@ def render_snapshot_html(
     for t in txns:
         if t["signed"] > 0 and t["role"] in REVENUE_ROLES:
             m = (t["txn_date"] or "")[:7]
-            if m.startswith("2025-"):
+            if m.startswith(f"{active_year}-"):
                 by_month_rev[m] += t["signed"]
     avg_rev_cents = (
         int(sum(by_month_rev.values()) / len(by_month_rev)) if by_month_rev else 0
@@ -276,12 +320,12 @@ def render_snapshot_html(
     op_in = sum(v for k, v in by_role_in.items() if k in REVENUE_ROLES)
     income_quality_pct = (op_in / total_in * 100) if total_in else 0
 
-    # Loan repayment frequency (2025)
+    # Loan repayment frequency (active year)
     repay_months: Dict[str, int] = defaultdict(int)
     for t in txns:
         if t["role"] == "loan_repayment" and t["signed"] < 0:
             m = (t["txn_date"] or "")[:7]
-            if m.startswith("2025-"):
+            if m.startswith(f"{active_year}-"):
                 repay_months[m] += 1
     loan_freq = (
         sum(repay_months.values()) / len(repay_months) if repay_months else 0
@@ -335,7 +379,7 @@ def render_snapshot_html(
     # Cashflow net-negative months
     neg_months = sorted(
         m for m, v in monthly_merged.items()
-        if m.startswith("2025-") and (v["inflow_cents"] - v["outflow_cents"]) < 0
+        if m.startswith(f"{active_year}-") and (v["inflow_cents"] - v["outflow_cents"]) < 0
     )
     if neg_months:
         worst = min(
@@ -369,19 +413,16 @@ def render_snapshot_html(
     generated_date = datetime.utcnow().strftime("%B %-d, %Y")
 
     # ── Tier badge ───────────────────────────────────────────────────────────
-    _tier_map = {
-        "HIGH_CONFIDENCE":   ("tier-high", "● HIGH_CONFIDENCE · reconciled"),
-        "MEDIUM_CONFIDENCE": ("tier-med",  "● MEDIUM_CONFIDENCE · reconciled"),
-        "LOW_CONFIDENCE":    ("tier-low",  "● LOW_CONFIDENCE · reconciled"),
-    }
+    # New design system defines only two tier badge colours: tier-high (green,
+    # for MEDIUM/HIGH_CONFIDENCE) and tier-low (amber, for LOW_CONFIDENCE and
+    # the no-audited-financials observed state).
     if recon_available:
         recon_tier = recon_section.get("tier") or "LOW_CONFIDENCE"
-        tier_badge_class, tier_badge_text = _tier_map.get(
-            recon_tier, ("tier-low", f"● {recon_tier}")
-        )
+        tier_badge_class = "tier-high" if recon_tier in ("HIGH_CONFIDENCE", "MEDIUM_CONFIDENCE") else "tier-low"
+        tier_badge_text  = f"● {recon_tier} · reconciled"
     else:
         recon_tier       = "OBSERVED"
-        tier_badge_class = "tier-obs"
+        tier_badge_class = "tier-low"
         tier_badge_text  = "● Observed · bank data only"
 
     # ── Data source pills ────────────────────────────────────────────────────
@@ -425,25 +466,25 @@ def render_snapshot_html(
                 "label": "Avg monthly revenue",
                 "value": _fmt_kes_compact(avg_rev_cents),
                 "sub":   f"{currency} · operational inflows",
-                "color_class": "g",
+                "color_class": "",
             },
             {
                 "label": "PBT margin",
                 "value": f"{pbt_margin:.2f}%",
                 "sub":   f"vs declared turnover · FY{fy}",
-                "color_class": "w" if pbt_margin < 5 else "g",
+                "color_class": "positive" if pbt_margin > 0 else "negative",
             },
             {
                 "label": "Loan reconciliation",
                 "value": loan_var_str,
                 "sub":   f"{loans_r.get('status', '')} · Note 14",
-                "color_class": "g" if (loan_var_pct or 0) < 5 else "w",
+                "color_class": "warning",
             },
             {
                 "label": "Revenue gap",
                 "value": rev_gap_str,
                 "sub":   "observed vs declared · accrual basis",
-                "color_class": "g" if (rev_gap or 0) <= 15 else "w",
+                "color_class": "warning" if (rev_gap or 0) > 15 else "",
             },
         ]
     else:
@@ -452,48 +493,49 @@ def render_snapshot_html(
                 "label": "Avg monthly revenue",
                 "value": _fmt_kes_compact(avg_rev_cents),
                 "sub":   f"{currency} · operational inflows",
-                "color_class": "g",
+                "color_class": "",
             },
             {
                 "label": "Income quality",
                 "value": f"{income_quality_pct:.1f}%",
                 "sub":   "operational vs total inflows",
-                "color_class": "g" if income_quality_pct >= 70 else "w",
+                "color_class": "positive" if income_quality_pct >= 70 else "warning",
             },
             {
                 "label": "Loan obligations",
                 "value": f"{loan_freq:.1f}/mo",
                 "sub":   f"repayments · {loan_repayment_txn_count} txns detected",
-                "color_class": "w",
+                "color_class": "warning",
             },
             {
                 "label": "Cash trend",
                 "value": cash_trend_str,
                 "sub":   cash_trend_sub,
-                "color_class": "g" if cash_trend_str.startswith("+") else "w",
+                "color_class": "positive" if cash_trend_str.startswith("+") else "warning",
             },
         ]
 
     # ── Monthly cashflow chart rows ──────────────────────────────────────────
-    months_2025 = sorted(m for m in monthly_merged if m.startswith("2025-"))
+    active_months = sorted(m for m in monthly_merged if m.startswith(f"{active_year}-"))
     max_abs_net = (
         max(abs(monthly_merged[m]["inflow_cents"] - monthly_merged[m]["outflow_cents"])
-            for m in months_2025)
-        if months_2025 else 1
+            for m in active_months)
+        if active_months else 1
     ) or 1
 
     cashflow_rows_ctx = []
-    for m in months_2025:
+    for m in active_months:
         v = monthly_merged[m]
         net     = v["inflow_cents"] - v["outflow_cents"]
         abs_net = abs(net)
         bar_pct = min(int(abs_net / max_abs_net * 100), 100)
-        net_m   = abs_net / 100 / 1_000_000
         sign    = "+" if net >= 0 else "−"
         cashflow_rows_ctx.append({
             "month_label":    MONTH_ABBR.get(m[5:7], m[5:7]),
-            "net_str":        f"{sign}{net_m:.2f}M",
-            "net_color_class": "g" if net >= 0 else "r",
+            "inflow_str":     f"{v['inflow_cents'] / 100:,.0f}",
+            "outflow_str":    f"{v['outflow_cents'] / 100:,.0f}",
+            "net_str":        f"{sign}{abs_net / 100:,.0f}",
+            "net_color_class": "pos" if net >= 0 else "neg",
             "positive":       net >= 0,
             "bar_pct":        bar_pct,
         })
@@ -658,6 +700,22 @@ def render_snapshot_html(
     recon_rows: List[Dict] = []
     recon_fiscal_note = ""
 
+    # Coverage-aware badge softening: a variance is only treated as a genuine,
+    # unexplained red b-variance when bank statement coverage is complete.
+    # When accounts are known to be missing, the same underlying variance is
+    # surfaced as an explainable amber b-warn naming the actual missing
+    # account(s) — derived from the real coverage data, not hardcoded to any
+    # one deal, so this calibration applies correctly to every deal on render.
+    missing_bank_names = [
+        a.get("bank_name") for a in (acct_cov_raw.get("account_details") or [])
+        if a.get("status") != "SUBMITTED" and a.get("bank_name")
+    ]
+    coverage_incomplete = recon_available and bool(missing_bank_names)
+    missing_note = (
+        f"Coverage gap — {', '.join(missing_bank_names)} not submitted."
+        if coverage_incomplete else ""
+    )
+
     if recon_available:
         cash_r = recon_section.get("cash_position") or {}
         rev_r  = recon_section.get("revenue") or {}
@@ -672,7 +730,10 @@ def render_snapshot_html(
         elif fy:
             recon_fiscal_note = f"All checks at fiscal year-end Dec 31 {fy}"
 
-        # Cash position
+        # Cash position — never softened by coverage gaps: the declared Note 11
+        # balance is the company's own attestation of total cash at year-end, so
+        # a variance here is treated as genuinely unexplained regardless of which
+        # bank statements are missing.
         cash_var    = cash_r.get("variance_pct")
         cash_status = cash_r.get("status") or "SKIPPED"
         cash_badge  = _status_to_badge(cash_status)
@@ -689,6 +750,7 @@ def render_snapshot_html(
             "declared_str":   _fmt_kes(int(cash_r.get("total_declared_kes", 0) * 100)),
             "declared_sub":   "Note 11 · cash and equivalents",
             "variance_str":   f"{cash_var:.1f}%" if cash_var is not None else "--",
+            "variance_class": _BADGE_VARIANCE_CLASS[cash_badge[0]],
             "badge_class":    cash_badge[0],
             "badge_label":    cash_badge[1],
             "assessment":     cash_assessment,
@@ -701,7 +763,10 @@ def render_snapshot_html(
             "HEALTHY" if "HEALTHY" in rev_text
             else ("ACCEPTABLE" if "WARNING" not in rev_text and "RISK" not in rev_text else "VARIANCE")
         )
-        rev_badge = _status_to_badge(rev_status)
+        rev_badge = _status_to_badge(rev_status, coverage_incomplete)
+        rev_assessment = rev_text or "--"
+        if rev_badge[0] == "b-warn":
+            rev_assessment = f"{rev_assessment.rstrip('.')} {missing_note}"
         recon_rows.append({
             "check":        "Revenue",
             "observed_str": _fmt_kes(int(rev_r.get("bank_inflows_kes", 0) * 100)),
@@ -709,14 +774,18 @@ def render_snapshot_html(
             "declared_str": _fmt_kes(int(rev_r.get("declared_revenue_kes", 0) * 100)),
             "declared_sub": "Declared turnover",
             "variance_str": f"{rev_gap:.1f}% gap" if rev_gap is not None else "--",
+            "variance_class": _BADGE_VARIANCE_CLASS[rev_badge[0]],
             "badge_class":  rev_badge[0],
             "badge_label":  rev_badge[1],
-            "assessment":   rev_text or "--",
+            "assessment":   rev_assessment,
         })
 
         # Expenses
         exp_gap   = exp_r.get("gap_pct")
-        exp_badge = _status_to_badge("ACCEPTABLE" if (exp_gap or 0) <= 15 else "VARIANCE")
+        exp_badge = _status_to_badge("ACCEPTABLE" if abs(exp_gap or 0) <= 15 else "VARIANCE", coverage_incomplete)
+        exp_assessment = exp_r.get("explanation") or "--"
+        if exp_badge[0] == "b-warn":
+            exp_assessment = f"{exp_assessment.rstrip('.')} {missing_note}"
         recon_rows.append({
             "check":        "Expenses",
             "observed_str": _fmt_kes(int(exp_r.get("bank_outflows_kes", 0) * 100)),
@@ -724,21 +793,24 @@ def render_snapshot_html(
             "declared_str": _fmt_kes(int(exp_r.get("declared_expenses_kes", 0) * 100)),
             "declared_sub": "Total declared expenses",
             "variance_str": f"{exp_gap:.1f}% gap" if exp_gap is not None else "--",
+            "variance_class": _BADGE_VARIANCE_CLASS[exp_badge[0]],
             "badge_class":  exp_badge[0],
             "badge_label":  exp_badge[1],
-            "assessment":   exp_r.get("explanation") or "--",
+            "assessment":   exp_assessment,
         })
 
         # Loan activity
         loan_var    = loan_r.get("variance_pct")
         loan_status = loan_r.get("status") or "VARIANCE"
-        loan_badge  = _status_to_badge(loan_status)
+        loan_badge  = _status_to_badge(loan_status, coverage_incomplete)
         if loan_status == "EXACT_MATCH":
             loan_assessment = "Net borrowing matches cashflow statement exactly."
         elif loan_var is not None:
             loan_assessment = f"{abs(loan_var):.1f}% variance — review facility discrepancy."
         else:
             loan_assessment = loan_r.get("reason") or "Insufficient data."
+        if loan_badge[0] == "b-warn":
+            loan_assessment = f"{loan_assessment.rstrip('.')} {missing_note}"
         recon_rows.append({
             "check":        "Loan activity",
             "observed_str": _fmt_kes(int(loan_r.get("bank_net_borrowing_kes", 0) * 100)),
@@ -746,6 +818,7 @@ def render_snapshot_html(
             "declared_str": _fmt_kes(int(loan_r.get("declared_net_borrowing_kes", 0) * 100)),
             "declared_sub": "Cashflow statement · Note 14",
             "variance_str": f"{loan_var:.1f}%" if loan_var is not None else "0%",
+            "variance_class": _BADGE_VARIANCE_CLASS[loan_badge[0]],
             "badge_class":  loan_badge[0],
             "badge_label":  loan_badge[1],
             "assessment":   loan_assessment,
@@ -754,14 +827,7 @@ def render_snapshot_html(
     # ── Loan facilities table (recon state) ──────────────────────────────────
     loans_r        = (recon_section.get("loan_activity") or {}) if recon_available else {}
     loan_recon_status = loans_r.get("status") or ""
-    fac_match_class = (
-        "ls-a" if loan_recon_status == "EXACT_MATCH"
-        else ("ls-w" if loan_recon_status == "VARIANCE" else "ls-c")
-    )
-    fac_match_label = (
-        "✓ Match" if loan_recon_status == "EXACT_MATCH"
-        else ("Variance" if loan_recon_status == "VARIANCE" else "Acceptable")
-    )
+    fac_match_class, fac_match_label = _status_to_badge(loan_recon_status or "VARIANCE", coverage_incomplete)
     loan_facilities = [
         {
             "name":        fac.get("name") or "--",
@@ -782,9 +848,50 @@ def render_snapshot_html(
         loan_recon_label = (loans_r.get("status") or "VARIANCE").replace("_", " ").title()
     else:
         loan_recon_label = "Not reconciled"
-    vp_confidence_color = "g" if recon_tier == "HIGH_CONFIDENCE" else (
-        "w" if recon_tier in ("MEDIUM_CONFIDENCE", "LOW_CONFIDENCE") else ""
+    vp_confidence_color = "positive" if recon_tier == "HIGH_CONFIDENCE" else (
+        "warning" if recon_tier in ("MEDIUM_CONFIDENCE", "LOW_CONFIDENCE") else ""
     )
+
+    # ── Account coverage section context ─────────────────────────────────────
+    _AC_STAT_COLOR = {  # advisory tier → coverage-stat-value modifier
+        "NEGLIGIBLE": "ok", "MINOR": "warn", "MATERIAL": "warn", "CRITICAL": "critical",
+    }
+    _AC_MATERIALITY_PILL = {  # account materiality → status-pill class
+        "NEGLIGIBLE": "status-matched", "MINOR": "status-matched",
+        "MATERIAL": "status-critical", "CRITICAL": "status-critical",
+    }
+    if acct_cov_raw.get("coverage_pct") is not None:
+        account_coverage_ctx: Dict[str, Any] = {
+            "available":        True,
+            "coverage_pct":     f"{acct_cov_raw.get('coverage_pct', 0):.1f}",
+            "coverage_color_class": _AC_STAT_COLOR.get(acct_cov_raw.get("advisory_tier"), "critical"),
+            "declared_count":   acct_cov_raw.get("declared_accounts_count", 0),
+            "submitted_count":  acct_cov_raw.get("submitted_accounts_count", 0),
+            "missing_count":    acct_cov_raw.get("missing_accounts_count", 0),
+            "missing_balance_str": _fmt_kes(int(acct_cov_raw.get("missing_balance_cents") or 0)),
+            "advisory_tier":    acct_cov_raw.get("advisory_tier", "--"),
+            "recommendation":   acct_cov_raw.get("recommendation", ""),
+            "accounts": [
+                {
+                    "bank_name":    a.get("bank_name") or "--",
+                    "declared_str": _fmt_kes(int(a.get("declared_balance_cents") or 0)),
+                    "status_label": "✓ Submitted" if a.get("status") == "SUBMITTED" else "Missing",
+                    "status_class": "status-matched" if a.get("status") == "SUBMITTED" else "status-missing",
+                    "materiality":  a.get("materiality") or "--",
+                    "materiality_class": _AC_MATERIALITY_PILL.get(a.get("materiality"), "status-critical"),
+                }
+                for a in (acct_cov_raw.get("account_details") or [])
+            ],
+        }
+    else:
+        account_coverage_ctx = {
+            "available": False,
+            "note": (
+                "Account coverage compares the bank accounts declared in audited "
+                "financials (Note 11 cash breakdown) against the statements "
+                "submitted. Submit audited financials to populate this advisory."
+            ),
+        }
 
     # ── Render template ───────────────────────────────────────────────────────
     templates_dir = os.path.join(os.path.dirname(__file__), "..", "templates")
@@ -841,6 +948,7 @@ def render_snapshot_html(
         "recon_rows":         recon_rows,
         "recon_fiscal_note":  recon_fiscal_note,
         "patterns":           patterns,
+        "account_coverage":   account_coverage_ctx,
     }
 
     return template.render(**context)

@@ -229,6 +229,49 @@ async def _send_webhook(
         logger.error("[MUSA] Webhook exception session=%s: %s", session_id, exc)
 
 
+async def _notify_parser_request(
+    session_id: str,
+    deal_id: str,
+    venture_country: str,
+    document_url: Optional[str],
+    error_message: str,
+) -> None:
+    """
+    Email the team that a Musa file failed with an unsupported/unparseable
+    format, via the existing Next.js /api/request-parser endpoint (which
+    owns the Resend integration — the Python backend has no email creds of
+    its own). Tags the request partner="musa" so the route skips its
+    pds_parser_requests insert (this path already wrote to parser_requests
+    directly, just above) and the email is the only thing left to do here.
+
+    Best-effort only: this must never affect musa_sessions state or the
+    webhook Musa actually depends on.
+    """
+    frontend_url = os.getenv("PARITY_FRONTEND_URL", "https://parity-sme-staging.vercel.app")
+    notify_url = f"{frontend_url.rstrip('/')}/api/request-parser"
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                notify_url,
+                json={
+                    "partner": "musa",
+                    "bank_name": "Unknown — auto-detected ingestion failure",
+                    "country": venture_country,
+                    "notes": error_message,
+                    "deal_id": deal_id,
+                    "original_filename": document_url,
+                },
+            )
+        if resp.status_code != 200:
+            logger.error(
+                "[MUSA] Parser-request notify non-200 session=%s status=%d body=%s",
+                session_id, resp.status_code, resp.text[:200],
+            )
+    except Exception as exc:
+        logger.error("[MUSA] Parser-request notify exception session=%s: %s", session_id, exc)
+
+
 # ---------------------------------------------------------------------------
 # Main background task
 # ---------------------------------------------------------------------------
@@ -369,8 +412,8 @@ async def process_musa_session(
             error_message = f"Processing failed: {exc}"
 
         if "no transactions" in error_str or "unsupported" in error_str:
+            _doc_url = documents[0].get("url") if documents else None
             try:
-                _doc_url = documents[0].get("url") if documents else None
                 get_supabase().table("parser_requests").insert({
                     "partner": "musa",
                     "market": venture_country,
@@ -380,7 +423,18 @@ async def process_musa_session(
                     "status": "pending",
                 }).execute()
             except Exception:
-                pass  # never let parser_requests insert block the main flow
+                # Logged, not swallowed — this previously failed silently with
+                # no way to ever notice from the admin dashboard.
+                logger.exception(
+                    "[MUSA] Failed to insert parser_requests row session=%s", session_id
+                )
+            await _notify_parser_request(
+                session_id=session_id,
+                deal_id=deal_id,
+                venture_country=venture_country,
+                document_url=_doc_url,
+                error_message=str(exc),
+            )
 
         try:
             supabase.table("musa_sessions").update(

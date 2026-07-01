@@ -19,6 +19,7 @@ ExtractionMethod = Literal[
     "kcb_online_pdf",
     "ncba_pdf",
     "stanbic_pdf",
+    "im_pdf",
     "equity_xlsx",
     "xlsx_generic",
 ]

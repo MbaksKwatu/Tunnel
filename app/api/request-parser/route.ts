@@ -10,10 +10,17 @@ const NOTIFY_EMAIL = 'mbakayaweever@gmail.com';
  * Accepts JSON (from the in-app modal) or multipart FormData (from /parsers/request page).
  *
  * JSON body:
- *   { bank_name, country, account_type, notes?, deal_id?, document_id?, original_filename?, contact_email? }
+ *   { bank_name, country, account_type, notes?, deal_id?, document_id?, original_filename?, contact_email?, partner? }
  *
  * FormData:
  *   bank_name, contact_email, notes?, sample_file? (File)
+ *
+ * partner: set by automatic callers (e.g. musa_file_processor.py passes
+ * "musa") that already wrote their own row to the `parser_requests` table
+ * directly. When set, this route sends the notification email only and
+ * skips its own `pds_parser_requests` insert, so the same failure doesn't
+ * show up twice in the admin dashboard (once "Auto · <partner>", once
+ * "Manual").
  */
 export async function POST(request: NextRequest) {
   const resend = new Resend(process.env.RESEND_API_KEY);
@@ -27,6 +34,7 @@ export async function POST(request: NextRequest) {
     let dealId = '';
     let documentId = '';
     let originalFilename = '';
+    let partner = '';
     let fileBuffer: ArrayBuffer | null = null;
     let fileName = '';
 
@@ -54,6 +62,7 @@ export async function POST(request: NextRequest) {
       dealId = body.deal_id ?? '';
       documentId = body.document_id ?? '';
       originalFilename = body.original_filename ?? '';
+      partner = body.partner ?? '';
     }
 
     if (!bankName) {
@@ -61,9 +70,11 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Build notification email HTML ─────────────────────────────────────────
+    const partnerTag = partner ? ` [${partner.toUpperCase()}]` : '';
     const notifyHtml = `
-      <h2 style="font-family:monospace;color:#6366F1">🔧 Parser Request: ${bankName}</h2>
+      <h2 style="font-family:monospace;color:#14B8A6">🔧 Parser Request${partnerTag}: ${bankName}</h2>
       <table style="font-family:sans-serif;font-size:14px;border-collapse:collapse">
+        ${partner ? `<tr><td style="padding:4px 12px 4px 0;color:#6b7280;font-weight:600">Partner</td><td>${partner}</td></tr>` : ''}
         <tr><td style="padding:4px 12px 4px 0;color:#6b7280;font-weight:600">Bank</td><td>${bankName}</td></tr>
         ${country ? `<tr><td style="padding:4px 12px 4px 0;color:#6b7280;font-weight:600">Country</td><td>${country}</td></tr>` : ''}
         ${accountType ? `<tr><td style="padding:4px 12px 4px 0;color:#6b7280;font-weight:600">Account type</td><td>${accountType}</td></tr>` : ''}
@@ -91,7 +102,7 @@ export async function POST(request: NextRequest) {
     await resend.emails.send({
       from: 'Parity Parser Requests <onboarding@resend.dev>',
       to: [NOTIFY_EMAIL],
-      subject: `🔧 Parser Request: ${bankName}`,
+      subject: `🔧 Parser Request${partnerTag}: ${bankName}`,
       html: notifyHtml,
       ...(attachments.length > 0 ? { attachments } : {}),
     });
@@ -103,7 +114,7 @@ export async function POST(request: NextRequest) {
         to: [contactEmail],
         subject: 'Bank Format Received — Parity',
         html: `
-          <h2 style="font-family:monospace;color:#6366F1">Bank Format Received</h2>
+          <h2 style="font-family:monospace;color:#14B8A6">Bank Format Received</h2>
           <p style="font-family:sans-serif;font-size:14px">
             Thanks! We're onboarding the <strong>${bankName}</strong> format now.
           </p>
@@ -116,9 +127,14 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // ── Log request to Supabase ────────────────────────────────────────────
+    // ── Log request to Supabase (skip when an auto/partner path already
+    //    wrote its own parser_requests row — avoids a duplicate admin entry
+    //    for the same failure) ───────────────────────────────────────────
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.STAGING_SUPABASE_SERVICE_ROLE_KEY;
-    if (!serviceRoleKey) {
+    if (partner) {
+      // Auto path (e.g. musa_file_processor.py) already inserted into
+      // parser_requests directly; this call only needed the email above.
+    } else if (!serviceRoleKey) {
       console.warn('[api/request-parser] No service role key — skipping DB insert');
     } else {
       const supabase = createClient(

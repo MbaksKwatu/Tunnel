@@ -68,6 +68,42 @@ class BaseRepo:
                 break
         return out
 
+    def select_eq2(self, col1: str, val1: Any, col2: str, val2: Any) -> List[Dict[str, Any]]:
+        """Same pagination as select_eq, with a second equality filter pushed to the DB."""
+        out: List[Dict[str, Any]] = []
+        offset = 0
+        while True:
+            end = offset + _SELECT_PAGE_SIZE - 1
+            res = (
+                self.client.table(self.table)
+                .select("*")
+                .eq(col1, val1)
+                .eq(col2, val2)
+                .range(offset, end)
+                .execute()
+            )
+            chunk = res.data or []
+            out.extend(chunk)
+            if len(chunk) < _SELECT_PAGE_SIZE:
+                break
+            offset += _SELECT_PAGE_SIZE
+            if offset > 2_000_000:
+                break
+        return out
+
+    def select_in(self, column: str, values: Sequence[Any]) -> List[Dict[str, Any]]:
+        """Fetch only rows matching a specific set of ids — avoids pulling an entire
+        deal's table just to look up a handful of referenced rows."""
+        ids = [v for v in dict.fromkeys(values) if v]
+        if not ids:
+            return []
+        out: List[Dict[str, Any]] = []
+        for i in range(0, len(ids), BATCH_SIZE):
+            chunk_ids = ids[i : i + BATCH_SIZE]
+            res = self.client.table(self.table).select("*").in_(column, chunk_ids).execute()
+            out.extend(res.data or [])
+        return out
+
     def delete_eq(self, column: str, value: Any) -> None:
         self.client.table(self.table).delete().eq(column, value).execute()
 
@@ -355,6 +391,11 @@ class TxnEntityMapRepo(TxnEntityMapRepository, BaseRepo):
     def list_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         return self.select_eq("deal_id", deal_id)
 
+    def list_needs_review_by_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
+        """Filters role='needs_review' in the DB query instead of pulling every
+        mapping row for the deal and filtering in Python."""
+        return self.select_eq2("deal_id", deal_id, "role", "needs_review")
+
     def update_role(self, txn_uuid: str, new_role: str) -> None:
         self.client.table(self.table).update({"role": new_role}).eq("txn_id", txn_uuid).execute()
 
@@ -450,16 +491,48 @@ class SnapshotsRepo(SnapshotsRepository, BaseRepo):
             return None
         return decode_snapshot_row(rows[0])
 
+    # Every column on pds_snapshots EXCEPT canonical_json. canonical_json is a
+    # multi-MB blob (~4.5 MB/row); selecting it for list/aggregate reads pushes the
+    # query past the 8s authenticated-role statement_timeout and PostgREST returns
+    # 500 (PAR-33). List/metadata consumers never read it, so we never fetch it here.
+    _METADATA_COLUMNS = (
+        "id, deal_id, analysis_run_id, schema_version, config_version, "
+        "sha256_hash, created_by, created_at, financial_state_hash"
+    )
+
     def list_snapshots(self, deal_id: str) -> Sequence[Dict[str, Any]]:
-        rows = self.select_eq("deal_id", deal_id)
-        return [decode_snapshot_row(r) or r for r in rows]
+        # Metadata only — no canonical_json. Callers (GET /deals/{id},
+        # GET /deals/{id}/snapshots) return this list to the UI, which renders
+        # hashes/dates, not the canonical payload. Pulling canonical_json here is
+        # what made the deals list 500 under concurrent per-deal fetches.
+        rows = (
+            self.client.table(self.table)
+            .select(self._METADATA_COLUMNS)
+            .eq("deal_id", deal_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return rows.data or []
 
     def get_latest_snapshot(self, deal_id: str) -> Optional[Dict[str, Any]]:
-        rows = self.select_eq("deal_id", deal_id)
-        if not rows:
+        # Fetch exactly the latest row at the DB (uses idx_pds_snapshots_deal on
+        # (deal_id, created_at DESC)) instead of pulling every snapshot row and
+        # taking max() in Python. A 2-snapshot deal was ~9 MB over the wire and
+        # blew the 8s statement_timeout; this is a single ~4.5 MB row. canonical_json
+        # is kept because the heavy consumers (PDF render, enrichment, analytics,
+        # parity-review) read it.
+        rows = (
+            self.client.table(self.table)
+            .select("*")
+            .eq("deal_id", deal_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        data = rows.data or []
+        if not data:
             return None
-        latest = max(rows, key=lambda r: r.get("created_at") or "")
-        return decode_snapshot_row(latest)
+        return decode_snapshot_row(data[0])
 
     def get_all_snapshots_for_deal(self, deal_id: str) -> Sequence[Dict[str, Any]]:
         # For snapshots, don't paginate - there are only a few per deal
@@ -545,10 +618,75 @@ class AuditedFinancialsRepo(BaseRepo):
         return res.data[0] if res.data else data
 
     def get_by_deal_id(self, deal_id: str) -> List[Dict[str, Any]]:
-        return self.select_eq("deal_id", deal_id)
+        """Active (non-removed) records for a deal. Soft-removed rows
+        (removed_at IS NOT NULL) are retained for audit but never read."""
+        res = (
+            self.client.table(self.table)
+            .select("*")
+            .eq("deal_id", deal_id)
+            .is_("removed_at", "null")
+            .execute()
+        )
+        return res.data or []
+
+    def get_by_deal_year(self, deal_id: str, financial_year: int) -> Optional[Dict[str, Any]]:
+        """Return the single ACTIVE row for (deal_id, financial_year), or None.
+        Soft-removed rows are excluded so a removed FY does not block a re-upload
+        via the 409 guard and is not re-removed via the DELETE route."""
+        res = (
+            self.client.table(self.table)
+            .select("*")
+            .eq("deal_id", deal_id)
+            .eq("financial_year", financial_year)
+            .is_("removed_at", "null")
+            .limit(1)
+            .execute()
+        )
+        return res.data[0] if res.data else None
+
+    def soft_delete(
+        self,
+        deal_id: str,
+        financial_year: int,
+        removed_at: str,
+        removed_reason: Optional[str],
+        removed_by: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        """Mark the active (deal_id, financial_year) row removed. Returns the
+        updated row, or None if there was no active row to remove (already
+        removed, or lost a race with a concurrent re-upload). Soft-delete only —
+        the row is retained; reads filter it out via removed_at IS NULL."""
+        res = (
+            self.client.table(self.table)
+            .update({
+                "removed_at": removed_at,
+                "removed_reason": removed_reason,
+                "removed_by": removed_by,
+            })
+            .eq("deal_id", deal_id)
+            .eq("financial_year", financial_year)
+            .is_("removed_at", "null")
+            .execute()
+        )
+        return res.data[0] if res.data else None
 
     def patch_coverage_summary(self, deal_id: str, financial_year: int, summary: Dict[str, Any]) -> None:
         self.client.table(self.table).update(summary).eq("deal_id", deal_id).eq("financial_year", financial_year).execute()
+
+
+class AfConfirmLogRepo(BaseRepo):
+    """Append-only audit trail of audited-financials confirmation events
+    (one row per confirm: who/when/which FY). Insert-only by convention —
+    no update/delete, mirroring the override-log posture."""
+
+    def __init__(self):
+        super().__init__("pds_af_confirm_log")
+
+    def insert_log(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+        return self.insert(entry)
+
+    def list_by_deal(self, deal_id: str) -> List[Dict[str, Any]]:
+        return self.select_eq("deal_id", deal_id)
 
 
 class AccountCoverageRepo(BaseRepo):

@@ -54,6 +54,9 @@ def run_pending_migrations() -> None:
     except RuntimeError as e:
         logger.warning("[migrator] %s — skipping migrations", e)
         return
+    except Exception:
+        logger.exception("[migrator] failed to connect to DATABASE_URL — skipping migrations")
+        return
 
     applied, failed = 0, []
     try:

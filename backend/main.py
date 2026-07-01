@@ -43,7 +43,8 @@ _EXPLICIT_ORIGINS = [
     "https://parityfinance.vercel.app",
     "https://parity-sme-staging.vercel.app",
     "https://parity-ingestion-gmkewhxbha-uc.a.run.app",
-    "http://localhost:8000"
+    "http://localhost:8000",
+    "http://localhost:3000",
 ]
 _ALL_ORIGINS = list({o.strip() for o in _CORS_ORIGINS + _EXPLICIT_ORIGINS if o.strip()})
 logger.info("[CORS] allow_origins=%s", _ALL_ORIGINS)
