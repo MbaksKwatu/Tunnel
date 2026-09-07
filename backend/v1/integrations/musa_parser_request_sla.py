@@ -301,6 +301,7 @@ def _cleanup_expired_raw_documents(supabase) -> int:
         result = (
             supabase.table("parser_requests")
             .select("id, storage_path")
+            .eq("partner", "musa")  # intentional: retention applies to Musa/sandbox only, not licensed partners
             .in_("status", ["expired", "resolved"])
             .lt("requested_at", cutoff)
             .execute()
