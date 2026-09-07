@@ -158,6 +158,8 @@ jobs:
         run: |
           python -m pytest backend/tests_v1/test_no_float_regression.py -v --tb=short
 
-      - name: Basis point semantics
-        run: |
-          python -m pytest backend/tests_v1/test_basis_point_semantics.py -v --tb=short
+      # test_basis_point_semantics.py is excluded here: test_export_confidence_values_are_integers
+      # calls the live /v1/deals and /v1/deals/{id}/export endpoints which require
+      # SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. This job has no Supabase secrets
+      # (by design — pure-Python determinism tests only). The file runs under test-v1.yml
+      # on PRs targeting main, where Live Supabase credentials are available.
