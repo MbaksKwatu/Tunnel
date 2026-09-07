@@ -5,7 +5,7 @@ import { useAuth } from './AuthProvider'
 import { useRouter } from 'next/navigation'
 
 export default function Login() {
-  const [mode, setMode] = useState<'magic' | 'password'>('magic')
+  const [mode, setMode] = useState<'magic' | 'password'>('password')
   const [isSignUp, setIsSignUp] = useState(false)
   const [showForgotPassword, setShowForgotPassword] = useState(false)
   const [email, setEmail] = useState('')
