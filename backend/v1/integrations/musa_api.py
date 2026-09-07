@@ -71,10 +71,14 @@ class SessionResponse(BaseModel):
     3. Webhook payload sent to Musa
 
     Do NOT modify this without updating all three uses.
+
+    PAR-262 (Phase 1): deal_id is now included in REST responses (1 and 2).
+    It is NOT yet in the webhook payload (3) — that is Phase 2 scope.
     """
     session_id: str
     venture_name: str
     venture_country: str
+    deal_id: Optional[str] = None  # PAR-262: echoed back so callers can confirm which deal was used
     status: str  # "processing" | "complete" | "failed"
     status_url: str
     pdf_url: Optional[str] = None
@@ -121,6 +125,7 @@ def _build_session_response(
         session_id=session_id,
         venture_name=session_data["venture_name"],
         venture_country=session_data.get("venture_country", ""),
+        deal_id=deal_id,
         status=status,
         status_url=status_url,
         pdf_url=pdf_url,
@@ -267,6 +272,7 @@ async def create_session(
         session_id=session_id,
         venture_name=body.venture_name,
         venture_country=body.venture_country,
+        deal_id=deal_id,
         status="processing",
         status_url=status_url,
         pdf_url=None,
