@@ -131,7 +131,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 # in the Sentry dashboard immediately after deploy. Only registered when
 # SENTRY_DEBUG_ROUTE=true is set on the service (staging only).
 if os.getenv("SENTRY_DEBUG_ROUTE") == "true":
-    @app.get("/sentry-debug")
+    @app.get("/v1/sentry-debug")
     async def sentry_debug():
         """Temporary: triggers a ZeroDivisionError to verify Sentry capture."""
         return 1 / 0
