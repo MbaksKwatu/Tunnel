@@ -59,12 +59,18 @@ VALID_SESSION_BODY = {
     ],
 }
 
-# Expected fields in every SessionResponse
+# Expected fields in every REST SessionResponse (POST + GET)
 _SESSION_RESPONSE_FIELDS = {
     "session_id", "venture_name", "venture_country",
+    "deal_id",  # PAR-262: echoed back so callers can confirm which deal was used
     "status", "status_url",
     "pdf_url", "error_message", "created_at", "completed_at",
 }
+
+# Webhook payload fields — same as _SESSION_RESPONSE_FIELDS except deal_id,
+# which is Phase 2 scope (PAR-262 Option A). Keep this set separate so the
+# webhook test stays green while Phase 1 ships.
+_WEBHOOK_PAYLOAD_FIELDS = _SESSION_RESPONSE_FIELDS - {"deal_id"}
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +302,8 @@ class TestCreateSessionDealIdReuse:
         assert repo_mock.create_deal.call_count == 0, "create_deal must not be called when deal_id is reused"
         assert repo_mock.get_deal.call_count == 1
         assert repo_mock.get_deal.call_args[0][0] == did
+        # PAR-262: provided deal_id must be echoed back in the response
+        assert resp.json()["deal_id"] == did, "response must echo the reused deal_id"
 
     def test_missing_deal_id_returns_404(self, client, monkeypatch):
         """When deal_id is provided but doesn't exist, a 404 is returned immediately."""
@@ -347,6 +355,8 @@ class TestCreateSessionDealIdReuse:
         data = resp.json()
         assert data["status"] == "processing"
         assert data["venture_name"] == VALID_SESSION_BODY["venture_name"]
+        # PAR-262: newly-created deal_id must be echoed back so the caller can see it
+        assert data["deal_id"] == did, "response must echo the newly-created deal_id"
 
 
 # ===========================================================================
@@ -464,8 +474,8 @@ class TestWebhookPayload:
         call_args = mock_post.call_args
         payload = call_args.kwargs.get("json") or call_args.args[1]
 
-        assert _SESSION_RESPONSE_FIELDS.issubset(payload.keys()), (
-            f"Webhook missing fields: {_SESSION_RESPONSE_FIELDS - payload.keys()}"
+        assert _WEBHOOK_PAYLOAD_FIELDS.issubset(payload.keys()), (
+            f"Webhook missing fields: {_WEBHOOK_PAYLOAD_FIELDS - payload.keys()}"
         )
 
     def test_webhook_skipped_when_env_vars_missing(self, monkeypatch):
