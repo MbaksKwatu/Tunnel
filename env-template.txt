@@ -20,6 +20,14 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-public-key-here
 NEXT_PUBLIC_PARSER_API_URL=http://localhost:8000
 NEXT_PUBLIC_API_URL=http://localhost:8000
 
+# PAR-265: deployment environment indicator badge (EnvBadge).
+# Set to the correct value in Vercel project settings per environment:
+#   Production environment → prod
+#   Preview environment    → preview
+#   Staging branch deploy  → staging
+# Local dev falls back to "preview" when unset.
+NEXT_PUBLIC_APP_ENV=preview
+
 # ==========================================
 # BACKEND (backend/.env)
 # ==========================================
