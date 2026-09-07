@@ -7,6 +7,7 @@ import re
 import traceback
 from contextlib import asynccontextmanager
 
+import sentry_sdk
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -25,11 +26,31 @@ from v1.core.pdf_jobs import pdf_job_retention_sweeper
 
 load_dotenv()
 
+# Sentry must be initialized before the FastAPI app is created so that the
+# FastAPI/Starlette integrations are registered at app startup.
+# DSN is injected per-service via Google Secret Manager (SENTRY_DSN);
+# if absent (local dev without the secret), Sentry is silently disabled.
+# send_default_pii=False: this backend handles real financial data — PII
+# capture (request headers, IPs, user context) is an explicit opt-in later.
+# Tracing and profiling are deliberately off (Weever's call, PAR-sentry).
+_sentry_dsn = os.getenv("SENTRY_DSN")
+if _sentry_dsn:
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        send_default_pii=False,
+        enable_logs=True,
+    )
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+if _sentry_dsn:
+    logger.info("[Sentry] initialized")
+else:
+    logger.warning("[Sentry] SENTRY_DSN not set — error tracking disabled")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -92,6 +113,9 @@ register_ingestion_startup(app)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     tb = traceback.format_exc()
     logger.error("[UNHANDLED] %s: %s\n%s", type(exc).__name__, exc, tb)
+    # FastAPI's custom exception handler swallows the exception before Sentry's
+    # middleware can see it, so we capture explicitly here.
+    sentry_sdk.capture_exception(exc)
     return JSONResponse(
         status_code=500,
         content={
@@ -100,6 +124,17 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
             "error_message": str(exc),
         },
     )
+
+
+# VERIFICATION ROUTE — remove or keep gated before closing PAR-sentry.
+# Raises a deliberate ZeroDivisionError so Sentry receipt can be confirmed
+# in the Sentry dashboard immediately after deploy. Only registered when
+# SENTRY_DEBUG_ROUTE=true is set on the service (staging only).
+if os.getenv("SENTRY_DEBUG_ROUTE") == "true":
+    @app.get("/sentry-debug")
+    async def sentry_debug():
+        """Temporary: triggers a ZeroDivisionError to verify Sentry capture."""
+        return 1 / 0
 
 
 @app.get("/")

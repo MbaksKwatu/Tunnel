@@ -25,3 +25,4 @@ weasyprint==69.0
 pycountry==24.6.1
 babel==2.18.0
 price-parser==0.5.1
+sentry-sdk[fastapi]>=2.0.0
