@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from './AuthProvider'
 import { useRouter } from 'next/navigation'
+import { EnvBadge } from './EnvBadge'
 
 export default function Login() {
   const [mode, setMode] = useState<'magic' | 'password'>('magic')
@@ -96,6 +97,9 @@ export default function Login() {
           </div>
           <div className="text-xs tracking-widest uppercase" style={{ color: 'var(--accent)', fontFamily: 'IBM Plex Sans, sans-serif' }}>
             Intelligence Infrastructure
+          </div>
+          <div className="flex justify-center pt-1">
+            <EnvBadge />
           </div>
         </div>
 

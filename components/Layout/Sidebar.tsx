@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Brain, LayoutDashboard } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { EnvBadge } from '@/components/EnvBadge';
 
 interface NavItem {
   name: string;
@@ -33,6 +34,9 @@ export default function Sidebar() {
         <p className="text-xs text-gray-400">
           AI-Native Investment Intelligence
         </p>
+        <div className="mt-2">
+          <EnvBadge />
+        </div>
         <div className="mt-2 inline-flex items-center px-2 py-1 rounded border border-teal/30 bg-teal/10">
             <div className="w-1.5 h-1.5 rounded-full bg-teal animate-pulse mr-2"></div>
             <span className="text-[10px] font-bold text-teal uppercase tracking-wider">Demo Mode</span>
