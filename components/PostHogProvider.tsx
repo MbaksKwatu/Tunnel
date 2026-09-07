@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef } from 'react'
+import { useEffect } from 'react'
 import posthog from 'posthog-js'
 
 const projectToken = process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN
@@ -24,10 +24,8 @@ function configurePostHog() {
 }
 
 export function PostHogProvider({ children }: { children: React.ReactNode }) {
-  const configured = useRef(false)
-  if (!configured.current) {
+  useEffect(() => {
     configurePostHog()
-    configured.current = true
-  }
+  }, [])
   return <>{children}</>
 }
