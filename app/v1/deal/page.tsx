@@ -141,16 +141,19 @@ function V1DealPageInner() {
   useEffect(() => {
     if (!dealDocumentsQuery.data) return;
     setDealDocuments(dealDocumentsQuery.data.documents);
-    // Hydrate failureCategoryMap from persisted next_action so badges survive a page reload.
+    // Hydrate failureCategoryMap and unknownFormatDocIds from persisted next_action
+    // so badges and inline CTAs survive a page reload.
+    const newUnknown: string[] = [];
     setFailureCategoryMap((prev) => {
       const m = new Map(prev);
       for (const doc of dealDocumentsQuery.data.documents) {
         const na = (doc as Record<string, unknown>).next_action as string | undefined;
         if (na === 'invalid_document') m.set(doc.id, 'invalid_document');
-        else if (na === 'request_parser') m.set(doc.id, 'unsupported_bank');
+        else if (na === 'request_parser') { m.set(doc.id, 'unsupported_bank'); newUnknown.push(doc.id); }
       }
       return m;
     });
+    if (newUnknown.length) setUnknownFormatDocIds((prev) => new Set([...prev, ...newUnknown]));
   }, [dealDocumentsQuery.data]);
 
   const [file, setFile] = useState<File | null>(null);
