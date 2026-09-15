@@ -157,6 +157,8 @@ export interface DocumentStatusResponse {
   next_action?: string
   traceback?: string
   currency_detected?: string
+  retry_count?: number
+  pds_parser_request_id?: string
   analytics?: {
     monthly_cashflow?: Array<Record<string, unknown>>
     credit_scoring_inputs?: Record<string, unknown>
@@ -246,6 +248,31 @@ export async function enrichParserRequest(
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(fields),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function enrichPdsParserRequest(
+  dealId: string,
+  requestId: string,
+  fields: { bank_name?: string; country?: string; account_type?: string; notes?: string }
+): Promise<{ parser_request: Record<string, unknown> }> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/pds-parser-requests/${requestId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function retryDocument(
+  dealId: string,
+  documentId: string,
+): Promise<{ document_id: string; retry_count: number; attempts_remaining: number; status: string }> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/documents/${documentId}/retry`, {
+    method: 'POST',
   })
   if (!res.ok) throw new Error(await res.text())
   return res.json()

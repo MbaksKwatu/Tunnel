@@ -3,17 +3,16 @@
 import { useState, useCallback } from 'react';
 import { deleteDocument, patchAuditedFinancials,removeAuditedFinancials, AuditedFinancialsRemoveError } from '@/lib/v1-api';
 import type { Deal, AuditedFinancialsRecord } from '@/lib/v1-api';
-import type { AnalysisState, QueuedStatement } from './types';
+import type { AnalysisState, QueuedStatement, ParserRequestDoc } from './types';
 import AnalystStatus from '@/components/AnalystStatus';
 
 const MAX_STATEMENTS = 20;
-
-interface ParserRequestDoc { docId: string; fileName: string; errorMessage: string }
 
 const FileRow = ({
   item,
   accent,
   isUnknownFormat,
+  failureCategory,
   onRequestParser,
   canRemove,
   onRemove,
@@ -21,14 +20,20 @@ const FileRow = ({
   item: { id: string; fileName: string; status: QueuedStatement['status'] };
   accent: string;
   isUnknownFormat?: boolean;
+  failureCategory?: 'invalid_document' | 'unsupported_bank';
   onRequestParser?: () => void;
   canRemove?: boolean;
   onRemove?: () => void;
 }) => {
   const [removing, setRemoving] = useState(false);
-  const statusLabel = { ready: 'INDEXED', processing: 'PROCESSING', uploading: 'UPLOADING', failed: isUnknownFormat ? 'NO PARSER' : 'FAILED' }[item.status];
-  const statusColor = { ready: 'var(--green)', processing: '#818CF8', uploading: '#818CF8', failed: isUnknownFormat ? 'var(--amber)' : 'var(--red)' }[item.status];
-  const statusBg = { ready: 'rgba(74,222,128,0.08)', processing: 'rgba(129,140,248,0.12)', uploading: 'rgba(129,140,248,0.12)', failed: isUnknownFormat ? 'rgba(245,158,11,0.1)' : 'rgba(248,113,113,0.12)' }[item.status];
+  const isInvalidDoc = failureCategory === 'invalid_document';
+  const isUnsupportedBank = isUnknownFormat && !isInvalidDoc;
+  const failedLabel = isInvalidDoc ? 'UNREADABLE' : isUnsupportedBank ? 'NO PARSER' : 'FAILED';
+  const failedColor = isInvalidDoc ? 'var(--red)' : isUnsupportedBank ? 'var(--amber)' : 'var(--red)';
+  const failedBg = isInvalidDoc ? 'rgba(248,113,113,0.12)' : isUnsupportedBank ? 'rgba(245,158,11,0.1)' : 'rgba(248,113,113,0.12)';
+  const statusLabel = { ready: 'INDEXED', processing: 'PROCESSING', uploading: 'UPLOADING', failed: failedLabel }[item.status];
+  const statusColor = { ready: 'var(--green)', processing: '#818CF8', uploading: '#818CF8', failed: failedColor }[item.status];
+  const statusBg = { ready: 'rgba(74,222,128,0.08)', processing: 'rgba(129,140,248,0.12)', uploading: 'rgba(129,140,248,0.12)', failed: failedBg }[item.status];
 
   const handleRemove = async () => {
     if (!onRemove || removing) return;
@@ -51,7 +56,7 @@ const FileRow = ({
         <span style={{ width: 20, height: 20, borderRadius: 4, background: item.status === 'ready' ? 'rgba(74,222,128,0.15)' : 'var(--s3)', border: `1px solid ${item.status === 'ready' ? accent : isUnknownFormat ? 'var(--amber)' : 'var(--t2)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           {item.status === 'ready' && <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 5.5l2.5 2.5L9 3" stroke={accent} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
           {(item.status === 'processing' || item.status === 'uploading') && <span style={{ width: 8, height: 8, borderRadius: '50%', borderTop: `2px solid ${accent}`, borderRight: `2px solid transparent`, animation: 'spin 0.8s linear infinite', display: 'inline-block' }} />}
-          {item.status === 'failed' && <span style={{ fontSize: 10, color: isUnknownFormat ? 'var(--amber)' : 'var(--red)', fontWeight: 700 }}>!</span>}
+          {item.status === 'failed' && <span style={{ fontSize: 10, color: failedColor, fontWeight: 700 }}>!</span>}
         </span>
         <span style={{ flex: 1, fontSize: 13, color: 'var(--t0)', fontFamily: "'IBM Plex Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.fileName}</span>
         <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: statusColor, background: statusBg, padding: '2px 7px', borderRadius: 3, flexShrink: 0 }}>{statusLabel}</span>
@@ -66,16 +71,22 @@ const FileRow = ({
           </button>
         )}
       </div>
-      {/* Inline CTA for unsupported bank format */}
-      {item.status === 'failed' && isUnknownFormat && onRequestParser && (
+      {/* Inline CTA for unsupported bank format (Category B) */}
+      {item.status === 'failed' && isUnsupportedBank && onRequestParser && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 10, paddingLeft: 30 }}>
           <span style={{ fontSize: 11, color: 'var(--t1)' }}>Format not supported —</span>
           <button
             onClick={onRequestParser}
             style={{ fontSize: 11, fontWeight: 600, color: 'var(--amber)', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 4, padding: '3px 10px', cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
           >
-            Request parser →
+            View options →
           </button>
+        </div>
+      )}
+      {/* Inline message for unreadable file (Category A) */}
+      {item.status === 'failed' && isInvalidDoc && (
+        <div style={{ paddingBottom: 10, paddingLeft: 30 }}>
+          <span style={{ fontSize: 11, color: 'var(--red)' }}>File is unreadable — please upload a different file</span>
         </div>
       )}
     </div>
@@ -104,6 +115,8 @@ export interface DocumentsTabProps {
   bankQueue: QueuedStatement[];
   bankReady: number;
   unknownFormatDocIds: Set<string>;
+  /** Maps document id → failure category for rendering distinct Category A/B UI. */
+  failureCategoryMap?: Map<string, 'invalid_document' | 'unsupported_bank'>;
   onRequestParser: (doc: ParserRequestDoc) => void;
   analysisState: AnalysisState;
   onBankDrop: (file: File) => Promise<void>;
@@ -132,6 +145,7 @@ export default function DocumentsTab({
   bankQueue,
   bankReady,
   unknownFormatDocIds,
+  failureCategoryMap,
   onRequestParser,
   analysisState,
   onBankDrop,
@@ -216,7 +230,8 @@ export default function DocumentsTab({
                   item={item}
                   accent="var(--green)"
                   isUnknownFormat={unknownFormatDocIds.has(item.id)}
-                  onRequestParser={() => onRequestParser({ docId: item.id, fileName: item.fileName, errorMessage: 'Bank format not recognised' })}
+                  failureCategory={failureCategoryMap?.get(item.id)}
+                  onRequestParser={() => onRequestParser({ docId: item.id, fileName: item.fileName, errorMessage: 'Bank format not recognised', failureCategory: failureCategoryMap?.get(item.id) })}
                   canRemove={analysisState === 'idle' || analysisState === 'checking' || item.status === 'failed'}
                   onRemove={() => onRemoveStatement(item.id)}
                 />

@@ -29,6 +29,8 @@ import {
   getLatestAnalysis,
   listPendingParserRequests,
   enrichParserRequest,
+  enrichPdsParserRequest,
+  retryDocument,
 } from '@/lib/v1-api';
 import type { DealListItem } from '@/lib/v1-api';
 import { useDealsListQuery, useDealDetailQuery, useDealDocumentsQuery, dealDocumentsKey, dealDetailKey, dealsListKey } from '@/lib/queries/deals';
@@ -186,9 +188,11 @@ function V1DealPageInner() {
   const [parserRequestForm, setParserRequestForm] = useState({ bankName: '', country: 'Kenya', accountType: 'Business Current', notes: '' });
   const [parserRequestSubmitting, setParserRequestSubmitting] = useState(false);
   const [parserRequestSubmitted, setParserRequestSubmitted] = useState(false);
+  const [parserRequestRetrying, setParserRequestRetrying] = useState(false);
   const checkedFailedDocs = useRef<Set<string>>(new Set());
   // Tracks doc IDs confirmed as "unsupported format" — used to show inline CTA in FileRow
   const [unknownFormatDocIds, setUnknownFormatDocIds] = useState<Set<string>>(new Set());
+  const [failureCategoryMap, setFailureCategoryMap] = useState<Map<string, 'invalid_document' | 'unsupported_bank'>>(new Map());
   const [sidebarDeals, setSidebarDeals] = useState<DealListItem[]>([]);
   const [userInitials, setUserInitials] = useState('AN');
   const userSelectedTabRef = useRef(false);
@@ -471,13 +475,33 @@ function V1DealPageInner() {
           try {
             const statusRes = await getDocumentStatus(id);
             const errType = statusRes.error_type ?? '';
-            const errMsg = (statusRes.error_message ?? statusRes.error ?? '').toLowerCase();
-            const isUnknownParser =
-              errType === 'InvalidSchemaError' &&
-              (errMsg.includes('not recognised') || errMsg.includes('not recognized') || errMsg.includes('unsupported') || errMsg.includes('no valid transactions'));
-            if (isUnknownParser) {
-              setUnknownParserDoc({ docId: id, fileName, errorMessage: statusRes.error_message ?? statusRes.error ?? 'Bank format not recognised' });
+            const nextAction = statusRes.next_action ?? '';
+            // Category A: invalid document (corrupt, wrong type) — show error modal, no retry/parser
+            const isInvalidDocument = errType === 'InvalidDocumentError' || nextAction === 'invalid_document';
+            // Category B: valid document but unsupported bank — show parser-request modal + retry
+            const isUnsupportedBank = !isInvalidDocument && (
+              errType === 'InvalidSchemaError' && nextAction === 'request_parser'
+            );
+            if (isInvalidDocument) {
+              setUnknownParserDoc({
+                docId: id,
+                fileName,
+                errorMessage: statusRes.error_message ?? statusRes.error ?? 'File could not be read as a bank statement',
+                failureCategory: 'invalid_document',
+              });
               setUnknownFormatDocIds((prev) => new Set([...prev, id]));
+              setFailureCategoryMap((prev) => { const m = new Map(prev); m.set(id, 'invalid_document'); return m; });
+            } else if (isUnsupportedBank) {
+              setUnknownParserDoc({
+                docId: id,
+                fileName,
+                errorMessage: statusRes.error_message ?? statusRes.error ?? 'Bank format not recognised',
+                failureCategory: 'unsupported_bank',
+                pdsParserRequestId: statusRes.pds_parser_request_id,
+                retryCount: statusRes.retry_count ?? 0,
+              });
+              setUnknownFormatDocIds((prev) => new Set([...prev, id]));
+              setFailureCategoryMap((prev) => { const m = new Map(prev); m.set(id, 'unsupported_bank'); return m; });
             }
           } catch {
             // silently skip — this is a best-effort enrichment
@@ -822,8 +846,36 @@ function V1DealPageInner() {
             notes: parserRequestForm.notes.trim() || undefined,
           }).catch(() => {/* best-effort — still show confirmation below */});
         }
+      } else if (unknownParserDoc.pdsParserRequestId && deal?.id) {
+        // PAR-125: server already auto-created the pds_parser_requests row at
+        // Category B detection time. Enrich it in place rather than inserting
+        // a duplicate (PAR-242 pattern, now applied to the direct-upload path too).
+        await enrichPdsParserRequest(deal.id, unknownParserDoc.pdsParserRequestId, {
+          bank_name: parserRequestForm.bankName.trim(),
+          country: parserRequestForm.country,
+          account_type: parserRequestForm.accountType,
+          notes: parserRequestForm.notes.trim() || undefined,
+        }).catch(() => {/* best-effort */});
+
+        // Send notification email (no DB insert needed — row already exists).
+        fetch('/api/request-parser', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bank_name: parserRequestForm.bankName.trim(),
+            country: parserRequestForm.country,
+            account_type: parserRequestForm.accountType,
+            notes: parserRequestForm.notes.trim() || '',
+            deal_id: deal?.id ?? '',
+            document_id: unknownParserDoc.docId,
+            original_filename: unknownParserDoc.fileName,
+            // Pass a pseudo-partner so the route skips the duplicate pds_parser_requests insert.
+            partner: 'web-upload-auto',
+          }),
+        }).catch(() => {/* silently ignore email errors */});
       } else {
-        // Direct-upload path (existing behaviour): fresh pds_parser_requests row.
+        // Fallback: no auto-created row (e.g. older document before PAR-125).
+        // Fall back to legacy frontend insert.
         const sbClient = supabase;
         if (sbClient) {
           await (sbClient as any).from('pds_parser_requests').insert({
@@ -839,8 +891,6 @@ function V1DealPageInner() {
           });
         }
 
-        // Email notification only for the direct path — Musa's row already
-        // fired its own notification at detection time (musa_file_processor.py).
         fetch('/api/request-parser', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -858,9 +908,30 @@ function V1DealPageInner() {
 
       setParserRequestSubmitted(true);
     } catch {
-      setParserRequestSubmitted(true); // still show confirmation even if insert/enrich fails
+      setParserRequestSubmitted(true); // still show confirmation even if enrich fails
     } finally {
       setParserRequestSubmitting(false);
+    }
+  };
+
+  const handleParserRequestRetry = async () => {
+    if (!unknownParserDoc || !deal?.id) return;
+    setParserRequestRetrying(true);
+    try {
+      await retryDocument(deal.id, unknownParserDoc.docId);
+      // Close the modal — the polling loop will re-open it if it fails again,
+      // with the updated retry_count reflecting the new attempt.
+      setUnknownParserDoc(null);
+      setParserRequestSubmitted(false);
+      setParserRequestForm({ bankName: '', country: 'Kenya', accountType: 'Business Current', notes: '' });
+      // Re-mark the document as processing so the UI shows the spinner.
+      setStatementQueue((prev) =>
+        prev.map((q) => (q.id === unknownParserDoc.docId ? { ...q, status: 'processing' as const } : q))
+      );
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Retry failed — please try again');
+    } finally {
+      setParserRequestRetrying(false);
     }
   };
 
@@ -1008,6 +1079,7 @@ function V1DealPageInner() {
               bankQueue={bankQueue}
               bankReady={bankReady}
               unknownFormatDocIds={unknownFormatDocIds}
+              failureCategoryMap={failureCategoryMap}
               onRequestParser={setUnknownParserDoc}
               analysisState={analysisState}
               onBankDrop={handleBankDrop}
@@ -1117,8 +1189,10 @@ function V1DealPageInner() {
         setForm={setParserRequestForm}
         submitting={parserRequestSubmitting}
         submitted={parserRequestSubmitted}
+        retrying={parserRequestRetrying}
         onSubmit={handleParserRequestSubmit}
         onClose={() => { setUnknownParserDoc(null); setParserRequestSubmitted(false); setParserRequestForm({ bankName: '', country: 'Kenya', accountType: 'Business Current', notes: '' }); }}
+        onRetry={unknownParserDoc?.failureCategory === 'unsupported_bank' ? handleParserRequestRetry : undefined}
       />
 
       {/* ── Transaction Drill-Down Modal ── */}
