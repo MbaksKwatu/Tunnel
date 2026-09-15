@@ -5,6 +5,7 @@ import { User, Session } from '@supabase/supabase-js'
 import { createBrowserClient } from '@/lib/supabase'
 import { setApiToken } from '@/lib/auth-bridge'
 import { useRouter } from 'next/navigation'
+import posthog from 'posthog-js'
 
 interface AuthContextType {
   user: User | null
@@ -27,20 +28,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const identifiedUserId = useRef<string | null>(null)
 
   const resetPostHog = useCallback(() => {
-    // posthog-js is dynamically imported in PostHogProvider; access it only after init.
-    import('posthog-js').then(({ default: posthog }) => {
-      if (posthog.__loaded) posthog.reset()
-    })
+    if (posthog.__loaded) posthog.reset()
     identifiedUserId.current = null
   }, [])
 
   const identifyPostHogUser = useCallback((authenticatedUser: User) => {
-    import('posthog-js').then(({ default: posthog }) => {
-      if (!posthog.__loaded || identifiedUserId.current === authenticatedUser.id) return
-      if (identifiedUserId.current) { posthog.reset(); identifiedUserId.current = null }
-      posthog.identify(authenticatedUser.id, authenticatedUser.email ? { email: authenticatedUser.email } : {})
-      identifiedUserId.current = authenticatedUser.id
-    })
+    if (!posthog.__loaded || identifiedUserId.current === authenticatedUser.id) return
+    if (identifiedUserId.current) { posthog.reset(); identifiedUserId.current = null }
+    posthog.identify(authenticatedUser.id, authenticatedUser.email ? { email: authenticatedUser.email } : {})
+    identifiedUserId.current = authenticatedUser.id
   }, [resetPostHog])
 
   // Lazy client creation - only create when actually needed (client-side)
