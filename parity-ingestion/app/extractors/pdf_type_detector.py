@@ -38,6 +38,10 @@ def is_scanned_pdf(path: str, password: Optional[str] = None) -> bool:
         pdf = pdfplumber.open(path, password=password) if password is not None else pdfplumber.open(path)
     except PDFPasswordIncorrect as exc:
         raise PDFLockedError(path) from exc
+    except Exception:
+        # Corrupt or unreadable file — not a scanned PDF, let route_extract() classify it
+        # as INVALID_DOCUMENT rather than crashing here.
+        return False
     with pdf:
         for page in pdf.pages[:_PAGES_TO_CHECK]:
             words = page.extract_words()
