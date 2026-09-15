@@ -159,7 +159,14 @@ body {
      and overflow cleanly onto the next when there isn't. Page numbers
      ("1/3" etc.) are still accurate counts of logical sections, not
      physical pages, by design. */
-  .page { box-shadow: none; min-height: 0; margin: 0 auto 16px; }
+  /* PAR-274: WeasyPrint re-runs full layout on every flex container for every
+     page fragment — superlinear cost and the root cause of silent row truncation.
+     Switching to block removes the quadratic penalty and lets content flow
+     across pages without being dropped. gap: 20px only works on flex/grid, so
+     replace it with margin-bottom on .sec instead. */
+  .page { box-shadow: none; min-height: 0; margin: 0 auto 16px; display: block; }
+  .page-body { display: block; }
+  .sec { margin-bottom: 20px; }
   .page-footer { margin-top: 0; }
 
   /* Keep these atomic across a page boundary — break between rows/sections
