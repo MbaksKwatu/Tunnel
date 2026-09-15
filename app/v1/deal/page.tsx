@@ -139,7 +139,18 @@ function V1DealPageInner() {
   // Same for the document list — shares ['documents', id] with the dashboard.
   const dealDocumentsQuery = useDealDocumentsQuery(urlDealId);
   useEffect(() => {
-    if (dealDocumentsQuery.data) setDealDocuments(dealDocumentsQuery.data.documents);
+    if (!dealDocumentsQuery.data) return;
+    setDealDocuments(dealDocumentsQuery.data.documents);
+    // Hydrate failureCategoryMap from persisted next_action so badges survive a page reload.
+    setFailureCategoryMap((prev) => {
+      const m = new Map(prev);
+      for (const doc of dealDocumentsQuery.data.documents) {
+        const na = (doc as Record<string, unknown>).next_action as string | undefined;
+        if (na === 'invalid_document') m.set(doc.id, 'invalid_document');
+        else if (na === 'request_parser') m.set(doc.id, 'unsupported_bank');
+      }
+      return m;
+    });
   }, [dealDocumentsQuery.data]);
 
   const [file, setFile] = useState<File | null>(null);
