@@ -188,11 +188,19 @@ def parse_via_parity_ingestion(
                 detected_currency = _detect_currency_from_bytes(file_bytes)
                 return rows_sorted, raw_hash, detected_currency, {}
 
-            # 415 means the file type itself wasn't accepted — Category A (wrong format).
+            # 415 may be Category A (wrong file type) or Category B (valid PDF, no bank
+            # detector matched — "Bank format not recognised"). Distinguish by the detail.
             try:
                 detail = resp.json().get("detail", "File type not accepted by parity-ingestion.")
             except Exception:
                 detail = "File type not accepted by parity-ingestion."
+            _detail_lower = detail.lower()
+            _is_bank_format = any(
+                kw in _detail_lower
+                for kw in ("not recognised", "not recognized", "bank format", "supported formats")
+            )
+            if _is_bank_format:
+                raise InvalidSchemaError(detail)
             raise InvalidDocumentError(detail)
 
         try:
