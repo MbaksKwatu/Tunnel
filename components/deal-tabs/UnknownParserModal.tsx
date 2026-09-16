@@ -11,6 +11,7 @@ export interface UnknownParserModalProps {
   submitting: boolean;
   submitted: boolean;
   retrying: boolean;
+  retryError?: string | null;
   onSubmit: () => Promise<void>;
   onClose: () => void;
   onRetry?: () => Promise<void>;
@@ -23,6 +24,7 @@ export default function UnknownParserModal({
   submitting,
   submitted,
   retrying,
+  retryError,
   onSubmit,
   onClose,
   onRetry,
@@ -111,6 +113,11 @@ export default function UnknownParserModal({
                 >
                   {retrying ? 'Retrying…' : '↺ Retry parser'}
                 </button>
+                {retryError && (
+                  <div style={{ marginTop: 8, fontSize: 11, color: '#FCA5A5', fontFamily: "'IBM Plex Mono', monospace" }}>
+                    Retry failed — {retryError}
+                  </div>
+                )}
               </div>
             )}
 

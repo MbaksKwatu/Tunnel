@@ -907,7 +907,18 @@ async def retry_document(
 
     # Find the stored file from the pds_parser_requests row.
     pr_row = repos["pds_parser_requests"].get_for_document(document_id)
-    if not pr_row or not pr_row.get("storage_path"):
+    if not pr_row:
+        # Distinct from "row exists but has no storage_path": this means the
+        # detection-time auto-insert never landed, which is a server-side fault,
+        # not a missing upload. Conflating the two sent people hunting for a
+        # storage bug when the file was in the bucket all along.
+        logger.error(
+            "[RETRY] no pds_parser_requests row for document_id=%s — auto-insert did not land",
+            document_id,
+        )
+        _error("CONFLICT", f"No parser request was recorded for document {document_id}. Re-upload the file instead.")
+    if not pr_row.get("storage_path"):
+        logger.error("[RETRY] parser request %s has no storage_path", pr_row.get("id"))
         _error("CONFLICT", f"No stored file found for document {document_id}. Re-upload the file instead.")
 
     storage_path = pr_row["storage_path"]

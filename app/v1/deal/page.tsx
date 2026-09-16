@@ -58,6 +58,21 @@ import type {
 import type { AnalysisState, EntityBreakdownRow, QueuedStatement, PipelineStage, DrillModalState, ParserRequestDoc } from '@/components/deal-tabs/types';
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'KES', 'NGN'];
 
+// v1-api throws with the raw response body, which for this API is a JSON
+// envelope ({detail:{error_message}}). Surface the human-readable part.
+function parseApiErrorMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  try {
+    const parsed = JSON.parse(raw);
+    const detail = parsed?.detail;
+    if (typeof detail === 'string') return detail;
+    if (detail?.error_message) return String(detail.error_message);
+  } catch {
+    // not JSON — fall through to the raw text
+  }
+  return raw || 'please try again';
+}
+
 // Keyed by dealId in the shared QueryClient cache (via queryClient.fetchQuery
 // below) rather than a plain in-memory Map — this dedupes concurrent double
 // mounts (a fresh/cold navigation to a deal URL can mount this component more
@@ -141,30 +156,6 @@ function V1DealPageInner() {
   useEffect(() => {
     if (!dealDocumentsQuery.data) return;
     setDealDocuments(dealDocumentsQuery.data.documents);
-    // Hydrate failureCategoryMap and unknownFormatDocIds from persisted next_action
-    // so badges and inline CTAs survive a page reload.
-    // NOTE: compute newUnknown synchronously here — NOT inside the setState updater,
-    // because React calls the updater during the next render, not immediately, so any
-    // side-effect inside it (like array.push) would be invisible to code after setState().
-    const newUnknown: string[] = [];
-    const categoryUpdates: Array<[string, 'invalid_document' | 'unsupported_bank']> = [];
-    for (const doc of dealDocumentsQuery.data.documents) {
-      const na = (doc as Record<string, unknown>).next_action as string | undefined;
-      if (na === 'invalid_document') {
-        categoryUpdates.push([doc.id, 'invalid_document']);
-      } else if (na === 'request_parser') {
-        categoryUpdates.push([doc.id, 'unsupported_bank']);
-        newUnknown.push(doc.id);
-      }
-    }
-    if (categoryUpdates.length) {
-      setFailureCategoryMap((prev) => {
-        const m = new Map(prev);
-        for (const [id, cat] of categoryUpdates) m.set(id, cat);
-        return m;
-      });
-    }
-    if (newUnknown.length) setUnknownFormatDocIds((prev) => new Set([...prev, ...newUnknown]));
   }, [dealDocumentsQuery.data]);
 
   const [file, setFile] = useState<File | null>(null);
@@ -214,6 +205,7 @@ function V1DealPageInner() {
   const [parserRequestSubmitting, setParserRequestSubmitting] = useState(false);
   const [parserRequestSubmitted, setParserRequestSubmitted] = useState(false);
   const [parserRequestRetrying, setParserRequestRetrying] = useState(false);
+  const [parserRequestRetryError, setParserRequestRetryError] = useState<string | null>(null);
   const checkedFailedDocs = useRef<Set<string>>(new Set());
   // Tracks doc IDs confirmed as "unsupported format" — used to show inline CTA in FileRow
   const [unknownFormatDocIds, setUnknownFormatDocIds] = useState<Set<string>>(new Set());
@@ -349,7 +341,24 @@ function V1DealPageInner() {
     }
   }, [analysisState]);
 
+  // Queue status and failure category are derived from the same `dealDocuments`
+  // snapshot in one effect, so a document can never be rendered as `failed`
+  // before its category is known. Splitting these across two effects left a
+  // window where a doc written straight to `failed` from server data showed the
+  // generic FAILED badge until an unrelated re-render happened to categorize it.
   useEffect(() => {
+    const categoryUpdates: Array<[string, 'invalid_document' | 'unsupported_bank']> = [];
+    const newUnknown: string[] = [];
+    for (const doc of dealDocuments) {
+      const na = (doc as Record<string, unknown>).next_action as string | undefined;
+      if (na === 'invalid_document') {
+        categoryUpdates.push([doc.id, 'invalid_document']);
+      } else if (na === 'request_parser') {
+        categoryUpdates.push([doc.id, 'unsupported_bank']);
+        newUnknown.push(doc.id);
+      }
+    }
+
     setStatementQueue((prev) => {
       const mapPrevById = new Map(prev.map((item) => [item.id, item]));
       return dealDocuments.map((doc, idx) => {
@@ -364,6 +373,14 @@ function V1DealPageInner() {
         };
       });
     });
+    if (categoryUpdates.length) {
+      setFailureCategoryMap((prev) => {
+        const m = new Map(prev);
+        for (const [id, cat] of categoryUpdates) m.set(id, cat);
+        return m;
+      });
+    }
+    if (newUnknown.length) setUnknownFormatDocIds((prev) => new Set([...prev, ...newUnknown]));
   }, [dealDocuments]);
 
   const handleStatementDrop = useCallback(
@@ -942,6 +959,7 @@ function V1DealPageInner() {
   const handleParserRequestRetry = async () => {
     if (!unknownParserDoc || !deal?.id) return;
     setParserRequestRetrying(true);
+    setParserRequestRetryError(null);
     try {
       await retryDocument(deal.id, unknownParserDoc.docId);
       // Close the modal — the polling loop will re-open it if it fails again,
@@ -954,7 +972,9 @@ function V1DealPageInner() {
         prev.map((q) => (q.id === unknownParserDoc.docId ? { ...q, status: 'processing' as const } : q))
       );
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Retry failed — please try again');
+      // Keep the modal open and show the reason inline — a failed retry that
+      // leaves the counter unchanged and no message reads as "nothing happened".
+      setParserRequestRetryError(parseApiErrorMessage(err));
     } finally {
       setParserRequestRetrying(false);
     }
@@ -1215,8 +1235,9 @@ function V1DealPageInner() {
         submitting={parserRequestSubmitting}
         submitted={parserRequestSubmitted}
         retrying={parserRequestRetrying}
+        retryError={parserRequestRetryError}
         onSubmit={handleParserRequestSubmit}
-        onClose={() => { setUnknownParserDoc(null); setParserRequestSubmitted(false); setParserRequestForm({ bankName: '', country: 'Kenya', accountType: 'Business Current', notes: '' }); }}
+        onClose={() => { setUnknownParserDoc(null); setParserRequestSubmitted(false); setParserRequestRetryError(null); setParserRequestForm({ bankName: '', country: 'Kenya', accountType: 'Business Current', notes: '' }); }}
         onRetry={unknownParserDoc?.failureCategory === 'unsupported_bank' ? handleParserRequestRetry : undefined}
       />
 

@@ -81,7 +81,12 @@ def _auto_create_pds_parser_request(
                 object_path, document_id,
             )
         except Exception as _se:
-            logger.warning("[INGEST] storage persist failed (non-fatal): %s", _se)
+            # Loud: without storage_path the retry endpoint cannot re-run this
+            # document, so a silent warning here hides a broken retry path.
+            logger.error(
+                "[INGEST] storage persist FAILED for document_id=%s path=%s: %s",
+                document_id, object_path, _se, exc_info=True,
+            )
 
         repo = PdsParserRequestsRepo()
         # Guard against double-insert if the document already has a row (e.g. retry path).
@@ -102,7 +107,13 @@ def _auto_create_pds_parser_request(
         )
         return request_id
     except Exception as exc:
-        logger.warning("[INGEST] auto_create_pds_parser_request failed (non-fatal): %s", exc)
+        # Loud: a swallowed failure here leaves a Category B document with no
+        # parser-request row, which silently disables both the retry flow and
+        # the engineering queue entry. Best-effort by design, but never quiet.
+        logger.error(
+            "[INGEST] auto_create_pds_parser_request FAILED for document_id=%s deal_id=%s file=%s: %s",
+            document_id, deal_id, file_name, exc, exc_info=True,
+        )
         return None
 
 
