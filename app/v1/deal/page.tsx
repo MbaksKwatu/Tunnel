@@ -143,16 +143,27 @@ function V1DealPageInner() {
     setDealDocuments(dealDocumentsQuery.data.documents);
     // Hydrate failureCategoryMap and unknownFormatDocIds from persisted next_action
     // so badges and inline CTAs survive a page reload.
+    // NOTE: compute newUnknown synchronously here — NOT inside the setState updater,
+    // because React calls the updater during the next render, not immediately, so any
+    // side-effect inside it (like array.push) would be invisible to code after setState().
     const newUnknown: string[] = [];
-    setFailureCategoryMap((prev) => {
-      const m = new Map(prev);
-      for (const doc of dealDocumentsQuery.data.documents) {
-        const na = (doc as Record<string, unknown>).next_action as string | undefined;
-        if (na === 'invalid_document') m.set(doc.id, 'invalid_document');
-        else if (na === 'request_parser') { m.set(doc.id, 'unsupported_bank'); newUnknown.push(doc.id); }
+    const categoryUpdates: Array<[string, 'invalid_document' | 'unsupported_bank']> = [];
+    for (const doc of dealDocumentsQuery.data.documents) {
+      const na = (doc as Record<string, unknown>).next_action as string | undefined;
+      if (na === 'invalid_document') {
+        categoryUpdates.push([doc.id, 'invalid_document']);
+      } else if (na === 'request_parser') {
+        categoryUpdates.push([doc.id, 'unsupported_bank']);
+        newUnknown.push(doc.id);
       }
-      return m;
-    });
+    }
+    if (categoryUpdates.length) {
+      setFailureCategoryMap((prev) => {
+        const m = new Map(prev);
+        for (const [id, cat] of categoryUpdates) m.set(id, cat);
+        return m;
+      });
+    }
     if (newUnknown.length) setUnknownFormatDocIds((prev) => new Set([...prev, ...newUnknown]));
   }, [dealDocumentsQuery.data]);
 
