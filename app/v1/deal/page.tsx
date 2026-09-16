@@ -1125,7 +1125,18 @@ function V1DealPageInner() {
               bankReady={bankReady}
               unknownFormatDocIds={unknownFormatDocIds}
               failureCategoryMap={failureCategoryMap}
-              onRequestParser={setUnknownParserDoc}
+              onRequestParser={(d) => {
+                // FileRow only knows what it renders, so it cannot supply the
+                // retry state. Enrich from the documents list, which carries the
+                // authoritative retry_count — without this the modal always read
+                // "3 of 3 attempts remaining" and the exhausted state never rendered.
+                const row = dealDocuments.find((doc) => doc.id === d.docId) as Record<string, unknown> | undefined;
+                setUnknownParserDoc({
+                  ...d,
+                  retryCount: (row?.retry_count as number | undefined) ?? 0,
+                  pdsParserRequestId: (row?.pds_parser_request_id as string | undefined) ?? undefined,
+                });
+              }}
               analysisState={analysisState}
               onBankDrop={handleBankDrop}
               onRemoveStatement={(id) => {
