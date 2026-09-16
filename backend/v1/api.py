@@ -159,6 +159,7 @@ def system_metrics(request: Request):
 _ERROR_CODES = {
     "CURRENCY_MISMATCH": 409,
     "INVALID_SCHEMA": 400,
+    "CONFLICT": 409,
     "DOCUMENTS_NOT_READY": 409,
     "NOT_FOUND": 404,
     "BAD_REQUEST": 400,
