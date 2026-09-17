@@ -60,6 +60,17 @@ const FileRow = ({
         </span>
         <span style={{ flex: 1, fontSize: 13, color: 'var(--t0)', fontFamily: "'IBM Plex Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.fileName}</span>
         <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: statusColor, background: statusBg, padding: '2px 7px', borderRadius: 3, flexShrink: 0 }}>{statusLabel}</span>
+        {/* Inline CTA for unsupported bank format (Category B) — same row as
+            filename/badge, styled as a bordered pill to match the "NO PARSER"
+            badge convention rather than reading as a plain text link. */}
+        {item.status === 'failed' && isUnsupportedBank && onRequestParser && (
+          <button
+            onClick={onRequestParser}
+            style={{ flexShrink: 0, fontSize: 11, fontWeight: 600, color: 'var(--amber)', background: 'rgba(245,158,11,0.1)', border: '1px solid var(--amber)', borderRadius: 999, padding: '3px 12px', cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif", whiteSpace: 'nowrap' }}
+          >
+            View options →
+          </button>
+        )}
         {canRemove && onRemove && item.status !== 'uploading' && (
           <button
             onClick={handleRemove}
@@ -71,18 +82,6 @@ const FileRow = ({
           </button>
         )}
       </div>
-      {/* Inline CTA for unsupported bank format (Category B) */}
-      {item.status === 'failed' && isUnsupportedBank && onRequestParser && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 10, paddingLeft: 30 }}>
-          <span style={{ fontSize: 11, color: 'var(--t1)' }}>Format not supported —</span>
-          <button
-            onClick={onRequestParser}
-            style={{ fontSize: 11, fontWeight: 600, color: 'var(--amber)', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 4, padding: '3px 10px', cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
-          >
-            View options →
-          </button>
-        </div>
-      )}
       {/* Inline message for unreadable file (Category A) */}
       {item.status === 'failed' && isInvalidDoc && (
         <div style={{ paddingBottom: 10, paddingLeft: 30 }}>

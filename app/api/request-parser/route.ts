@@ -13,7 +13,15 @@ const NOTIFY_EMAIL = 'mbakayaweever@gmail.com';
  *   { bank_name, country, account_type, notes?, deal_id?, document_id?, original_filename?, contact_email?, partner? }
  *
  * FormData:
- *   bank_name, contact_email, notes?, sample_file? (File)
+ *   bank_name, contact_email, notes?, sample_file? (File), access_token?
+ *
+ * access_token: the submitting user's Supabase access token (FormData path
+ * only — the standalone /parsers/request page). Verified server-side via
+ * Supabase's own auth server (never trusted as-is) to get a real user id,
+ * used to (a) attribute the pds_parser_requests row via created_by and (b)
+ * upsert user_profiles.contact_email when the typed email differs from the
+ * session's own email. Absent token = anonymous submission, unchanged from
+ * today's behavior.
  *
  * partner: set by automatic callers (e.g. musa_file_processor.py passes
  * "musa") that already wrote their own row to the `parser_requests` table
@@ -39,6 +47,7 @@ export async function POST(request: NextRequest) {
     let fileBuffer: ArrayBuffer | null = null;
     let fileName = '';
     let fileType = '';
+    let accessToken = '';
 
     // ── Parse body ────────────────────────────────────────────────────────────
     if (contentType.includes('multipart/form-data')) {
@@ -48,6 +57,7 @@ export async function POST(request: NextRequest) {
       notes = (form.get('notes') as string) ?? '';
       country = (form.get('country') as string) ?? '';
       accountType = (form.get('account_type') as string) ?? '';
+      accessToken = (form.get('access_token') as string) ?? '';
       const sampleFile = form.get('sample_file') as File | null;
       if (sampleFile) {
         fileBuffer = await sampleFile.arrayBuffer();
@@ -159,6 +169,29 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // ── Verify the submitter's identity (if provided) ──────────────────────────
+    // Never trust a client-supplied user id. Verifies accessToken against
+    // Supabase's own auth server (equivalent trust to the JWKS check the
+    // backend API uses) and returns the real user id + login email, or null
+    // if absent/invalid — an anonymous submission is unchanged from before.
+    let verifiedUserId: string | null = null;
+    let verifiedUserEmail: string | null = null;
+    if (accessToken) {
+      try {
+        const anonClient = createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        );
+        const { data, error: authError } = await anonClient.auth.getUser(accessToken);
+        if (!authError && data.user) {
+          verifiedUserId = data.user.id;
+          verifiedUserEmail = data.user.email ?? null;
+        }
+      } catch (authErr) {
+        console.error('[api/request-parser] token verification failed:', authErr);
+      }
+    }
+
     // ── Log request to Supabase (skip when an auto/partner path already
     //    wrote its own parser_requests row — avoids a duplicate admin entry
     //    for the same failure) ───────────────────────────────────────────
@@ -215,7 +248,23 @@ export async function POST(request: NextRequest) {
         original_filename: originalFilename || fileName || null,
         storage_path: storagePath,
         status: 'new',
+        created_by: verifiedUserId,
       });
+
+      // Contact Email was edited away from the session's own login email —
+      // treat that as updating the account's contact address going forward,
+      // not a one-off value for this request. Upserted by the verified user
+      // id only (never by the typed email string), into a table separate
+      // from auth.users so this never touches the actual login email.
+      if (verifiedUserId && contactEmail && contactEmail !== verifiedUserEmail) {
+        const { error: profileError } = await supabase.from('user_profiles').upsert(
+          { user_id: verifiedUserId, contact_email: contactEmail, updated_at: new Date().toISOString() },
+          { onConflict: 'user_id' }
+        );
+        if (profileError) {
+          console.error('[api/request-parser] user_profiles upsert failed:', profileError.message);
+        }
+      }
     }
 
     return NextResponse.json({ success: true, bank_slug: bankSlug });
