@@ -24,6 +24,7 @@
 - `overrides`: insert-only log; field (v1: role), weight 0.5/1.0; immutable by trigger + no update/delete RLS.
 - `analysis_runs`: LIVE_DRAFT runs; integer cents totals; basis-point metrics; hashes for inputs.
 - `snapshots`: immutable exports; unique sha256_hash; canonical_json TEXT; insert-only; idempotent by hash.
+- `pds_parser_requests`: bank-format parser requests submitted via the web-upload path; tracks document/deal/account, status, contact email, and (since PAR-245) `created_by uuid` for attribution to the submitting user.
 
 ## RLS (summary)
 - Enabled on all tables.
@@ -73,3 +74,4 @@ reference / attribution data, not part of the hashed snapshot state: no drops, n
 type changes, no impact on `financial_state_hash` / `sha256_hash`.
 
 | 2026-07-24 | `20260724070000_add_role_reason_to_txn_entity_map.sql` (backend mirror `025_add_role_reason_to_txn_entity_map.sql`) | `pds_txn_entity_map` | Add `role_reason text null` — PAR-89: human-readable reason a transaction was flagged `needs_review` (e.g. "KES 340,000 credit, no keyword match, 4.2x this business's median transaction size"), surfaced on the Review Queue. Additive (nullable column), no backfill. **Unlike the entries above, this DOES affect `financial_state_hash` going forward** — `txn_entity_map` (including this new field) is part of the hashed snapshot payload. Accompanied by `SCHEMA_VERSION` 1.0.2→1.0.3 and `CONFIG_VERSION` 1.0.3→1.0.4 in `backend/v1/config.py` in the same change (classifier.py's large-positive fallback logic also changed — see PAR-89), and a corresponding golden-hash-sentinel update. | Additive (nullable column) — hash-affecting, version-bumped |
+| 2026-09-17 | `20260917010000_add_created_by_to_pds_parser_requests.sql` (backend mirror `045_add_created_by_to_pds_parser_requests.sql`) | `pds_parser_requests` | Add `created_by uuid null REFERENCES auth.users(id)` — PAR-245: attribute each bank-format parser request to the Supabase user who submitted it, enabling account-scoped listing on the Bank Formats dashboard. Additive (nullable FK column), no backfill (pre-existing rows remain NULL). Index `idx_pds_parser_requests_created_by` added. Does **not** affect `financial_state_hash` — `pds_parser_requests` is not part of the hashed snapshot payload. `SCHEMA_VERSION` intentionally unchanged. | Additive (nullable FK column + index) |

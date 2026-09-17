@@ -267,6 +267,25 @@ export async function enrichPdsParserRequest(
   return res.json()
 }
 
+export interface AccountParserRequestItem {
+  id: string
+  bank_name: string | null
+  status: string | null
+  deal_id: string | null
+  deal_name: string | null
+  original_filename: string | null
+  created_at: string | null
+}
+
+// Every parser request the signed-in account has ever made, across all its
+// deals — account is derived server-side from the verified JWT, not passed
+// by the client. Powers the dashboard-level "Bank Formats" section.
+export async function listAccountParserRequests(): Promise<{ parser_requests: AccountParserRequestItem[] }> {
+  const res = await fetchApi(`${BASE}/parser-requests`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
 export async function retryDocument(
   dealId: string,
   documentId: string,

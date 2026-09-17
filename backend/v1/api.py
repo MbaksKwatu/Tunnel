@@ -514,6 +514,10 @@ async def upload_document(
         _error("BAD_REQUEST", f"Unsupported file type '{ext}'. Accepted: .csv, .xlsx, .xls, .pdf")
     file_type = ext.lstrip(".")
     created_by_val = created_by or deal.get("created_by") or str(uuid.uuid4())
+    # Verified caller identity (JWT sub, not client-supplied) — used only to
+    # attribute an auto-created pds_parser_requests row to a real account;
+    # does not change document/deal created_by attribution above.
+    verified_user_id = _extract_user_id_from_request(request)
 
     document = {
         "id": document_id,
@@ -542,6 +546,7 @@ async def upload_document(
         file_name=file.filename,
         file_type=file_type,
         deal_currency=deal["currency"],
+        parser_request_user_id=verified_user_id,
     )
 
     return {"ingestion": {"document_id": document_id, "status": "processing", "rows_count": 0}}
@@ -596,6 +601,7 @@ async def upload_documents_batch(
 
     next_batch_number = batch_count + 1
     created_by_val = created_by or deal.get("created_by") or str(uuid.uuid4())
+    verified_user_id = _extract_user_id_from_request(request)
 
     pdf_parts: List[bytes] = []
     source_names: List[str] = []
@@ -662,6 +668,7 @@ async def upload_documents_batch(
         file_name=merged_label,
         file_type="pdf",
         deal_currency=deal["currency"],
+        parser_request_user_id=verified_user_id,
     )
 
     batches_remaining = max(0, 20 - next_batch_number)
@@ -763,6 +770,48 @@ def enrich_parser_request(request: Request, deal_id: str, request_id: str, body:
     return {"parser_request": updated or {**existing, **fields}}
 
 
+@router.get("/parser-requests")
+def list_parser_requests_for_account(request: Request):
+    """
+    Every pds_parser_requests row the signed-in account has ever created,
+    across all its deals, newest first — powers the dashboard-level "Bank
+    Formats" section. The account is derived from the verified JWT (`sub`),
+    never from a client-supplied query param, so one account can't page
+    through another's requests by guessing an id.
+
+    Rows created before pds_parser_requests.created_by was wired up (see
+    PAR-125 follow-up) have no created_by and will not appear here — no
+    backfill is attempted.
+    """
+    user_id = _extract_user_id_from_request(request)
+    if not user_id:
+        _error("UNAUTHORIZED", "A valid session is required to list parser requests")
+
+    repos = _repos(request)
+    rows = repos["pds_parser_requests"].list_for_account(user_id)
+
+    deal_ids = [r.get("deal_id") for r in rows if r.get("deal_id")]
+    deals_by_id: Dict[str, Any] = {}
+    if deal_ids:
+        deal_rows = repos["deals"].select_in("id", deal_ids)
+        deals_by_id = {d["id"]: d for d in deal_rows}
+
+    return {
+        "parser_requests": [
+            {
+                "id": r.get("id"),
+                "bank_name": r.get("bank_name"),
+                "status": r.get("status"),
+                "deal_id": r.get("deal_id"),
+                "deal_name": (deals_by_id.get(r.get("deal_id")) or {}).get("name"),
+                "original_filename": r.get("original_filename"),
+                "created_at": r.get("created_at"),
+            }
+            for r in rows
+        ]
+    }
+
+
 @router.patch("/deals/{deal_id}/pds-parser-requests/{request_id}")
 def enrich_pds_parser_request(request: Request, deal_id: str, request_id: str, body: dict = Body(...)):
     """
@@ -800,6 +849,14 @@ def enrich_pds_parser_request(request: Request, deal_id: str, request_id: str, b
         fields["notes"] = notes.strip()
     if existing.get("status") == "new":
         fields["status"] = "pending"
+
+    # Backfill attribution on enrich for rows auto-created without a verified
+    # caller in scope (e.g. background ingestion). Never overwrites an
+    # already-attributed row, and never trusts a client-supplied id.
+    if not existing.get("created_by"):
+        verified_user_id = _extract_user_id_from_request(request)
+        if verified_user_id:
+            fields["created_by"] = verified_user_id
 
     updated = pds_repo.enrich(request_id, deal_id, fields)
     return {"parser_request": updated or {**existing, **fields}}
@@ -960,6 +1017,7 @@ async def retry_document(
         file_name=file_name,
         file_type=file_type,
         deal_currency=deal_currency,
+        parser_request_user_id=_extract_user_id_from_request(request),
     )
 
     attempts_remaining = MAX_RETRY_ATTEMPTS - new_retry_count

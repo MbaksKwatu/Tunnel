@@ -920,6 +920,7 @@ function V1DealPageInner() {
         // Fall back to legacy frontend insert.
         const sbClient = supabase;
         if (sbClient) {
+          const { data: { user: sbUser } } = await sbClient.auth.getUser();
           await (sbClient as any).from('pds_parser_requests').insert({
             deal_id: deal?.id ?? null,
             document_id: unknownParserDoc.docId,
@@ -930,6 +931,7 @@ function V1DealPageInner() {
             notes: parserRequestForm.notes.trim() || null,
             error_type: 'InvalidSchemaError',
             error_message: unknownParserDoc.errorMessage,
+            created_by: sbUser?.id ?? null,
           });
         }
 

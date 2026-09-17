@@ -52,6 +52,7 @@ def _auto_create_pds_parser_request(
     file_name: str,
     file_bytes: bytes,
     error_message: str,
+    created_by: Optional[str] = None,
 ) -> Optional[str]:
     """
     Server-side auto-insert for Category B (unsupported bank, valid document).
@@ -100,6 +101,7 @@ def _auto_create_pds_parser_request(
             original_filename=file_name,
             error_message=error_message,
             storage_path=storage_path,
+            created_by=created_by,
         )
         logger.info(
             "[INGEST] auto-created pds_parser_requests id=%s deal_id=%s document_id=%s file=%s",
@@ -292,11 +294,18 @@ class IngestionService:
         file_name: str,
         file_type: str,
         deal_currency: str,
+        parser_request_user_id: Optional[str] = None,
     ) -> None:
         """
         Process document in background. Document must already exist with status=processing.
         On success: updates status=completed, inserts rows, inserts analysis run.
         On failure: updates status=failed with structured error taxonomy.
+
+        `parser_request_user_id`: the caller's verified JWT sub (see
+        `_extract_user_id_from_request` in api.py), threaded through purely to
+        attribute an auto-created pds_parser_requests row (Category B) to a
+        real account. Independent of `created_by` above, which attributes the
+        document/deal and may be a client-supplied or generated value.
         """
         stage = STAGE_FILE_RECEIVED
         try:
@@ -436,6 +445,7 @@ class IngestionService:
                     file_name=file_name,
                     file_bytes=file_bytes,
                     error_message=str(exc),
+                    created_by=parser_request_user_id,
                 )
             self._update_failed(
                 document_id,

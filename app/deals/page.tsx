@@ -2,11 +2,20 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { useQueries } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { createBrowserClient } from '@/lib/supabase'
-import { getDeal, listDocuments, type AnalysisRun } from '@/lib/v1-api'
+import { getDeal, listDocuments, listAccountParserRequests, type AnalysisRun } from '@/lib/v1-api'
 import { useDealsListQuery, dealDetailKey, dealDocumentsKey } from '@/lib/queries/deals'
 import { ThemeToggle } from '@/components/ThemeToggle'
+
+// pds_parser_requests.status values (see backend/migrations 20260915000001):
+// new = auto-created/unsubmitted, pending = user submitted the form,
+// resolved = parser built and live.
+const PARSER_REQUEST_STATUS_DISPLAY: Record<string, { label: string; dot: string }> = {
+  new: { label: 'Processing', dot: 'var(--amber)' },
+  pending: { label: 'Submitted', dot: '#818CF8' },
+  resolved: { label: 'Completed', dot: 'var(--green)' },
+}
 
 interface PipelineStatus {
   label: string
@@ -45,6 +54,15 @@ export default function DashboardPage() {
   // after viewing a deal reads from cache instead of re-fetching within staleTime.
   const dealsQuery = useDealsListQuery(userId)
   const deals = dealsQuery.data?.deals ?? []
+
+  // Account-level "Bank Formats" — every parser request this signed-in
+  // account has ever made, across all its deals. Full history, no expiry.
+  const parserRequestsQuery = useQuery({
+    queryKey: ['account-parser-requests', userId],
+    queryFn: listAccountParserRequests,
+    enabled: !!userId,
+  })
+  const parserRequests = parserRequestsQuery.data?.parser_requests ?? []
 
   // Per-deal status, also cache-shared with /v1/deal (['deal', id] / ['documents', id]) —
   // opening a deal you just saw on this dashboard won't re-fetch its detail/documents.
@@ -157,10 +175,9 @@ export default function DashboardPage() {
           <div style={{ padding: '12px 16px 6px', fontSize: 9, color: 'var(--t2)', letterSpacing: '0.12em', fontWeight: 600, marginTop: 4 }}>INTELLIGENCE</div>
           <div style={{ padding: '9px 16px', color: 'var(--t2)', fontSize: 13 }}>Parity Review</div>
           <div style={{ padding: '9px 16px', color: 'var(--t2)', fontSize: 13 }}>Benchmarks</div>
-          <div style={{ padding: '12px 16px 6px', fontSize: 9, color: 'var(--t2)', letterSpacing: '0.12em', fontWeight: 600, marginTop: 4 }}>SWITCH MODE</div>
-          <div style={{ padding: '9px 16px', color: 'var(--t2)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11 }}>&lt;&gt;</span> Credit officer view
-          </div>
+          {/* "SWITCH MODE — Credit officer view" removed: inert, no onClick/state
+              anywhere. Earmarked for a future credit/insurance/audit
+              analysis-scope switch — that's separate future work. */}
         </nav>
         <div style={{ padding: '12px 16px', borderTop: '1px solid var(--s3)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -346,6 +363,54 @@ export default function DashboardPage() {
                 {l.label}
               </div>
             ))}
+          </div>
+
+          {/* Bank Formats — every parser request this account has ever made,
+              across all its deals. Permanent history, no expiry/archival. */}
+          <div style={{ marginTop: 32 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <h2 style={{ fontSize: 13, fontWeight: 700, color: 'var(--t0)', margin: 0 }}>Bank Formats</h2>
+              <span style={{ fontSize: 10, color: 'var(--t2)', fontFamily: "'IBM Plex Mono', monospace" }}>
+                {parserRequests.length ? String(parserRequests.length).padStart(2, '0') : ''}
+              </span>
+            </div>
+            <div style={{ background: 'var(--s1)', border: '1px solid var(--s3)', borderRadius: 6 }}>
+              {parserRequestsQuery.isLoading && (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--t2)', fontSize: 12 }}>Loading…</div>
+              )}
+              {!parserRequestsQuery.isLoading && parserRequests.length === 0 && (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--t2)', fontSize: 12 }}>
+                  No bank format requests yet.{' '}
+                  <span style={{ color: 'var(--accent)', cursor: 'pointer' }} onClick={() => router.push('/parsers/request')}>Request one →</span>
+                </div>
+              )}
+              {parserRequests.map((r, i) => {
+                const display = (r.status && PARSER_REQUEST_STATUS_DISPLAY[r.status]) || { label: r.status || '—', dot: 'var(--t2)' }
+                const requestedAt = r.created_at
+                  ? new Date(r.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+                  : '—'
+                return (
+                  <div
+                    key={r.id}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '2fr 1.5fr 140px 120px',
+                      padding: '12px 16px',
+                      borderBottom: i < parserRequests.length - 1 ? '1px solid var(--s3)' : 'none',
+                      fontSize: 12,
+                    }}
+                  >
+                    <div style={{ color: 'var(--t0)', fontWeight: 600 }}>{r.bank_name || 'Unnamed bank'}</div>
+                    <div style={{ color: 'var(--t2)' }}>{r.deal_name || (r.deal_id ? r.deal_id.slice(0, 8) + '…' : '—')}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--t1)' }}>
+                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: display.dot, display: 'inline-block', flexShrink: 0 }} />
+                      {display.label}
+                    </div>
+                    <div style={{ color: 'var(--t2)' }}>{requestedAt}</div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         </div>
       </div>
