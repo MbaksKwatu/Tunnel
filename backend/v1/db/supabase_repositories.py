@@ -949,6 +949,7 @@ class PdsParserRequestsRepo(BaseRepo):
         original_filename: str,
         error_message: str,
         storage_path: Optional[str] = None,
+        created_by: Optional[str] = None,
     ) -> str:
         """Insert a new Category B row (unsupported bank, valid document).
         Returns the new row id."""
@@ -966,6 +967,8 @@ class PdsParserRequestsRepo(BaseRepo):
         }
         if storage_path:
             data["storage_path"] = storage_path
+        if created_by:
+            data["created_by"] = created_by
         self.client.table(self.table).insert(data).execute()
         return request_id
 
@@ -973,6 +976,14 @@ class PdsParserRequestsRepo(BaseRepo):
         """Return the first pds_parser_requests row for this document (for enrich-in-place)."""
         rows = self.select_eq("document_id", document_id)
         return rows[0] if rows else None
+
+    def list_for_account(self, user_id: str) -> List[Dict[str, Any]]:
+        """Every parser request this verified account has ever made, across all
+        its deals, newest first. Used by the dashboard-level "Bank Formats"
+        section — never trust a client-supplied user id here, only the
+        verified JWT sub from `_extract_user_id_from_request`."""
+        rows = self.select_eq("created_by", user_id, order_by="created_at")
+        return sorted(rows, key=lambda r: r.get("created_at") or "", reverse=True)
 
     def enrich(self, request_id: str, deal_id: str, fields: Dict[str, Any]) -> Dict[str, Any]:
         """Update an existing row with user-supplied details (bank name etc).

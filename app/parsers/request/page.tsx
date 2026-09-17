@@ -1,17 +1,8 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-
-const COUNTRIES = [
-  'Kenya', 'Nigeria', 'Uganda', 'Tanzania', 'Ghana',
-  'South Africa', 'Rwanda', 'Ethiopia', 'Other',
-];
-
-const ACCOUNT_TYPES = [
-  'Business Current', 'Business Savings', 'Personal Current',
-  'Personal Savings', 'Mobile Money', 'Other',
-];
+import { createBrowserClient } from '@/lib/supabase';
 
 export default function RequestParserPage() {
   const router = useRouter();
@@ -19,14 +10,29 @@ export default function RequestParserPage() {
 
   const [bankName, setBankName] = useState('');
   const [contactEmail, setContactEmail] = useState('');
-  const [country, setCountry] = useState('Kenya');
-  const [accountType, setAccountType] = useState('Business Current');
+  const [sessionEmail, setSessionEmail] = useState('');
+  const [accessToken, setAccessToken] = useState('');
   const [notes, setNotes] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState('');
+
+  // Pre-fill Contact Email from the signed-in session, editable. If the user
+  // edits it away from the session email, the submit handler treats that as
+  // updating the account's contact address going forward (upserted into
+  // user_profiles server-side), not a one-off value for this request alone.
+  useEffect(() => {
+    const supabase = createBrowserClient();
+    if (!supabase) return;
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const email = session?.user?.email ?? '';
+      setSessionEmail(email);
+      setContactEmail((prev) => prev || email);
+      setAccessToken(session?.access_token ?? '');
+    });
+  }, []);
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -45,10 +51,9 @@ export default function RequestParserPage() {
       const formData = new FormData();
       formData.append('bank_name', bankName.trim());
       formData.append('contact_email', contactEmail.trim());
-      formData.append('country', country);
-      formData.append('account_type', accountType);
       formData.append('notes', notes.trim());
       formData.append('sample_file', file);
+      if (accessToken) formData.append('access_token', accessToken);
 
       const res = await fetch('/api/request-parser', {
         method: 'POST',
@@ -159,34 +164,11 @@ export default function RequestParserPage() {
               placeholder="your@email.com"
               style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--b1)', borderRadius: 6, padding: '10px 12px', color: 'var(--t0)', fontSize: 13, outline: 'none', boxSizing: 'border-box', fontFamily: "'IBM Plex Sans', sans-serif" }}
             />
-          </div>
-
-          {/* Country + Account Type */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--t2)', letterSpacing: '0.08em', marginBottom: 6 }}>
-                COUNTRY
-              </label>
-              <select
-                value={country}
-                onChange={(e) => setCountry(e.target.value)}
-                style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--b1)', borderRadius: 6, padding: '10px 12px', color: 'var(--t1)', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
-              >
-                {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--t2)', letterSpacing: '0.08em', marginBottom: 6 }}>
-                ACCOUNT TYPE
-              </label>
-              <select
-                value={accountType}
-                onChange={(e) => setAccountType(e.target.value)}
-                style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--b1)', borderRadius: 6, padding: '10px 12px', color: 'var(--t1)', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
-              >
-                {ACCOUNT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
+            {sessionEmail && contactEmail.trim() && contactEmail.trim() !== sessionEmail && (
+              <div style={{ fontSize: 11, color: 'var(--t2)', marginTop: 6 }}>
+                This updates your account&apos;s contact email going forward, not just this request.
+              </div>
+            )}
           </div>
 
           {/* Sample File Upload */}
