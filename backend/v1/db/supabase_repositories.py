@@ -210,6 +210,7 @@ class DocumentsRepo(DocumentsRepository, BaseRepo):
         next_action: Optional[str] = None,
         analytics: Optional[Dict[str, Any]] = None,
         currency_detected: Optional[str] = None,
+        pds_parser_request_id: Optional[str] = None,
     ) -> None:
         data: Dict[str, Any] = {"status": status, "currency_mismatch": currency_mismatch}
         if error_message is not None:
@@ -224,7 +225,22 @@ class DocumentsRepo(DocumentsRepository, BaseRepo):
             data["analytics"] = analytics
         if currency_detected is not None:
             data["currency_detected"] = currency_detected
+        if pds_parser_request_id is not None:
+            data["pds_parser_request_id"] = pds_parser_request_id
         self.client.table(self.table).update(data).eq("id", document_id).execute()
+
+    def increment_retry_count(self, document_id: str) -> int:
+        """Increment retry_count by 1 and reset status to processing. Returns new count."""
+        doc = self.get_document(document_id)
+        new_count = (doc.get("retry_count") or 0) + 1 if doc else 1
+        self.client.table(self.table).update({
+            "retry_count": new_count,
+            "status": "processing",
+            "error_message": None,
+            "error_type": None,
+            "error_stage": None,
+        }).eq("id", document_id).execute()
+        return new_count
 
     def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
         rows = self.select_eq("id", document_id)
@@ -902,6 +918,65 @@ class ParserRequestsRepo(BaseRepo):
         """Update an existing pending row in place (e.g. bank_name confirmed
         by the deal's user) -- never inserts a second row for the same
         detected failure."""
+        res = (
+            self.client.table(self.table)
+            .update(fields)
+            .eq("id", request_id)
+            .eq("deal_id", deal_id)
+            .execute()
+        )
+        return res.data[0] if res.data else {}
+
+
+class PdsParserRequestsRepo(BaseRepo):
+    """`pds_parser_requests` -- the user-facing parser-request table for the
+    web-upload (direct-upload) path. PAR-125 moves the insert from the frontend
+    modal to here (server-side, at Category B detection time), so a record
+    exists even if the user never opens or submits the modal.
+
+    The modal-submit flow enriches the existing row (bank_name, country,
+    account_type, notes) via enrich() rather than inserting a duplicate — the
+    same "enrich in place, never duplicate" pattern as PAR-242's Musa surface."""
+
+    def __init__(self):
+        super().__init__("pds_parser_requests")
+
+    def create_for_document(
+        self,
+        *,
+        deal_id: str,
+        document_id: str,
+        original_filename: str,
+        error_message: str,
+        storage_path: Optional[str] = None,
+    ) -> str:
+        """Insert a new Category B row (unsupported bank, valid document).
+        Returns the new row id."""
+        import uuid as _uuid
+        request_id = str(_uuid.uuid4())
+        data: Dict[str, Any] = {
+            "id": request_id,
+            "deal_id": deal_id,
+            "document_id": document_id,
+            "original_filename": original_filename,
+            "bank_name": None,
+            "error_message": error_message,
+            "error_type": "InvalidSchemaError",
+            "status": "new",
+        }
+        if storage_path:
+            data["storage_path"] = storage_path
+        self.client.table(self.table).insert(data).execute()
+        return request_id
+
+    def get_for_document(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """Return the first pds_parser_requests row for this document (for enrich-in-place)."""
+        rows = self.select_eq("document_id", document_id)
+        return rows[0] if rows else None
+
+    def enrich(self, request_id: str, deal_id: str, fields: Dict[str, Any]) -> Dict[str, Any]:
+        """Update an existing row with user-supplied details (bank name etc).
+        Never inserts a second row."""
         res = (
             self.client.table(self.table)
             .update(fields)

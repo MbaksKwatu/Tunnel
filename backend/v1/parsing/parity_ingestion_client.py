@@ -29,7 +29,7 @@ class IngestionTimeoutError(Exception):
 logger = logging.getLogger(__name__)
 
 from .common import canonical_hash, compute_txn_id, normalize_descriptor, sort_rows
-from .errors import InvalidSchemaError
+from .errors import InvalidDocumentError, InvalidSchemaError
 
 
 PARITY_INGESTION_URL = os.getenv("PARITY_INGESTION_URL", "").rstrip("/")
@@ -188,11 +188,20 @@ def parse_via_parity_ingestion(
                 detected_currency = _detect_currency_from_bytes(file_bytes)
                 return rows_sorted, raw_hash, detected_currency, {}
 
+            # 415 may be Category A (wrong file type) or Category B (valid PDF, no bank
+            # detector matched — "Bank format not recognised"). Distinguish by the detail.
             try:
-                detail = resp.json().get("detail", "Bank format not recognised by parity-ingestion.")
+                detail = resp.json().get("detail", "File type not accepted by parity-ingestion.")
             except Exception:
-                detail = "Bank format not recognised by parity-ingestion."
-            raise InvalidSchemaError(detail)
+                detail = "File type not accepted by parity-ingestion."
+            _detail_lower = detail.lower()
+            _is_bank_format = any(
+                kw in _detail_lower
+                for kw in ("not recognised", "not recognized", "bank format", "supported formats")
+            )
+            if _is_bank_format:
+                raise InvalidSchemaError(detail)
+            raise InvalidDocumentError(detail)
 
         try:
             result = resp.json()
@@ -210,7 +219,12 @@ def parse_via_parity_ingestion(
                 msg = str(detail) if detail else f"parity-ingestion HTTP {resp.status_code}"
             raise InvalidSchemaError(msg)
 
-        # If the service says unsupported but it still included transactions, prefer transactions.
+        # Category A: file is not a valid document at all — raise immediately, no retry.
+        if isinstance(result, dict) and result.get("status") == "INVALID_DOCUMENT":
+            raise InvalidDocumentError(result.get("message", "This file could not be read as a bank statement."))
+
+        # Category B: valid document but no bank detector matched.
+        # If the service says unsupported but still included transactions, prefer transactions.
         if isinstance(result, dict) and result.get("status") == "UNSUPPORTED_FORMAT":
             tentative_rows = _parity_result_to_rows(result, document_id)
             if not tentative_rows:

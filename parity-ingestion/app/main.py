@@ -66,6 +66,7 @@ async def upload(file: UploadFile = File(...), password: Optional[str] = Form(No
                 route_extract,
                 PASSWORD_REQUIRED_RESPONSE,
                 PASSWORD_INCORRECT_RESPONSE,
+                INVALID_DOCUMENT_RESPONSE,
             )
 
             # PAR-69: password is a per-request field, never persisted — not
@@ -89,6 +90,13 @@ async def upload(file: UploadFile = File(...), password: Optional[str] = Form(No
                         status_code=415,
                         detail=result.get("message", "Bank format not recognised."),
                     )
+                # Category A: corrupt/unreadable file. Return the dict as HTTP 200
+                # so parity_ingestion_client can distinguish it from UNSUPPORTED_FORMAT
+                # via the status field. Old-backend callers that don't recognise this
+                # status will extract zero transactions and raise InvalidSchemaError
+                # (the same graceful fallback as before this change).
+                if isinstance(result, dict) and result.get("status") == "INVALID_DOCUMENT":
+                    return JSONResponse(status_code=200, content=result)
                 if isinstance(result, dict) and result.get("status") in (
                     "PASSWORD_REQUIRED",
                     "PASSWORD_INCORRECT",

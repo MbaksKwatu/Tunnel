@@ -10,7 +10,7 @@ from fastapi import FastAPI
 
 from ..config import SCHEMA_VERSION, CONFIG_VERSION
 from ..parsing import parse_file
-from ..parsing.errors import InvalidSchemaError, CurrencyMismatchError
+from ..parsing.errors import InvalidDocumentError, InvalidSchemaError, CurrencyMismatchError
 from ..parsing.parity_ingestion_client import IngestionTimeoutError
 from ..parsing.common import canonical_hash, sort_rows
 from ..errors import is_dev_diagnostics
@@ -40,6 +40,81 @@ STAGE_STATUS_COMPLETED = "STATUS_COMPLETED"
 
 class IngestionResult(Dict[str, Any]):
     pass
+
+
+MAX_RETRY_ATTEMPTS = 3
+
+
+def _auto_create_pds_parser_request(
+    *,
+    deal_id: str,
+    document_id: str,
+    file_name: str,
+    file_bytes: bytes,
+    error_message: str,
+) -> Optional[str]:
+    """
+    Server-side auto-insert for Category B (unsupported bank, valid document).
+    Called at detection time so the record exists regardless of modal interaction.
+    Returns the new pds_parser_requests row id, or None on failure (best-effort).
+
+    Also persists the raw file to the parser-requests Storage bucket so the
+    retry endpoint can re-run the same bytes without asking the user to re-upload.
+    """
+    try:
+        from ..db.supabase_repositories import PdsParserRequestsRepo
+        from ..db.supabase_client import get_supabase
+
+        storage_path: Optional[str] = None
+        try:
+            import uuid as _uuid
+            safe_name = (file_name or "upload").replace(" ", "_")
+            object_path = f"web-upload/{document_id}/{safe_name}"
+            get_supabase().storage.from_("parser-requests").upload(
+                object_path,
+                file_bytes,
+                {"content-type": "application/octet-stream", "upsert": "false"},
+            )
+            storage_path = object_path
+            logger.info(
+                "[INGEST] persisted Category B file to storage path=%s document_id=%s",
+                object_path, document_id,
+            )
+        except Exception as _se:
+            # Loud: without storage_path the retry endpoint cannot re-run this
+            # document, so a silent warning here hides a broken retry path.
+            logger.error(
+                "[INGEST] storage persist FAILED for document_id=%s path=%s: %s",
+                document_id, object_path, _se, exc_info=True,
+            )
+
+        repo = PdsParserRequestsRepo()
+        # Guard against double-insert if the document already has a row (e.g. retry path).
+        existing = repo.get_for_document(document_id)
+        if existing:
+            return existing.get("id")
+
+        request_id = repo.create_for_document(
+            deal_id=deal_id,
+            document_id=document_id,
+            original_filename=file_name,
+            error_message=error_message,
+            storage_path=storage_path,
+        )
+        logger.info(
+            "[INGEST] auto-created pds_parser_requests id=%s deal_id=%s document_id=%s file=%s",
+            request_id, deal_id, document_id, file_name,
+        )
+        return request_id
+    except Exception as exc:
+        # Loud: a swallowed failure here leaves a Category B document with no
+        # parser-request row, which silently disables both the retry flow and
+        # the engineering queue entry. Best-effort by design, but never quiet.
+        logger.error(
+            "[INGEST] auto_create_pds_parser_request FAILED for document_id=%s deal_id=%s file=%s: %s",
+            document_id, deal_id, file_name, exc, exc_info=True,
+        )
+        return None
 
 
 class IngestionService:
@@ -188,6 +263,7 @@ class IngestionService:
         next_action: str,
         currency_mismatch: bool = False,
         exc: Optional[Exception] = None,
+        pds_parser_request_id: Optional[str] = None,
     ) -> None:
         tb_str = traceback.format_exc() if (is_dev_diagnostics() and exc) else None
         try:
@@ -199,6 +275,7 @@ class IngestionService:
                 error_type=error_type,
                 error_stage=stage,
                 next_action=next_action,
+                pds_parser_request_id=pds_parser_request_id,
             )
         except Exception:
             pass
@@ -323,16 +400,43 @@ class IngestionService:
                 currency_mismatch=True,
                 exc=exc,
             )
+        except InvalidDocumentError as exc:
+            # Category A: file is not a valid/parseable document. Not retriable.
+            logger.warning(
+                "[INGEST] background invalid document stage=%s file=%s: %s",
+                stage, file_name, exc,
+            )
+            self._update_failed(
+                document_id,
+                error_type="InvalidDocumentError",
+                error_message=str(exc),
+                stage=stage,
+                next_action="invalid_document",
+                currency_mismatch=False,
+                exc=exc,
+            )
         except InvalidSchemaError as exc:
-            logger.warning("[INGEST] background invalid schema stage=%s: %s", stage, exc)
+            logger.warning("[INGEST] background invalid schema stage=%s file=%s: %s", stage, file_name, exc)
             currency_mismatch = "currency mismatch" in str(exc).lower()
-            # Differentiate unsupported bank format (triggers parser-request flow on frontend)
+            # Differentiate unsupported bank format (Category B: valid document, no parser)
             # from CSV schema errors (fix_csv_header) by examining message keywords.
             _emsg = str(exc).lower()
             _is_unsupported = any(
                 kw in _emsg
                 for kw in ("not recognised", "not recognized", "unsupported", "no valid transactions", "bank format")
             )
+            pds_parser_request_id: Optional[str] = None
+            if _is_unsupported and not currency_mismatch:
+                # Category B: auto-write pds_parser_requests at detection time,
+                # regardless of whether the user ever opens or submits the modal.
+                # The modal-submit flow enriches this row in place (PAR-242 pattern).
+                pds_parser_request_id = _auto_create_pds_parser_request(
+                    deal_id=deal_id,
+                    document_id=document_id,
+                    file_name=file_name,
+                    file_bytes=file_bytes,
+                    error_message=str(exc),
+                )
             self._update_failed(
                 document_id,
                 error_type="InvalidSchemaError",
@@ -341,6 +445,7 @@ class IngestionService:
                 next_action="request_parser" if _is_unsupported else "fix_csv_header",
                 currency_mismatch=currency_mismatch,
                 exc=exc,
+                pds_parser_request_id=pds_parser_request_id,
             )
         except IngestionTimeoutError as exc:
             logger.error("Ingestion timeout for document %s after 300s", document_id)

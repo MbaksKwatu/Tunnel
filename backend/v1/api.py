@@ -159,6 +159,7 @@ def system_metrics(request: Request):
 _ERROR_CODES = {
     "CURRENCY_MISMATCH": 409,
     "INVALID_SCHEMA": 400,
+    "CONFLICT": 409,
     "DOCUMENTS_NOT_READY": 409,
     "NOT_FOUND": 404,
     "BAD_REQUEST": 400,
@@ -264,7 +265,7 @@ def _repos(request: Optional[Request] = None) -> Dict[str, Any]:
         AnalysisRunsRepo, SnapshotsRepo,
         EnrichmentsRepo, ClassificationOverridesRepo, CustomFlagsRepo,
         AccountCoverageRepo, OverrideLogRepo, IntelligenceLogRepo,
-        ExportPersistenceRepo, ParserRequestsRepo,
+        ExportPersistenceRepo, ParserRequestsRepo, PdsParserRequestsRepo,
     )
     return {
         "deals": DealsRepo(),
@@ -284,6 +285,7 @@ def _repos(request: Optional[Request] = None) -> Dict[str, Any]:
         "custom_flags": CustomFlagsRepo(),
         "account_coverage": AccountCoverageRepo(),
         "parser_requests": ParserRequestsRepo(),
+        "pds_parser_requests": PdsParserRequestsRepo(),
     }
 
 
@@ -507,9 +509,9 @@ async def upload_document(
     document_id = str(uuid.uuid4())
     fname = file.filename or "upload.csv"
     ext = ("." + fname.rsplit(".", 1)[-1].lower()) if "." in fname else ".csv"
-    ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".pdf"}
+    ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls", ".pdf"}
     if ext not in ALLOWED_EXTENSIONS:
-        _error("BAD_REQUEST", f"Unsupported file type '{ext}'. Accepted: .csv, .xlsx, .pdf")
+        _error("BAD_REQUEST", f"Unsupported file type '{ext}'. Accepted: .csv, .xlsx, .xls, .pdf")
     file_type = ext.lstrip(".")
     created_by_val = created_by or deal.get("created_by") or str(uuid.uuid4())
 
@@ -761,6 +763,48 @@ def enrich_parser_request(request: Request, deal_id: str, request_id: str, body:
     return {"parser_request": updated or {**existing, **fields}}
 
 
+@router.patch("/deals/{deal_id}/pds-parser-requests/{request_id}")
+def enrich_pds_parser_request(request: Request, deal_id: str, request_id: str, body: dict = Body(...)):
+    """
+    PAR-125: enrich an auto-created pds_parser_requests row (Category B web-upload
+    failure) with user-supplied details from the parser-request modal.
+    Enriches in place — never inserts a second row for the same detected failure
+    (PAR-242 pattern).
+    """
+    repos = _repos(request)
+    deal = repos["deals"].get_deal(deal_id)
+    if not deal:
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+    existing = repos["pds_parser_requests"].get_for_document(request_id) or \
+               repos["pds_parser_requests"].select_eq("id", request_id)
+    # Try by id directly
+    from .db.supabase_repositories import PdsParserRequestsRepo
+    pds_repo = repos["pds_parser_requests"]
+    rows = pds_repo.client.table("pds_parser_requests").select("*").eq("id", request_id).eq("deal_id", deal_id).execute()
+    existing = rows.data[0] if rows.data else None
+    if not existing:
+        _error("NOT_FOUND", f"Parser request {request_id} not found for deal {deal_id}")
+
+    fields: Dict[str, Any] = {}
+    bank_name = body.get("bank_name")
+    if isinstance(bank_name, str) and bank_name.strip():
+        fields["bank_name"] = bank_name.strip()
+    country = body.get("country")
+    if isinstance(country, str) and country.strip():
+        fields["country"] = country.strip()
+    account_type = body.get("account_type")
+    if isinstance(account_type, str) and account_type.strip():
+        fields["account_type"] = account_type.strip()
+    notes = body.get("notes")
+    if isinstance(notes, str) and notes.strip():
+        fields["notes"] = notes.strip()
+    if existing.get("status") == "new":
+        fields["status"] = "pending"
+
+    updated = pds_repo.enrich(request_id, deal_id, fields)
+    return {"parser_request": updated or {**existing, **fields}}
+
+
 @router.delete("/deals/{deal_id}/documents/{document_id}")
 def delete_document(request: Request, deal_id: str, document_id: str):
     repos = _repos(request)
@@ -823,7 +867,108 @@ def get_document_status(request: Request, document_id: str):
             out["next_action"] = doc.get("next_action") or "retry_or_contact_support"
         # Legacy: keep "error" for backward compat
         out["error"] = out["error_message"]
+        # Surface auto-created pds_parser_requests row id (Category B only) so the
+        # frontend can enrich it in place rather than inserting a duplicate.
+        if doc.get("pds_parser_request_id"):
+            out["pds_parser_request_id"] = doc["pds_parser_request_id"]
+    out["retry_count"] = doc.get("retry_count") or 0
     return out
+
+
+@router.post("/deals/{deal_id}/documents/{document_id}/retry")
+async def retry_document(
+    request: Request,
+    deal_id: str,
+    document_id: str,
+    background_tasks: BackgroundTasks,
+):
+    """
+    Retry ingestion of a Category B (unsupported bank) document.
+    Reads the stored file from the pds_parser_requests.storage_path bucket entry,
+    resets the document to processing, and re-runs the ingestion pipeline.
+    Capped at MAX_RETRY_ATTEMPTS (3). Category A documents (invalid_document) are
+    never eligible for retry and will receive a 409 from this endpoint.
+    """
+    from .ingestion.service import IngestionService, MAX_RETRY_ATTEMPTS
+
+    repos = _repos(request)
+    doc = repos["documents"].get_document(document_id)
+    if not doc:
+        _error("NOT_FOUND", f"Document {document_id} not found")
+    if doc.get("deal_id") != deal_id:
+        _error("NOT_FOUND", f"Document {document_id} not found in deal {deal_id}")
+
+    current_retry = doc.get("retry_count") or 0
+    if current_retry >= MAX_RETRY_ATTEMPTS:
+        _error("CONFLICT", f"Document {document_id} has exhausted {MAX_RETRY_ATTEMPTS} retry attempts")
+
+    next_action = doc.get("next_action") or ""
+    if next_action == "invalid_document":
+        _error("CONFLICT", "Category A failures (invalid document) are not retriable. Please upload a different file.")
+
+    # Find the stored file from the pds_parser_requests row.
+    pr_row = repos["pds_parser_requests"].get_for_document(document_id)
+    if not pr_row:
+        # Distinct from "row exists but has no storage_path": this means the
+        # detection-time auto-insert never landed, which is a server-side fault,
+        # not a missing upload. Conflating the two sent people hunting for a
+        # storage bug when the file was in the bucket all along.
+        logger.error(
+            "[RETRY] no pds_parser_requests row for document_id=%s — auto-insert did not land",
+            document_id,
+        )
+        _error("CONFLICT", f"No parser request was recorded for document {document_id}. Re-upload the file instead.")
+    if not pr_row.get("storage_path"):
+        logger.error("[RETRY] parser request %s has no storage_path", pr_row.get("id"))
+        _error("CONFLICT", f"No stored file found for document {document_id}. Re-upload the file instead.")
+
+    storage_path = pr_row["storage_path"]
+    file_name = pr_row.get("original_filename") or doc.get("storage_url", "").replace("inline://", "") or "upload"
+    file_type = ("." + file_name.rsplit(".", 1)[-1].lower()) if "." in file_name else ".pdf"
+    file_type = file_type.lstrip(".")
+
+    # Download the stored bytes.
+    try:
+        from .db.supabase_client import get_supabase
+        dl = get_supabase().storage.from_("parser-requests").download(storage_path)
+        file_bytes = dl
+    except Exception as exc:
+        logger.error("[RETRY] Failed to download %s: %s", storage_path, exc)
+        _error("INTERNAL", f"Could not retrieve the stored file for retry: {exc}")
+
+    deal = repos["deals"].get_deal(deal_id)
+    deal_currency = (deal or {}).get("currency") or "KES"
+
+    # Increment retry count and reset status to processing.
+    new_retry_count = repos["documents"].increment_retry_count(document_id)
+    logger.info(
+        "[RETRY] document_id=%s deal_id=%s attempt=%d/%d file=%s",
+        document_id, deal_id, new_retry_count, MAX_RETRY_ATTEMPTS, file_name,
+    )
+
+    ingestion = IngestionService(
+        documents_repo=repos["documents"],
+        raw_tx_repo=repos["raw"],
+        analysis_repo=repos["runs"],
+    )
+    background_tasks.add_task(
+        ingestion.process_document_background,
+        document_id=document_id,
+        deal_id=deal_id,
+        created_by=doc.get("created_by") or "",
+        file_bytes=file_bytes,
+        file_name=file_name,
+        file_type=file_type,
+        deal_currency=deal_currency,
+    )
+
+    attempts_remaining = MAX_RETRY_ATTEMPTS - new_retry_count
+    return {
+        "document_id": document_id,
+        "retry_count": new_retry_count,
+        "attempts_remaining": attempts_remaining,
+        "status": "processing",
+    }
 
 
 @router.get("/documents/{document_id}/transactions")
