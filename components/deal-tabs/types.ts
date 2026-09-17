@@ -47,6 +47,14 @@ export interface ParserRequestDoc {
   // via PATCH /deals/{deal_id}/parser-requests/{id} instead of inserting a
   // second row for the same detected failure).
   source?: 'direct' | 'musa';
+  // PAR-125: failure category distinguishes corrupt/wrong-type (Category A,
+  // not retriable, no parser-request form) from valid-but-unsupported bank
+  // (Category B, retriable, shows parser-request modal + retry flow).
+  failureCategory?: 'invalid_document' | 'unsupported_bank';
+  // Auto-created pds_parser_requests row id (Category B, server-side).
+  // Used by the modal-submit flow to enrich in place rather than re-insert.
+  pdsParserRequestId?: string;
+  retryCount?: number;
 }
 
 export interface ParserRequestForm {

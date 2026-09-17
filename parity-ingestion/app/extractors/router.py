@@ -38,6 +38,18 @@ UNSUPPORTED_RESPONSE = {
     ),
 }
 
+# Category A: file is not a valid/parseable document at all.
+# Not retriable — retrying the same corrupt/wrong-type file produces the same failure.
+# Distinct from UNSUPPORTED_FORMAT (Category B: valid document, no bank detector matched).
+INVALID_DOCUMENT_RESPONSE = {
+    "status": "INVALID_DOCUMENT",
+    "message": (
+        "This file could not be read as a bank statement. "
+        "It may be corrupt, password-protected with an unrecognised encoding, "
+        "or not a PDF/Excel document. Please check the file and re-upload."
+    ),
+}
+
 # PAR-69: generic, bank-agnostic password signals — returned before any bank
 # detector runs, since a locked PDF can't be format-detected at all yet.
 # Distinguished only by whether a password was supplied, so the caller can
@@ -101,13 +113,14 @@ def route_extract(file_path: str, password: Optional[str] = None) -> Union[Extra
     except PDFLockedError:
         return PASSWORD_INCORRECT_RESPONSE if password else PASSWORD_REQUIRED_RESPONSE
     except Exception:
-        # A file that isn't a valid PDF at all (unopenable/corrupt) previously
-        # fell through to UNSUPPORTED_RESPONSE because every detector opened
-        # the file independently and caught its own exception. The single
-        # shared parse below must preserve that: an unopenable file is
-        # "unsupported", not a 500.
-        logger.debug("route_extract: failed to parse %s as PDF", file_path, exc_info=True)
-        return UNSUPPORTED_RESPONSE
+        # Category A: file cannot be parsed as a PDF at all (corrupt, wrong type,
+        # unreadable). Not retriable — a different file is needed.
+        logger.warning(
+            "route_extract: failed to parse %s as PDF — returning INVALID_DOCUMENT",
+            file_path,
+            exc_info=True,
+        )
+        return INVALID_DOCUMENT_RESPONSE
 
     try:
         with doc:
@@ -147,7 +160,19 @@ def route_extract(file_path: str, password: Optional[str] = None) -> Union[Extra
                 if "Particulars" in text and "Statement Of Account" in text:
                     return extract_scb_pdf(file_path)
     except Exception:
-        logger.debug("route_extract: failed to parse %s as PDF", file_path, exc_info=True)
-        return UNSUPPORTED_RESPONSE
+        # Category A: exception during the detection loop (e.g. a detector crashed).
+        # Treat as invalid document, not as "bank not found" — the file itself is suspect.
+        logger.warning(
+            "route_extract: exception during bank detection for %s — returning INVALID_DOCUMENT",
+            file_path,
+            exc_info=True,
+        )
+        return INVALID_DOCUMENT_RESPONSE
 
+    # Category B: file parsed cleanly as a PDF but matched no known bank detector.
+    # This is the only category eligible for retry and for a parser-request record.
+    logger.warning(
+        "route_extract: no bank detector matched for %s — returning UNSUPPORTED_FORMAT",
+        file_path,
+    )
     return UNSUPPORTED_RESPONSE
