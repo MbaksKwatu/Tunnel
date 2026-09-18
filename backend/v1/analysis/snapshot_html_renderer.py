@@ -20,6 +20,7 @@ from .snapshot_generator import generate_reconciliation_section
 from .snapshot_context import (
     AccountCoverage as _AccountCoverage,
     Composition as _Composition,
+    CustomerRevenue as _CustomerRevenue,
     FourPointReconciliation as _FourPointReconciliation,
     InterAccountTransfer as _InterAccountTransfer,
     Inventory as _Inventory,
@@ -187,6 +188,33 @@ def _supplier_payments_ctx_from(sp: _SupplierPayments) -> Dict[str, Any]:
                 "pct_str":   f"{row.share.value * 100:.1f}%",
             }
             for row in (sp.top_n or [])
+        ],
+    }
+
+
+def _customer_revenue_ctx_from(cr: _CustomerRevenue) -> Dict[str, Any]:
+    """PAR-241: mirrors _supplier_payments_ctx_from() exactly for the customer
+    side — same presentation shape, revenue-side typed result."""
+    if not cr.available:
+        return {"available": False}
+    return {
+        "available":    True,
+        "total_str":    _fmt_money_kes(cr.total),
+        "txn_count":    cr.txn_count,
+        "entity_count": cr.counterparty_count,
+        "top_name":     cr.top_counterparty,
+        "top_pct_str":  f"{cr.top_share.value * 100:.1f}%",
+        "clause":       cr.narrative,
+        # PAR-241: ranked table rows, name/count/amount — mirrors the
+        # supplier table shape. Already top-10 from _build_customer_revenue().
+        "rows": [
+            {
+                "name":      row.name,
+                "txn_count": row.txn_count,
+                "total_str": _fmt_money_kes(row.total),
+                "pct_str":   f"{row.share.value * 100:.1f}%",
+            }
+            for row in (cr.top_n or [])
         ],
     }
 
@@ -961,6 +989,11 @@ def render_snapshot_html(
     # above.
     supplier_payments_ctx: Dict[str, Any] = _supplier_payments_ctx_from(shared_ctx["supplier_payments"])
 
+    # ── Customer Revenue Analysis (PAR-241) ───────────────────────────────────
+    # Mirrors Supplier Payment Analysis above — same pattern, revenue side.
+    # See _customer_revenue_ctx_from() above.
+    customer_revenue_ctx: Dict[str, Any] = _customer_revenue_ctx_from(shared_ctx["customer_revenue"])
+
     # ── Transaction Pattern Analysis (PAR-63) ─────────────────────────────────
     # PAR-189 Stage 2: computation now lives in build_snapshot_context()
     # (snapshot_context.py) — this just re-derives the presentation dict the
@@ -1125,6 +1158,7 @@ def render_snapshot_html(
         "account_coverage":   account_coverage_ctx,
         "inventory":          inventory_ctx,
         "supplier_payments":  supplier_payments_ctx,
+        "customer_revenue":   customer_revenue_ctx,
         "tax_compliance":     tax_compliance_ctx,
         "transaction_patterns": transaction_patterns_ctx,
         "inter_account_transfer": inter_account_transfer_ctx,

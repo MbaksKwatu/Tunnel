@@ -1877,6 +1877,39 @@ body {
       {% endif %}
     </div>
 
+    <!-- TOP CUSTOMERS (PAR-241) — mirrors Supplier Payment Analysis above, renders in both states -->
+    <div class="sec">
+      <div class="sec-label">Top Customers <span class="sec-label-badge">Observed · Classified</span></div>
+      {% if customer_revenue.available %}
+      <table class="loan-table">
+        <tbody>
+          <tr><td>Total customer revenue</td><td class="rt-figure" style="text-align:right">{{ customer_revenue.total_str }}</td></tr>
+          <tr><td>Transactions</td><td class="rt-figure" style="text-align:right">{{ customer_revenue.txn_count }}</td></tr>
+          <tr><td>Counterparties</td><td class="rt-figure" style="text-align:right">{{ customer_revenue.entity_count }}</td></tr>
+          <tr><td>Top customer</td><td class="rt-figure" style="text-align:right">{{ customer_revenue.top_name }} · {{ customer_revenue.top_pct_str }}</td></tr>
+        </tbody>
+      </table>
+      <!-- PAR-241: ranked customer table, top-10 by total value, name/count/amount only -->
+      <table class="loan-table">
+        <thead>
+          <tr><th>Customer</th><th>Transactions</th><th>Total</th></tr>
+        </thead>
+        <tbody>
+          {% for row in customer_revenue.rows | default([]) %}
+          <tr>
+            <td><span class="loan-name">{{ row.name | default('--') }}</span></td>
+            <td class="rt-figure">{{ row.txn_count | default('--') }}</td>
+            <td class="rt-figure">{{ row.total_str | default('--') }} ({{ row.pct_str | default('--') }})</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="cashflow-note">{{ customer_revenue.clause }}</div>
+      {% else %}
+      <div class="cashflow-note" style="border-top:none">No concentration data available.</div>
+      {% endif %}
+    </div>
+
     <!-- INTER-ACCOUNT TRANSFER ANALYSIS (PAR-63; live-checked per PAR-102) -->
     <div class="sec">
       <div class="sec-label">Inter-Account Transfer Analysis <span class="sec-label-badge">{{ inter_account_transfer.badge_label }}</span></div>
