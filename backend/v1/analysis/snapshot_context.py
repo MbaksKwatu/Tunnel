@@ -361,6 +361,35 @@ class SupplierPayments:
 
 
 @dataclass(frozen=True)
+class CustomerEntry:
+    """PAR-241: one row of the ranked customer table. Mirrors SupplierEntry
+    exactly — same per-counterparty aggregation, revenue side instead of
+    supplier side."""
+    name: str
+    txn_count: int
+    total: Money
+    share: Percent   # this entry's total / customer_total_cents
+
+
+@dataclass(frozen=True)
+class CustomerRevenue:
+    """PAR-241: the customer-concentration table, mirroring SupplierPayments
+    field-for-field. This is the version that actually reaches a rendered
+    PDF (GET /report, POST /snapshot/pdf/jobs) -- unlike the top_revenue
+    computation PR #212 shipped into pdf_generator.py, which is dead code
+    with no live call site."""
+    available: bool
+    total: Optional[Money] = None
+    txn_count: Optional[int] = None
+    counterparty_count: Optional[int] = None
+    top_counterparty: Optional[str] = None
+    top_share: Optional[Percent] = None
+    concentration: Optional[SupplierConcentration] = None
+    narrative: Optional[str] = None
+    top_n: Optional[List[CustomerEntry]] = None   # PAR-241: top 10 by total, all deals
+
+
+@dataclass(frozen=True)
 class CashflowMonthRow:
     month: str            # "YYYY-MM"
     inflow: Money
@@ -1627,6 +1656,90 @@ def _build_supplier_payments(
     )
 
 
+def _build_customer_revenue(
+    txns: List[Dict],
+    entity_name_by_id: Dict[str, str],
+    config: SupplierConcentrationConfig,
+) -> CustomerRevenue:
+    """
+    Customer Revenue Analysis (PAR-241) — mirrors _build_supplier_payments()
+    field-for-field: same aggregation, same threshold config (reused, not
+    duplicated — see SupplierConcentrationConfig's own docstring: those
+    30%/15% thresholds were borrowed FROM PARITY_SCIENCE.md's Customer
+    Concentration convention in the first place), same top-10 ranking. Only
+    the role set (REVENUE_ROLES vs _SUPPLIER_ROLES) and sign (inflow > 0 vs
+    outflow < 0) differ.
+    """
+    customer_by_entity: Dict[str, Dict[str, int]] = defaultdict(lambda: {"total": 0, "count": 0})
+    for t in txns:
+        if t["role"] in REVENUE_ROLES and t["signed"] > 0:
+            eid = t.get("entity_id") or ""
+            customer_by_entity[eid]["total"] += t["signed"]
+            customer_by_entity[eid]["count"] += 1
+
+    customer_total_cents = sum(v["total"] for v in customer_by_entity.values())
+    customer_txn_count = sum(v["count"] for v in customer_by_entity.values())
+    customer_entity_count = len(customer_by_entity)
+
+    if not customer_by_entity or customer_total_cents <= 0:
+        return CustomerRevenue(available=False)
+
+    top_eid, top_data = max(customer_by_entity.items(), key=lambda kv: kv[1]["total"])
+    top_customer_name = (
+        entity_name_by_id.get(top_eid)
+        or (top_eid[:16] + "…" if len(top_eid) > 16 else top_eid)
+        or "--"
+    )
+    top_customer_share = top_data["total"] / customer_total_cents
+
+    if customer_txn_count < config.min_sample_size:
+        concentration: SupplierConcentration = "INSUFFICIENT_DATA"
+        narrative = (
+            f"Insufficient customer transaction volume for a reliable "
+            f"concentration assessment (N={customer_txn_count})."
+        )
+    else:
+        if top_customer_share >= config.high_threshold:
+            concentration = "HIGH"
+        elif top_customer_share >= config.moderate_threshold:
+            concentration = "MODERATE"
+        else:
+            concentration = "DIVERSIFIED"
+        narrative = (
+            f"Top customer accounts for {top_customer_share * 100:.1f}% of "
+            f"total customer revenue across {customer_entity_count} counterparties."
+        )
+
+    # Top-10 by total value, for every deal regardless of size — same
+    # unconditional cap PAR-226 established for the supplier table.
+    ranked = sorted(customer_by_entity.items(), key=lambda kv: kv[1]["total"], reverse=True)
+    top_n = [
+        CustomerEntry(
+            name=(
+                entity_name_by_id.get(eid)
+                or (eid[:16] + "…" if len(eid) > 16 else eid)
+                or "--"
+            ),
+            txn_count=data["count"],
+            total=Money(cents=data["total"]),
+            share=Percent(value=data["total"] / customer_total_cents),
+        )
+        for eid, data in ranked[:10]
+    ]
+
+    return CustomerRevenue(
+        available=True,
+        total=Money(cents=customer_total_cents),
+        txn_count=customer_txn_count,
+        counterparty_count=customer_entity_count,
+        top_counterparty=top_customer_name,
+        top_share=Percent(value=top_customer_share),
+        concentration=concentration,
+        narrative=narrative,
+        top_n=top_n,
+    )
+
+
 def _build_inter_account_transfer(
     txns: List[Dict],
     transfer_link_rows: List[Dict],
@@ -2304,6 +2417,7 @@ def build_snapshot_context(
     """
     Stage 11 of PAR-189 — the last stage. Returns:
         {"risk": RiskAssessment, "supplier_payments": SupplierPayments,
+         "customer_revenue": CustomerRevenue,
          "transaction_patterns": TransactionPatterns, "tax_compliance": TaxCompliance,
          "tax_payment_pattern": TaxPaymentPattern,
          "inventory": Inventory, "analyst_notes": Optional[str], "loans": LoanActivity,
@@ -2485,6 +2599,7 @@ def build_snapshot_context(
     )
 
     supplier_payments = _build_supplier_payments(txns, entity_name_by_id, supplier_config)
+    customer_revenue = _build_customer_revenue(txns, entity_name_by_id, supplier_config)
     tax_compliance = _build_tax_compliance(txns, in_active_period, tax_config)
     tax_payment_pattern = _build_tax_payment_pattern(txns)
     inventory = _build_inventory(af, recon_available, inventory_config)
@@ -2513,6 +2628,7 @@ def build_snapshot_context(
         "risk": risk,
         "loans": loans,
         "supplier_payments": supplier_payments,
+        "customer_revenue": customer_revenue,
         "transaction_patterns": transaction_patterns,
         "tax_compliance": tax_compliance,
         "tax_payment_pattern": tax_payment_pattern,
