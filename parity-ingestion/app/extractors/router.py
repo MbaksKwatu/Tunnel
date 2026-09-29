@@ -2,7 +2,7 @@
 Bank format detection and extraction router.
 
 XLSX is routed by extension first. PDF detection order:
-KCB → KCB_Online → Equity_CLMS → Equity_F1 → NCBA → Equity → ABSA → COOP → MPESA_PDF → Stanbic → I&M → SCB
+KCB → KCB_Online → Equity_CLMS → Equity_F1 → NCBA → Equity → ABSA → COOP → MPESA_PDF → Stanbic → I&M → SBM → SCB
 
 Note: Equity_CLMS must precede NCBA because some CLMS statements trigger NCBA detection.
 Equity_F1 must precede the generic Equity check since it's structurally a
@@ -22,6 +22,7 @@ from app.extractors.coop_extractor import detect_coop, extract_coop_pdf
 from app.extractors.mpesa_pdf_extractor import detect_mpesa_pdf, extract_mpesa_pdf
 from app.extractors.stanbic_extractor import detect_stanbic, extract_stanbic_pdf
 from app.extractors.im_extractor import detect_im, extract_im_pdf
+from app.extractors.sbm_extractor import detect_sbm, extract_sbm_pdf
 from app.extractors.pdf_extractor import extract_scb_pdf
 from app.extractors.currency_detector import detect as detect_currency
 from app.extractors.pdf_document import NormalizedDocument, parse_pdf, PDFLockedError
@@ -34,7 +35,7 @@ UNSUPPORTED_RESPONSE = {
     "status": "UNSUPPORTED_FORMAT",
     "message": (
         "Bank format not recognised. Supported formats: SCB, Co-op, ABSA, M-Pesa, "
-        "Equity Bank, KCB, NCBA, Stanbic, I&M Bank"
+        "Equity Bank, KCB, NCBA, Stanbic, I&M Bank, SBM Bank"
     ),
 }
 
@@ -82,7 +83,7 @@ def route_extract(file_path: str, password: Optional[str] = None) -> Union[Extra
     Detect bank format and run the appropriate extractor.
     Returns ExtractionResult on success, or UNSUPPORTED_RESPONSE dict if no format matches.
 
-    PDF detection (currency pre-extraction + all 10 bank-format detectors)
+    PDF detection (currency pre-extraction + all 11 bank-format detectors)
     shares a single parse of the file (PAR-36) — previously each detector and
     the currency pre-check opened the file independently via its own
     `pdfplumber.open()` call (confirmed up to 11 opens for one document).
@@ -154,6 +155,8 @@ def route_extract(file_path: str, password: Optional[str] = None) -> Union[Extra
                 return extract_stanbic_pdf(file_path)
             if detect_im(doc):
                 return extract_im_pdf(file_path)
+            if detect_sbm(doc):
+                return extract_sbm_pdf(file_path)
 
             if doc.pages:
                 text = doc.pages[0].text
