@@ -21,6 +21,7 @@ ExtractionMethod = Literal[
     "ncba_estatement_pdf",
     "stanbic_pdf",
     "im_pdf",
+    "sbm_pdf",
     "equity_xlsx",
     "xlsx_generic",
 ]
