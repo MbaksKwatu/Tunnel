@@ -126,12 +126,12 @@ _PAGE2_ROWS = [
 ]
 
 
-def _build_pdf(path: pathlib.Path) -> None:
+def _build_pdf(path: pathlib.Path, pages=None) -> None:
     from reportlab.lib.pagesizes import A4
     from reportlab.pdfgen import canvas
 
     c = canvas.Canvas(str(path), pagesize=A4)
-    for lines in (_HEADER + _COLS + _PAGE1_ROWS, _COLS + _PAGE2_ROWS + _FOOTER):
+    for lines in pages or (_HEADER + _COLS + _PAGE1_ROWS, _COLS + _PAGE2_ROWS + _FOOTER):
         y = 800
         for ln in lines:
             c.setFont("Helvetica", 7)
@@ -202,6 +202,50 @@ class TestSyntheticStatement:
         n = normalise_all(extract_sbm_pdf(synthetic_pdf))
         assert n.normalisation_warnings == []
         assert n.normalised_transactions[0].date == "2026-03-04"
+
+
+class TestUnpairedPositiveDebit:
+    """A positive Debit figure with no earlier debit of the same ref and amount
+    is still money in (the balance proves it) but is NOT labelled a reversal."""
+
+    _ROWS = [
+        "04-MAR-26 Mpesa Deposit 000MPDT260633439 04-MAR-26 0.00 300.00 300.00",
+        "05-MAR-26 IB MPESA Withdrawal 003ICMB260650018 05-MAR-26 -100.00 0.00 200.00",
+        # Same ref, different amount -> no match.
+        "06-MAR-26 IB MPESA Withdrawal 003ICMB260650018 06-MAR-26 50.00 0.00 250.00",
+        # Ref never seen before -> no match.
+        "07-MAR-26 Interest Credit 003INTC260660001 07-MAR-26 25.00 0.00 275.00",
+    ]
+    @pytest.fixture(scope="class")
+    def result(self, tmp_path_factory):
+        pytest.importorskip("reportlab")
+        hdr = [
+            ln.replace("Total Debits: 600.00", "Total Debits: 25.00")
+              .replace("Total Credits: 400,885.80", "Total Credits: 300.00")
+              .replace("Available Balance: 400,285.80", "Available Balance: 275.00")
+            for ln in _HEADER
+        ]
+        p = tmp_path_factory.mktemp("sbm_unpaired") / "unpaired.pdf"
+        _build_pdf(p, pages=[hdr + _COLS + self._ROWS + _FOOTER])
+        return extract_sbm_pdf(str(p))
+
+    def test_direction_still_credit_and_balance_reconciles(self, result):
+        tx = result.raw_transactions
+        assert [t.credit_raw for t in tx[2:]] == ["50.00", "25.00"]
+        assert all(t.debit_raw == "" for t in tx[2:])
+        assert reconcile_balances(tx, None)[0] == []
+
+    def test_not_labelled_reversal(self, result):
+        tx = result.raw_transactions
+        assert [t.pattern_hint for t in tx[2:]] == ["UNCLASSIFIED", "UNCLASSIFIED"]
+        assert all(t.pattern_hint != "REVERSAL_PAIR" for t in tx)
+
+    def test_warned_and_needs_review(self, result):
+        assert result.extraction_status == "needs_review"
+        msgs = [w for w in result.warnings if "not labelled as a reversal" in w.message]
+        assert [w.row_index for w in msgs] == [2, 3]
+        # No other warnings: header totals still reconcile.
+        assert len(result.warnings) == 2, result.warnings
 
 
 class TestNotSbm:

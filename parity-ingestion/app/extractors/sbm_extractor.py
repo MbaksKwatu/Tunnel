@@ -21,7 +21,10 @@ statement (real text layer, PDFium producer, Helvetica, no embedded fonts):
     (23-MAR-26, a full 4-line M-Pesa withdrawal + 3 fee reversal). The
     normaliser strips signs and derives direction from the field name, so a
     positive "debit" is emitted as credit_raw, otherwise every downstream
-    total would be wrong.
+    total would be wrong. The direction is proven by the balance chain; the
+    REVERSAL_PAIR label is not (one real example), so it is only applied
+    when the row undoes an earlier debit with the same ref and amount —
+    otherwise UNCLASSIFIED plus a warning (needs_review).
   * An M-Pesa withdrawal is 4 separate rows sharing one ref number
     (withdrawal, Safaricom charge, Mfukoni charge, excise tax). They are kept
     as 4 rows (each moves the running balance) and the shared ref is appended
@@ -36,6 +39,7 @@ statement (real text layer, PDFium producer, Helvetica, no embedded fonts):
 from __future__ import annotations
 
 import re
+from collections import Counter
 from decimal import Decimal
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -177,7 +181,9 @@ def reconcile_balances(
 def extract_sbm_pdf(file_path: str) -> ExtractionResult:
     transactions: List[RawTransaction] = []
     warnings: List[WarningItem] = []
+    # All positive-Debit rows (paired or not): header Total Debits nets them all.
     reversal_rows: set = set()
+    open_debits: Counter = Counter()
     header: Dict[str, Optional[str]] = {}
     pending: Optional[dict] = None
 
@@ -189,7 +195,10 @@ def extract_sbm_pdf(file_path: str) -> ExtractionResult:
         pattern_src = pending["type"]
         status, hint = _detect_pattern(pattern_src)
         if pending["reversal"]:
-            status, hint = ("PENDING_CLASSIFICATION", "REVERSAL_PAIR")
+            status, hint = (
+                ("PENDING_CLASSIFICATION", "REVERSAL_PAIR") if pending["paired"]
+                else ("PENDING_CLASSIFICATION", "UNCLASSIFIED")
+            )
         transactions.append(
             RawTransaction(
                 row_index=pending["row_index"],
@@ -229,8 +238,23 @@ def extract_sbm_pdf(file_path: str) -> ExtractionResult:
                     # Debit column is printed negative; a positive figure there
                     # is a reversal (money in), not a debit.
                     reversal = debit > 0
+                    key = (m.group("ref"), abs(debit))
+                    paired = False
                     if reversal:
                         credit_raw, debit_raw = _amt_str(debit), ""
+                        # Only label REVERSAL_PAIR when it undoes an earlier
+                        # debit with the same ref and amount (consumed 1:1).
+                        # Direction stays credit either way — the balance
+                        # chain proves it; only the label is conditional.
+                        paired = open_debits[key] > 0
+                        if paired:
+                            open_debits[key] -= 1
+                        else:
+                            warnings.append(WarningItem(
+                                row_index=row_idx,
+                                message="positive debit (money in) with no earlier debit of the same ref and amount — not labelled as a reversal",
+                                raw_text=line,
+                            ))
                         if credit != 0:
                             warnings.append(WarningItem(
                                 row_index=row_idx,
@@ -239,6 +263,8 @@ def extract_sbm_pdf(file_path: str) -> ExtractionResult:
                             ))
                     else:
                         credit_raw, debit_raw = _amt_str(credit), _amt_str(debit)
+                        if debit < 0:
+                            open_debits[key] += 1
                     if not iso:
                         warnings.append(WarningItem(
                             row_index=row_idx,
@@ -261,6 +287,7 @@ def extract_sbm_pdf(file_path: str) -> ExtractionResult:
                         "credit_raw": credit_raw,
                         "balance_raw": m.group("balance").replace(",", ""),
                         "reversal": reversal,
+                        "paired": paired,
                     }
                     if reversal:
                         reversal_rows.add(row_idx)
