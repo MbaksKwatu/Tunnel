@@ -326,6 +326,75 @@ _SKIP_C_RE = _re.compile(
 )
 
 
+# Zero-balance line: the Balance cell is left blank when the running balance
+# lands on exactly 0.00, e.g. "25-04-25 EXCISE TAX 25-04-25 28.68".
+# Groups: (continuation_text, value_date, amount). Only trusted when the amount
+# is found in the Debit or Credit column by x-position.
+_LINE_C_AMOUNT_NO_BAL_RE = _re.compile(
+    rf'^(.*?)\s+({_DATE_PAT_2Y})\s+({_AMT_PAT})\s*$'
+)
+
+# Opening balance line: "B/F  2,000.00CR" (no date, no amount).
+_LINE_C_BF_RE = _re.compile(rf'^B/F\s+({_BAL_PAT})\s*$')
+
+# Layout C prints Debit and Credit as two separate right-aligned columns, but
+# extract_text() flattens each row to a single amount token, so the column is
+# recovered from the amount word's right edge (x1) as a fraction of page
+# width. Measured on the real 12-month Kankam PrimeNET statement (595pt page):
+# every debit ends at x1=377, every credit at x1=464, balances at x1=568.
+_C_DEBIT_RIGHT_FRAC = 377 / 595
+_C_CREDIT_RIGHT_FRAC = 464 / 595
+_C_COLUMN_TOLERANCE_FRAC = 0.05
+
+
+def _parse_balance_to_signed_cents(raw: str) -> int | None:
+    """'1,500.00CR' -> 150000, '280.95DR' -> -28095, '5,000.00' -> 500000, '' -> None."""
+    m = _re.fullmatch(r'([\d,]+)\.(\d{2})\s*(CR|DR)?', (raw or "").strip(), _re.IGNORECASE)
+    if not m:
+        return None
+    cents = int(m.group(1).replace(",", "") + m.group(2))
+    return -cents if (m.group(3) or "").upper() == "DR" else cents
+
+
+def _layout_c_amount_column(text_line: dict, words: list, amount_str: str, page_width: float) -> str | None:
+    """
+    Return 'debit' / 'credit' for the amount printed on this text line, based on
+    which column its right edge falls in, or None if it can't be located.
+    """
+    top, bottom = text_line["top"] - 1, text_line["bottom"] + 1
+    candidates = [
+        w for w in words
+        if w["text"] == amount_str and w["top"] >= top and w["bottom"] <= bottom
+    ]
+    if not candidates or not page_width:
+        return None
+    # Rightmost match: the amount column sits right of any number that happens
+    # to appear in the description (e.g. "EURO 15190 AT 139.70 TRF ...").
+    frac = max(w["x1"] for w in candidates) / page_width
+    d_debit = abs(frac - _C_DEBIT_RIGHT_FRAC)
+    d_credit = abs(frac - _C_CREDIT_RIGHT_FRAC)
+    if min(d_debit, d_credit) > _C_COLUMN_TOLERANCE_FRAC:
+        return None
+    return "debit" if d_debit < d_credit else "credit"
+
+
+def _layout_c_balance_direction(prev_cents: int | None, amount_str: str, balance_str: str) -> str | None:
+    """
+    Return 'credit' / 'debit' if the running balance moved by exactly +/- amount
+    since the previous row, else None (no previous balance, or chain break).
+    """
+    bal_cents = _parse_balance_to_signed_cents(balance_str)
+    amt_cents = _parse_balance_to_signed_cents(amount_str)
+    if prev_cents is None or bal_cents is None or amt_cents is None:
+        return None
+    delta = bal_cents - prev_cents
+    if delta == amt_cents:
+        return "credit"
+    if delta == -amt_cents:
+        return "debit"
+    return None
+
+
 def _is_layout_c(file_path: str) -> bool:
     """Return True if the PDF uses the PrimeNET text layout (no tables, DD-MM-YY dates)."""
     try:
@@ -352,11 +421,18 @@ def _extract_coop_layout_c(file_path: str) -> tuple:
       Single:  DD-MM-YY  DESCRIPTION  DD-MM-YY  AMOUNT  BALANCE_CR
       Wrapped: DD-MM-YY  DESCRIPTION_START          (no amounts — wraps)
                DESCRIPTION_END  DD-MM-YY  AMOUNT  BALANCE_CR
+
+    Direction: the statement has separate Debit and Credit columns, which
+    extract_text() collapses into one amount token. The column is recovered
+    from the amount's x-position and cross-checked against the running-balance
+    delta (seeded from the "B/F" line). When both are available and disagree,
+    the balance delta wins and a warning is emitted.
     """
     transactions: List[RawTransaction] = []
     warnings: List[WarningItem] = []
     row_idx = 0
     pending: dict | None = None
+    prev_balance_cents: int | None = None
 
     _DATE_LINE_RE = _re.compile(rf'^({_DATE_PAT_2Y})\s+(.*)')
 
@@ -386,27 +462,78 @@ def _extract_coop_layout_c(file_path: str) -> tuple:
             pattern_hint=pattern_hint,
         ))
 
-    def parse_amounts(amount_str: str, balance_str: str) -> tuple[str, str]:
-        """
-        Determine debit vs credit from the signed context.
-        Balance direction: CR = net positive, DR = net negative.
-        Single amount field — debit if balance went down, credit if it went up.
-        We keep it simple: store in debit_raw, normaliser resolves sign via balance delta.
-        """
-        return amount_str, balance_str
+    def parse_amounts(
+        row_index: int, line: str, column: str | None, amount_str: str, balance_str: str,
+    ) -> tuple[str, str]:
+        """Return (debit_raw, credit_raw) for a single-amount line; advances the running balance."""
+        nonlocal prev_balance_cents
+        by_balance = _layout_c_balance_direction(prev_balance_cents, amount_str, balance_str)
+        if column and by_balance and column != by_balance:
+            warnings.append(WarningItem(
+                row_index=row_index,
+                message=(
+                    f"coop layout C: amount printed in {column} column but running "
+                    f"balance moved as a {by_balance}; using balance direction"
+                ),
+                raw_text=line,
+            ))
+            direction = by_balance
+        elif by_balance or column:
+            direction = by_balance or column
+        else:
+            warnings.append(WarningItem(
+                row_index=row_index,
+                message=(
+                    "coop layout C: could not determine debit/credit from column "
+                    "position or running balance; defaulted to debit"
+                ),
+                raw_text=line,
+            ))
+            direction = "debit"
+        balance_cents = _parse_balance_to_signed_cents(balance_str)
+        if balance_cents is not None:
+            prev_balance_cents = balance_cents
+        elif prev_balance_cents is not None:
+            # Blank balance cell (zero-balance line): carry the implied balance.
+            amount_cents = _parse_balance_to_signed_cents(amount_str) or 0
+            prev_balance_cents += amount_cents if direction == "credit" else -amount_cents
+        if direction == "credit":
+            return "", amount_str
+        return amount_str, ""
 
     with pdfplumber.open(file_path) as pdf:
         for page in pdf.pages:
-            text = page.extract_text() or ""
-            for raw_line in text.split("\n"):
-                line = raw_line.strip()
+            words = page.extract_words()
+            for text_line in page.extract_text_lines():
+                line = text_line["text"].strip()
                 if not line:
                     continue
-                if _SKIP_C_RE.match(line):
+
+                m_bf = _LINE_C_BF_RE.match(line)
+                if m_bf:
+                    prev_balance_cents = _parse_balance_to_signed_cents(m_bf.group(1))
                     continue
 
-                # Does this line carry amounts? (ends with balance CR/DR)
+                # Does this line carry amounts? (ends with balance CR/DR, or
+                # with a bare amount when the balance cell is blank)
                 m_amt = _LINE_C_AMOUNTS_RE.match(line)
+                column = (
+                    _layout_c_amount_column(text_line, words, m_amt.group(3), page.width)
+                    if m_amt else None
+                )
+                if not m_amt:
+                    m_no_bal = _LINE_C_AMOUNT_NO_BAL_RE.match(line)
+                    if m_no_bal:
+                        column = _layout_c_amount_column(text_line, words, m_no_bal.group(3), page.width)
+                        if column:
+                            m_amt = m_no_bal
+
+                # A continuation line carrying amounts can start with text that
+                # looks like a header ("3000230088 2547..." for BY MPESA
+                # deposits, "01-03-2025 to 31-03-..." for Int.Coll), so the
+                # header/footer skip only applies to lines without amounts.
+                if _SKIP_C_RE.match(line) and not (m_amt and pending):
+                    continue
 
                 # Does this line start with a date?
                 m_date = _DATE_LINE_RE.match(line)
@@ -425,8 +552,8 @@ def _extract_coop_layout_c(file_path: str) -> tuple:
                         inner = _DATE_LINE_RE.match(desc_part)
                         description = inner.group(2).strip() if inner else desc_part.strip()
                         amount_str = m_amt.group(3)
-                        balance_str = m_amt.group(4)
-                        debit_raw, balance_raw = parse_amounts(amount_str, balance_str)
+                        balance_str = m_amt.group(4) if m_amt.re.groups >= 4 else ""
+                        debit_raw, credit_raw = parse_amounts(row_idx, line, column, amount_str, balance_str)
 
                         if pending:
                             flush(pending)
@@ -435,8 +562,8 @@ def _extract_coop_layout_c(file_path: str) -> tuple:
                             "date_raw": iso_date or date_part,
                             "description": description,
                             "debit_raw": debit_raw,
-                            "credit_raw": "",
-                            "balance_raw": balance_raw,
+                            "credit_raw": credit_raw,
+                            "balance_raw": balance_str,
                         }
                         row_idx += 1
                         flush(pending)
@@ -459,13 +586,16 @@ def _extract_coop_layout_c(file_path: str) -> tuple:
                     # Continuation line carrying amounts
                     desc_tail = m_amt.group(1).strip()
                     amount_str = m_amt.group(3)
-                    balance_str = m_amt.group(4)
-                    debit_raw, balance_raw = parse_amounts(amount_str, balance_str)
+                    balance_str = m_amt.group(4) if m_amt.re.groups >= 4 else ""
+                    debit_raw, credit_raw = parse_amounts(
+                        pending["row_index"], line, column, amount_str, balance_str,
+                    )
 
                     if desc_tail:
                         pending["description"] = (pending["description"] + " " + desc_tail).strip()
                     pending["debit_raw"] = debit_raw
-                    pending["balance_raw"] = balance_raw
+                    pending["credit_raw"] = credit_raw
+                    pending["balance_raw"] = balance_str
                     flush(pending)
                     pending = None
 
