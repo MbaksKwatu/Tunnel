@@ -432,6 +432,45 @@ def _require_snapshot_access(
     raise HTTPException(status_code=401, detail="Authentication required")
 
 
+def _deal_owner_id(deal: Dict[str, Any]) -> Optional[str]:
+    """Trustworthy owner of a deal.
+
+    `user_id` is set from the verified JWT at creation. `created_by` is a
+    client-supplied form field (POST /deals), so it is only used as a fallback
+    when `user_id` is absent (older rows: in prod every deal that has a user_id
+    has user_id == created_by).
+    """
+    owner = deal.get("user_id") or deal.get("created_by")
+    return str(owner) if owner else None
+
+
+def _require_deal_owner(
+    request: Request,
+    deal_id: str,
+    x_api_key: Optional[str] = Header(None, alias="x-api-key"),
+) -> None:
+    """Gate for deal-scoped routes that return a deal's financial data.
+
+    Authentication AND ownership, not just "any valid token": accepts
+      - a valid admin-scoped x-api-key (the admin panel's server-side proxy), or
+      - a verified Supabase JWT whose subject owns the deal.
+    A Musa partner key is deliberately NOT accepted (no partner integration calls
+    these routes). No credential -> 401 (checked before the deal is looked up, so
+    the response reveals nothing about which deal ids exist). A valid JWT for a
+    different account -> the same 404 as a missing deal (no existence leak).
+    """
+    if x_api_key:
+        from .integrations.auth import validate_scoped_api_key
+        if validate_scoped_api_key(x_api_key, "admin"):
+            return
+    user_id = _extract_user_id_from_request(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    deal = _repos(request)["deals"].get_deal(deal_id)
+    if not deal or _deal_owner_id(deal) != str(user_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+
+
 @router.post("/deals")
 def create_deal(
     request: Request,
@@ -2401,7 +2440,7 @@ from .suggestions import generate_suggestions  # noqa: E402
 
 
 @router.get("/deals/{deal_id}/analytics/loan-drawdowns")
-def get_loan_drawdowns(request: Request, deal_id: str):
+def get_loan_drawdowns(request: Request, deal_id: str, _auth: None = Depends(_require_deal_owner)):
     """Returns all loan inflow transactions for a deal. Used by Parity Review."""
     repos = _repos(request)
     if not repos["deals"].get_deal(deal_id):
@@ -2441,7 +2480,7 @@ def get_loan_drawdowns(request: Request, deal_id: str):
 
 
 @router.get("/deals/{deal_id}/analytics/monthly-cashflow")
-def get_monthly_cashflow(request: Request, deal_id: str):
+def get_monthly_cashflow(request: Request, deal_id: str, _auth: None = Depends(_require_deal_owner)):
     """
     Month-by-month inflow / outflow / net for a deal.
     Computed from classified transactions in the latest snapshot.
@@ -2496,7 +2535,7 @@ def get_monthly_cashflow(request: Request, deal_id: str):
 
 
 @router.get("/deals/{deal_id}/analytics/credit-scoring-inputs")
-def get_credit_scoring_inputs(request: Request, deal_id: str):
+def get_credit_scoring_inputs(request: Request, deal_id: str, _auth: None = Depends(_require_deal_owner)):
     """
     Deal-level Credit Scoring Inputs (the 7 core metrics + payroll/KRA signals),
     computed from classifier role in the latest snapshot — works uniformly for
