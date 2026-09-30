@@ -415,3 +415,65 @@ def monthly_cashflow(transactions: list[dict]) -> list[dict]:
         })
         prev_net = net
     return result
+
+
+# Credits with these roles have not been classified yet — as opposed to being
+# classified into a role that is deliberately not "inflow" (transfer,
+# reversal_credit, ...). Reported separately so a reader can tell the two apart.
+PENDING_CLASSIFICATION_ROLES = frozenset({"needs_review", ""})
+
+
+def monthly_excluded_credits(transactions: list[dict]) -> list[dict]:
+    """
+    Credits that monthly_cashflow() does NOT count as inflow, by month.
+
+    monthly_cashflow() counts a credit as inflow only when its role is in
+    CASHFLOW_INFLOW_ROLES; every other credit used to vanish without trace
+    (PAR-86, 2026-09-30: 55% of credit value on a real deal). This reports
+    exactly that remainder, so per month:
+
+        inflow_cents (monthly_cashflow) + excluded_credit_cents == all credits
+
+    Fields per month (only months with excluded credits are returned):
+      excluded_credit_cents          total credits outside CASHFLOW_INFLOW_ROLES
+      pending_classification_cents   part of it still needs_review / unclassified
+      by_role                        {role: cents} for the excluded credits
+
+    Whether excluded credits should count toward any given metric is a product
+    decision (revenue: no; cash actually moved: yes for transfers/reversals) —
+    this function only makes them visible; it does not re-include them.
+    All amounts integer cents. No floats. Sorted by month ascending.
+    """
+    by_month: dict[str, dict[str, int]] = {}
+    for txn in transactions:
+        amount = txn.get("amount_cents", 0)
+        if not isinstance(amount, int):
+            raise ValueError(
+                f"Non-integer amount_cents: {amount} on txn {txn.get('txn_id')}"
+            )
+        txn_date = txn.get("txn_date", "")
+        if not txn_date:
+            continue
+        month = str(txn_date)[:7]
+        if len(month) < 7 or amount <= 0:
+            continue
+        role = txn.get("role") or txn.get("classification") or ""
+        if role in CASHFLOW_INFLOW_ROLES:
+            continue
+        roles = by_month.setdefault(month, {})
+        roles[role or "unclassified"] = roles.get(role or "unclassified", 0) + amount
+
+    result = []
+    for month in sorted(by_month):
+        roles = by_month[month]
+        pending = sum(
+            cents for role, cents in roles.items()
+            if role in PENDING_CLASSIFICATION_ROLES or role == "unclassified"
+        )
+        result.append({
+            "month": month,
+            "excluded_credit_cents": sum(roles.values()),
+            "pending_classification_cents": pending,
+            "by_role": dict(sorted(roles.items())),
+        })
+    return result

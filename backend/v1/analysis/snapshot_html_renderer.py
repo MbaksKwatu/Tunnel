@@ -583,6 +583,7 @@ def _monthly_cashflow_ctx_from(mc: _MonthlyCashflow) -> Dict[str, Any]:
         "cashflow_note": mc.note,
         "cashflow_trend_note": mc.trend_note,
         "cashflow_peak_trough_note": mc.peak_trough_note,
+        "cashflow_excluded_note": mc.excluded_note,
         "cashflow_rows_ctx": rows,
     }
 
@@ -909,6 +910,7 @@ def render_snapshot_html(
     cashflow_trend_note = monthly_cashflow_ctx["cashflow_trend_note"]
     cashflow_peak_trough_note = monthly_cashflow_ctx["cashflow_peak_trough_note"]
     cashflow_rows_ctx = monthly_cashflow_ctx["cashflow_rows_ctx"]
+    cashflow_excluded_note = monthly_cashflow_ctx["cashflow_excluded_note"]
 
     # ── Period label ────────────────────────────────────────────────────────
     fy = str(af.get("financial_year") or "") if recon_available else ""
@@ -1128,6 +1130,7 @@ def render_snapshot_html(
         "kms":                kms,
         "cashflow_rows":      cashflow_rows_ctx,
         "cashflow_note":      cashflow_note,
+        "cashflow_excluded_note": cashflow_excluded_note,
         "cashflow_peak_trough_note": cashflow_peak_trough_note,
         "cashflow_trend_note": cashflow_trend_note,
         "inflow_total_str":   inflow_composition_ctx["total_str"],
