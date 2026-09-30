@@ -82,6 +82,16 @@ def _ingest_upload_url(file_name: str) -> str:
     return f"{PARITY_INGESTION_URL}/v1/ingest/upload"
 
 
+def _raw_hash(rows: List[Dict[str, Any]]) -> str:
+    """canonical_hash over rows WITHOUT balance_cents.
+
+    balance_cents began being persisted after this hash contract was set, so it
+    is excluded to keep raw_transaction_hash byte-identical to what the same
+    file produced before balances were carried through.
+    """
+    return canonical_hash([{k: v for k, v in r.items() if k != "balance_cents"} for r in rows])
+
+
 def _parity_result_to_rows(
     result: dict,
     document_id: str,
@@ -110,6 +120,14 @@ def _parity_result_to_rows(
             # Per-document account_id enables transfer detection — see PAR-30.
             "account_id": str(document_id),
         }
+        # Statement-printed running balance. Persisted so year-end cash can
+        # read the real balance instead of falling back to fiscal-year net
+        # flow (reconciliation_engine.calculate_cash_position_reconciliation).
+        # Left off the row entirely when the parser produced none, so CSV/
+        # Excel sources without a balance column behave exactly as before.
+        balance = n.get("balance_cents")
+        if isinstance(balance, int) and not isinstance(balance, bool):
+            row_obj["balance_cents"] = balance
         row_obj["txn_id"] = compute_txn_id(row_obj, document_id)
         rows.append(row_obj)
 
@@ -236,7 +254,7 @@ def parse_via_parity_ingestion(
         logger.info("[BACKEND] Rows received from ingestion: %d", len(rows))
 
         rows_sorted = sort_rows(rows)
-        raw_hash = canonical_hash(rows_sorted)
+        raw_hash = _raw_hash(rows_sorted)
         currency_detection = result.get("currency") or "unknown"
         analytics = result.get("analytics") or {}
         return rows_sorted, raw_hash, currency_detection, analytics
@@ -255,7 +273,7 @@ def parse_via_parity_ingestion(
                     )
                     logger.info("[BACKEND] Rows received from ingestion: %d", len(rows))
                     rows_sorted = sort_rows(rows)
-                    raw_hash = canonical_hash(rows_sorted)
+                    raw_hash = _raw_hash(rows_sorted)
                     currency_detection = partial_result.get("currency") or "unknown"
                     analytics = partial_result.get("analytics") or {}
                     return rows_sorted, raw_hash, currency_detection, analytics

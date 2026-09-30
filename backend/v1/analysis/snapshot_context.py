@@ -95,7 +95,11 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional, Tuple
 
-from ..analytics import CASHFLOW_INFLOW_ROLES, monthly_cashflow as _monthly_cashflow
+from ..analytics import (
+    CASHFLOW_INFLOW_ROLES,
+    monthly_cashflow as _monthly_cashflow,
+    monthly_excluded_credits as _monthly_excluded_credits,
+)
 from ..core.snapshot_engine import decompress_canonical_json_if_needed
 from .snapshot_generator import generate_reconciliation_section
 from ._snapshot_fetch_helpers import _bank_label, _get_supabase, _paginate
@@ -404,6 +408,9 @@ class MonthlyCashflow:
     trend_note: str         # "" | one-month caveat | net POSITIVE/NEGATIVE/stable clause (>=2 months only)
     peak_trough_note: str   # "" | "Trough of X in <month>; peak of Y in <month>." (>=2 months only)
     rows: List[CashflowMonthRow]
+    # "" when every credit in the period is counted as inflow; otherwise says how
+    # much credit value is NOT in the Inflow column (PAR-86 2026-09-30).
+    excluded_note: str = ""
 
 
 @dataclass(frozen=True)
@@ -1112,11 +1119,26 @@ def _build_monthly_cashflow(
             bar_share=Percent(value=min(abs(net) / max_abs_net, 1.0)),
         ))
 
+    period_set = set(period_months)
+    excl = [r for r in _monthly_excluded_credits(canon_tagged) if r["month"] in period_set]
+    excluded_cents = sum(r["excluded_credit_cents"] for r in excl)
+    excluded_note = ""
+    if excluded_cents > 0:
+        pending_cents = sum(r["pending_classification_cents"] for r in excl)
+        total_credits = excluded_cents + sum(monthly_merged[m]["inflow_cents"] for m in period_months)
+        excluded_note = (
+            f"{_fmt_kes(excluded_cents)} of credits ({excluded_cents * 100 // total_credits}% of all "
+            f"credits in this period) is not counted as Inflow: {_fmt_kes(pending_cents)} pending "
+            f"classification, {_fmt_kes(excluded_cents - pending_cents)} classified as non-inflow "
+            f"roles (e.g. transfers, reversals)."
+        )
+
     return MonthlyCashflow(
         note=note,
         trend_note=trend_note,
         peak_trough_note=peak_trough_note,
         rows=rows,
+        excluded_note=excluded_note,
     )
 
 
