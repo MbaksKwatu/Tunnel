@@ -130,8 +130,11 @@ def _assert_equiv(canon_tagged, in_active_period=lambda m: True, currency="KES")
     new = _monthly_cashflow_ctx_from(
         _build_monthly_cashflow(canon_tagged, in_active_period, currency)
     )
+    # cashflow_excluded_note is additive (PAR-86 2026-09-30) — the four legacy
+    # keys must stay byte-identical to the original inline logic.
+    excluded_note = new.pop("cashflow_excluded_note")
     assert new == original
-    return new
+    return {**new, "cashflow_excluded_note": excluded_note}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -273,3 +276,29 @@ def test_currency_propagates_from_deal_not_hardcoded():
     canon_tagged = [_txn("2025-01", "05", 100_00), _txn("2025-02", "05", 100_00)]
     mc = _build_monthly_cashflow(canon_tagged, lambda m: True, "USD")
     assert mc.rows[0].inflow.currency == "USD"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Excluded-credits note (PAR-86, 2026-09-30) — credits not in Inflow are disclosed
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_excluded_note_empty_when_every_credit_is_inflow():
+    ctx = _assert_equiv([_txn("2025-01", "05", 1_000_00), _txn("2025-01", "06", -200_00, "supplier")])
+    assert ctx["cashflow_excluded_note"] == ""
+
+
+def test_excluded_note_discloses_pending_and_non_inflow_credits_within_period():
+    canon = [
+        _txn("2025-01", "05", 1_000_000_00),
+        _txn("2025-01", "06", 3_000_000_00, "needs_review"),
+        _txn("2025-01", "07", 1_000_000_00, "transfer"),
+        _txn("2026-01", "07", 9_000_000_00, "needs_review"),  # outside active period: not counted
+    ]
+    ctx = _assert_equiv(canon, in_active_period=lambda m: m.startswith("2025-"))
+    assert ctx["cashflow_excluded_note"] == (
+        "KES 4,000,000 of credits (80% of all credits in this period) is not counted as Inflow: "
+        "KES 3,000,000 pending classification, KES 1,000,000 classified as non-inflow "
+        "roles (e.g. transfers, reversals)."
+    )
+    # Inflow column itself is unchanged: the excluded credits are disclosed, not re-included
+    assert ctx["cashflow_rows_ctx"][0]["inflow_str"] == "1,000,000"

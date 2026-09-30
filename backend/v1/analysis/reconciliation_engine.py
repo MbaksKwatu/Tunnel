@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import contextvars
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Tuple, Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +209,159 @@ def _variance_status(variance_cents: int, declared_cents: int) -> str:
 # Task 1: Cash Position Reconciliation
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Statement-balance helpers (pure — no I/O, unit-tested directly)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Each row is {"txn_date", "balance_cents", "signed_amount_cents", "id"}; the
+# balance is the statement's printed running balance AFTER that row, so
+# balance - signed_amount is the balance BEFORE it. Rows carry no statement
+# sequence (`id` is a random uuid), so order within a day is recovered from
+# that chain rather than from any stored order.
+
+def _day_boundary_row(
+    day_rows: List[Dict[str, Any]], *, last: bool, unbalanced_rows: int = 0
+) -> Tuple[Dict[str, Any], bool]:
+    """Last (or first) row of one day's rows, order-independent.
+
+    Returns (row, ambiguous). The last row is the one whose balance is nobody
+    else's pre-transaction balance; the first is the one whose pre-transaction
+    balance is nobody else's balance. Falls back to a deterministic pick
+    (flagged ambiguous) when the chain does not resolve to exactly one row, and
+    ALWAYS flags ambiguous when the day also holds rows with no printed balance
+    (`unbalanced_rows`): the chain over the balanced rows alone is then
+    incomplete, and the true last row might be one of the unbalanced ones.
+    """
+    if len(day_rows) == 1:
+        return day_rows[0], unbalanced_rows > 0
+    cands = []
+    for r in day_rows:
+        if last:
+            clash = any(o is not r and o["balance_cents"] - o["signed_amount_cents"] == r["balance_cents"] for o in day_rows)
+        else:
+            pre = r["balance_cents"] - r["signed_amount_cents"]
+            clash = any(o is not r and o["balance_cents"] == pre for o in day_rows)
+        if not clash:
+            cands.append(r)
+    if len(cands) == 1:
+        return cands[0], unbalanced_rows > 0
+    return sorted(day_rows, key=lambda r: str(r.get("id") or ""))[-1 if last else 0], True
+
+
+def _statement_span(
+    rows: List[Dict[str, Any]], unbalanced_by_date: Optional[Dict[str, int]] = None
+) -> Optional[Dict[str, Any]]:
+    """Date span, boundary balances and fingerprint of one statement's rows."""
+    if not rows:
+        return None
+    ub = unbalanced_by_date or {}
+    first_date = min(str(r["txn_date"]) for r in rows)
+    last_date = max(str(r["txn_date"]) for r in rows)
+    first_day = [r for r in rows if str(r["txn_date"]) == first_date]
+    last_day = [r for r in rows if str(r["txn_date"]) == last_date]
+    first_row, _ = _day_boundary_row(first_day, last=False, unbalanced_rows=ub.get(first_date, 0))
+    last_row, _ = _day_boundary_row(last_day, last=True, unbalanced_rows=ub.get(last_date, 0))
+    return {
+        "first_date": first_date,
+        "opening_cents": first_row["balance_cents"] - first_row["signed_amount_cents"],
+        "last_date": last_date,
+        "closing_cents": last_row["balance_cents"],
+        # any printed balance on the boundary days: tolerant of unresolved same-day order
+        "first_pre_balances": {r["balance_cents"] - r["signed_amount_cents"] for r in first_day},
+        "last_balances": {r["balance_cents"] for r in last_day},
+        "fingerprint": {(str(r["txn_date"]), r["signed_amount_cents"], r["balance_cents"]) for r in rows},
+    }
+
+
+_ADJACENT_DAYS = 5
+
+
+def _chain_documents(spans: Dict[str, Dict[str, Any]]) -> List[List[str]]:
+    """Group documents that are statements of ONE account.
+
+    Without this, a deal with twelve monthly PDFs of one account would sum
+    twelve month-end balances as if they were twelve accounts. Two documents
+    are the same account when ANY of these holds:
+      1. continuity   — B starts on/after A ends and one of B's first-day
+                        pre-transaction balances equals one of A's last-day
+                        printed balances (exact-cents match);
+      2. adjacency    — B starts on/after A ends and within _ADJACENT_DAYS days
+                        (covers statements whose boundary rows lack a printed
+                        balance, so continuity cannot be proven). Weak evidence,
+                        so it is used ONLY when no two documents in the deal
+                        run concurrently (overlap without shared rows would mean
+                        several accounts, and adjacency could then link the
+                        wrong pair);
+      3. shared rows  — they contain an identical printed (date, amount,
+                        balance) row (an overlapping re-upload of one account).
+    Otherwise they are separate accounts (e.g. different banks).
+
+    Known limits (documented in PAR-86): two DIFFERENT accounts with disjoint,
+    back-to-back date ranges are merged by rule 2 (understates cash); a genuine
+    gap of more than _ADJACENT_DAYS days between two statements of one account
+    with no provable continuity splits them (overstates cash). The complete fix
+    is a persisted per-statement row sequence + account identifier.
+    Deterministic: union-find over documents in (first_date, id) order.
+    """
+    import datetime as _dt
+
+    order = sorted(spans, key=lambda d: (spans[d]["first_date"], d))
+    parent = {d: d for d in order}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def days_between(a_end: str, b_start: str) -> Optional[int]:
+        try:
+            return (_dt.date.fromisoformat(b_start) - _dt.date.fromisoformat(a_end)).days
+        except ValueError:
+            return None
+
+    concurrent = False
+    for i, a in enumerate(order):
+        for b in order[i + 1:]:
+            sa, sb = spans[a], spans[b]
+            if sb["first_date"] < sa["last_date"] and not (sa["fingerprint"] & sb["fingerprint"]):
+                concurrent = True
+
+    for i, a in enumerate(order):
+        for b in order[i + 1:]:
+            sa, sb = spans[a], spans[b]
+            gap = days_between(sa["last_date"], sb["first_date"])
+            sequential = gap is not None and gap >= 0
+            linked = (
+                (sequential and bool(sb["first_pre_balances"] & sa["last_balances"]))
+                or (sequential and not concurrent and gap <= _ADJACENT_DAYS)
+                or bool(sa["fingerprint"] & sb["fingerprint"])
+            )
+            if linked:
+                parent[find(b)] = find(a)
+
+    groups: Dict[str, List[str]] = {}
+    for d in order:
+        groups.setdefault(find(d), []).append(d)
+    return list(groups.values())
+
+
+def _year_end_balance(
+    rows: List[Dict[str, Any]], fiscal_end: str, unbalanced_by_date: Optional[Dict[str, int]] = None
+) -> Optional[Dict[str, Any]]:
+    """Statement balance after the last row on/before fiscal_end, or None."""
+    eligible = [r for r in rows if str(r["txn_date"]) <= fiscal_end]
+    if not eligible:
+        return None
+    last_date = max(str(r["txn_date"]) for r in eligible)
+    row, ambiguous = _day_boundary_row(
+        [r for r in eligible if str(r["txn_date"]) == last_date],
+        last=True,
+        unbalanced_rows=(unbalanced_by_date or {}).get(last_date, 0),
+    )
+    return {"date": last_date, "balance_cents": row["balance_cents"], "ambiguous": ambiguous}
+
+
 def calculate_cash_position_reconciliation(deal_id: str) -> Dict[str, Any]:
     """
     Compare bank account balances vs audited financials ON FISCAL YEAR-END DATE.
@@ -275,61 +428,113 @@ def calculate_cash_position_reconciliation(deal_id: str) -> Dict[str, Any]:
     total_bank_cents = 0
     method = "balance_column"  # will downgrade to "flow_derived" if balance_cents absent
 
-    for doc_id, doc in documents.items():
-        # Get the last transaction on or before fiscal_year_end that has a balance
-        bal_res = (
-            sb.table("pds_raw_transactions")
-            .select("txn_date,balance_cents,account_id")
-            .eq("deal_id", deal_id)
-            .eq("document_id", doc_id)
-            .lte("txn_date", fiscal_end)
-            .not_.is_("balance_cents", "null")
-            .order("txn_date", desc=True)
-            .order("id", desc=True)
-            .limit(1)
-            .execute()
-        )
+    def _label(doc_id: str) -> str:
+        d = documents[doc_id]
+        return (d.get("storage_url") or doc_id).replace("inline://", "")
 
-        source_label = (
-            doc.get("storage_url") or doc_id
-        ).replace("inline://", "")
-
-        if bal_res.data:
-            row = bal_res.data[0]
-            bal_cents = row["balance_cents"]
-            bank_balances.append({
-                "source": source_label,
-                "balance_kes": round(bal_cents / 100, 2),
-                "balance_cents": bal_cents,
-                "date": row["txn_date"],
-                "method": "balance_column",
-            })
-            total_bank_cents += bal_cents
-        else:
-            # Fallback: fiscal-year net flow (opening balance unknown)
-            flow_res = (
+    # Statement balances, fetched once per document. A document that has any
+    # stored balance is handled on the balance path; the flow-derived fallback
+    # below is ONLY for documents with no balance column at all (e.g. CSV/Excel
+    # sources without one, or deals ingested before balance_cents was persisted).
+    balance_rows: Dict[str, List[Dict[str, Any]]] = {}
+    unbalanced: Dict[str, Dict[str, int]] = {}
+    for doc_id in documents:
+        got: List[Dict[str, Any]] = []
+        off = 0
+        while True:
+            res = (
                 sb.table("pds_raw_transactions")
-                .select("signed_amount_cents")
+                .select("id,txn_date,signed_amount_cents,balance_cents")
                 .eq("deal_id", deal_id)
                 .eq("document_id", doc_id)
-                .gte("txn_date", fiscal_start)
-                .lte("txn_date", fiscal_end)
-                .range(0, 50_000)
+                .not_.is_("balance_cents", "null")
+                .order("txn_date")
+                .order("id")
+                .range(off, off + 999)
                 .execute()
             )
-            net_flow = sum(r["signed_amount_cents"] for r in (flow_res.data or []))
-            if net_flow == 0:
-                continue  # document has no transactions in fiscal year
-            bank_balances.append({
-                "source": source_label,
-                "balance_kes": round(net_flow / 100, 2),
-                "balance_cents": net_flow,
-                "date": fiscal_end,
-                "method": "flow_derived",
-                "note": "balance_cents not stored; value is net fiscal-year flow only",
-            })
-            total_bank_cents += net_flow
-            method = "flow_derived"
+            chunk = res.data or []
+            got.extend(chunk)
+            if len(chunk) < 1000:
+                break
+            off += 1000
+        if got:
+            balance_rows[doc_id] = got
+            # rows of this document with NO printed balance (e.g. cheque lines):
+            # they break the running-balance chain, so their dates are flagged.
+            nb: Dict[str, int] = {}
+            off = 0
+            while True:
+                res = (
+                    sb.table("pds_raw_transactions")
+                    .select("id,txn_date")
+                    .eq("deal_id", deal_id)
+                    .eq("document_id", doc_id)
+                    .is_("balance_cents", "null")
+                    .order("id")
+                    .range(off, off + 999)
+                    .execute()
+                )
+                chunk = res.data or []
+                for r in chunk:
+                    nb[str(r["txn_date"])] = nb.get(str(r["txn_date"]), 0) + 1
+                if len(chunk) < 1000:
+                    break
+                off += 1000
+            unbalanced[doc_id] = nb
+
+    spans = {d: _statement_span(r, unbalanced.get(d)) for d, r in balance_rows.items()}
+    for chain in _chain_documents(spans):
+        pooled = [r for d in chain for r in balance_rows[d]]
+        pooled_ub: Dict[str, int] = {}
+        for d in chain:
+            for k, v in unbalanced.get(d, {}).items():
+                pooled_ub[k] = pooled_ub.get(k, 0) + v
+        ye = _year_end_balance(pooled, fiscal_end, pooled_ub)
+        if ye is None:
+            continue  # statement chain starts after fiscal year-end
+        entry = {
+            "source": " → ".join(_label(d) for d in chain),
+            "balance_kes": round(ye["balance_cents"] / 100, 2),
+            "balance_cents": ye["balance_cents"],
+            "date": ye["date"],
+            "method": "balance_column",
+        }
+        if ye["ambiguous"]:
+            entry["note"] = (
+                "last day's row order is not provable (same-day chain unresolved or rows without a "
+                "printed balance); balance may be an intra-day figure"
+            )
+        bank_balances.append(entry)
+        total_bank_cents += ye["balance_cents"]
+
+    for doc_id in documents:
+        if doc_id in balance_rows:
+            continue
+        # Fallback: fiscal-year net flow (opening balance unknown)
+        flow_res = (
+            sb.table("pds_raw_transactions")
+            .select("signed_amount_cents")
+            .eq("deal_id", deal_id)
+            .eq("document_id", doc_id)
+            .gte("txn_date", fiscal_start)
+            .lte("txn_date", fiscal_end)
+            .range(0, 50_000)
+            .execute()
+        )
+        net_flow = sum(r["signed_amount_cents"] for r in (flow_res.data or []))
+        if net_flow == 0:
+            continue  # document has no transactions in fiscal year
+        bank_balances.append({
+            "source": _label(doc_id),
+            "balance_kes": round(net_flow / 100, 2),
+            "balance_cents": net_flow,
+            "date": fiscal_end,
+            "method": "flow_derived",
+            "note": "balance_cents not stored; value is net fiscal-year flow only",
+        })
+        total_bank_cents += net_flow
+        method = "flow_derived"
 
     # Declared balances from cash_breakdown
     declared_balances: List[Dict[str, Any]] = [

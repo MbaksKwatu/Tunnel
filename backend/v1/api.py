@@ -2394,6 +2394,7 @@ def log_intelligence_entry(request: Request, deal_id: str, entry_id: str):
 from .analytics import (  # noqa: E402
     loan_drawdowns as _loan_drawdowns,
     monthly_cashflow as _monthly_cashflow,
+    monthly_excluded_credits as _monthly_excluded_credits,
     credit_scoring_inputs as _credit_scoring_inputs,
 )
 from .suggestions import generate_suggestions  # noqa: E402
@@ -2447,6 +2448,7 @@ def get_monthly_cashflow(request: Request, deal_id: str):
     Inflows: revenue_operational, revenue_non_operational, mpesa_inflow,
              pesalink_inflow, loan_inflow, capital_injection.
     Outflows: all transactions with negative amount_cents.
+    Credits with any other role are returned under "excluded_credits".
     """
     repos = _repos(request)
     if not repos["deals"].get_deal(deal_id):
@@ -2480,7 +2482,17 @@ def get_monthly_cashflow(request: Request, deal_id: str):
         })
 
     rows = _monthly_cashflow(tagged)
-    return {"monthly_cashflow": rows, "count": len(rows)}
+    # Credits NOT counted in inflow_cents above (needs_review, transfer,
+    # reversal_credit, ...), reported instead of silently dropped. Per month:
+    # inflow_cents + excluded_credit_cents == all credits.
+    excluded = _monthly_excluded_credits(tagged)
+    return {
+        "monthly_cashflow": rows,
+        "count": len(rows),
+        "excluded_credits": excluded,
+        "excluded_credits_total_cents": sum(r["excluded_credit_cents"] for r in excluded),
+        "pending_classification_total_cents": sum(r["pending_classification_cents"] for r in excluded),
+    }
 
 
 @router.get("/deals/{deal_id}/analytics/credit-scoring-inputs")

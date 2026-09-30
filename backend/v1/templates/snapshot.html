@@ -2014,6 +2014,9 @@ body {
         </tbody>
         <tfoot>
           <tr><td colspan="5" class="cf-foot">{{ cashflow_note | default('') }}</td></tr>
+          {% if cashflow_excluded_note %}
+          <tr><td colspan="5" class="cf-foot">{{ cashflow_excluded_note }}</td></tr>
+          {% endif %}
           {% if cashflow_peak_trough_note %}
           <!-- PAR-225 follow-up: cashflow_trend_note ("The trend over the
                observed period is net POSITIVE/NEGATIVE...") deliberately not
