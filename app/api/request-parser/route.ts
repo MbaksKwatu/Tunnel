@@ -237,7 +237,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      await supabase.from('pds_parser_requests').insert({
+      const { error: insertError } = await supabase.from('pds_parser_requests').insert({
         id: requestId,
         bank_name: bankName,
         country: country || null,
@@ -249,7 +249,16 @@ export async function POST(request: NextRequest) {
         storage_path: storagePath,
         status: 'new',
         created_by: verifiedUserId,
+        // Migration 046: a person filled in this form, and this is where the
+        // resolve notification goes (typed address first, else login email).
+        submitted_at: new Date().toISOString(),
+        contact_email: contactEmail || verifiedUserEmail || null,
       });
+      if (insertError) {
+        // Previously unchecked: a failed insert silently dropped the request
+        // from the admin queue while the emails above still said "received".
+        console.error('[api/request-parser] pds_parser_requests insert failed:', insertError.message);
+      }
 
       // Contact Email was edited away from the session's own login email —
       // treat that as updating the account's contact address going forward,
