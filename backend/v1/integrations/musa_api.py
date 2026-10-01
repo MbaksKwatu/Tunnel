@@ -136,22 +136,21 @@ def _build_session_response(
 
 
 def _require_admin_access(
-    request: Request,
     x_api_key: Optional[str] = Header(None, alias="x-api-key"),
 ) -> None:
     """
     Admin-only gate for the manual webhook-resend action (PAR-174).
 
-    Deliberately narrower than api.py's _require_snapshot_access: a Musa
-    partner key does NOT satisfy this. Musa should not be able to
-    self-trigger resends of its own webhooks — only the admin panel's
-    server-side proxy key (key_type="admin") or an authenticated internal
-    user (Supabase JWT) can.
+    Deliberately narrower than api.py's _require_snapshot_access: only the
+    admin panel's server-side proxy key (key_type="admin") satisfies this.
+    A Musa partner key does not — Musa should not be able to self-trigger
+    resends of its own webhooks. A Supabase user JWT does not either: any
+    signed-up client account has one, so it proves authentication, not
+    admin-ness. The admin app (admin/app/api/data/musa-sessions/[sessionId]/
+    resend-webhook/route.ts) enforces its email allow-list itself and then
+    proxies with ADMIN_BACKEND_API_KEY; it never forwards a user JWT.
     """
     if x_api_key and validate_scoped_api_key(x_api_key, "admin"):
-        return
-    from ..api import _extract_user_id_from_request
-    if _extract_user_id_from_request(request):
         return
     raise HTTPException(status_code=401, detail="Admin authentication required")
 
