@@ -7,9 +7,15 @@ import { PageHeader } from '@/components/PageHeader'
 import { EnvBadge } from '@/components/EnvBadge'
 import { ENV_HEADER } from '@/lib/env-header'
 import { toEAT, timeSince, refreshedLabel, downloadCSV } from './utils'
+import {
+  NO_FILE_MESSAGE,
+  PARSER_REQUEST_STATUSES,
+  STATUS_LABELS,
+  TESTABLE_STATUSES,
+  type ParserRequestStatus,
+} from '@/lib/parser-requests/lifecycle'
 
-type Status = 'pending' | 'in_progress' | 'done'
-const STATUS_CYCLE: Status[] = ['pending', 'in_progress', 'done']
+type LastTest = { passed: boolean; reason: string; created_at: string } | null
 
 // Raw shape from `parser_requests` ("auto" / Musa table)
 interface AutoRequest {
@@ -22,7 +28,8 @@ interface AutoRequest {
   deal_id?: string | null
   deal_name?: string | null
   error_message: string | null
-  status: Status
+  // Musa's own pipeline states (pending / expired / resolved) — read-only here.
+  status: string
   requested_at: string
   updated_at?: string
   [key: string]: unknown
@@ -42,6 +49,11 @@ interface ManualRequest {
   error_type?: string | null
   error_message: string | null
   created_at: string
+  status: ParserRequestStatus
+  storage_path?: string | null
+  signed_url?: string | null
+  contact_email?: string | null
+  last_test?: LastTest
   [key: string]: unknown
 }
 
@@ -54,20 +66,19 @@ interface Row {
   bank_display: string
   deal_display: string
   error_message: string | null
-  status: Status | null
+  status: string
   date: string
   isAuto: boolean
+  hasFile: boolean
+  signedUrl: string | null
+  contactEmail: string | null
+  lastTest: LastTest
   [key: string]: unknown
 }
 
 type ApiResponse =
   | AutoRequest[]
   | { auto: AutoRequest[]; manual: ManualRequest[]; env?: string; fetched_at?: string }
-
-function nextStatus(current: Status): Status {
-  const idx = STATUS_CYCLE.indexOf(current)
-  return STATUS_CYCLE[(idx + 1) % STATUS_CYCLE.length]
-}
 
 function normalize(data: ApiResponse): Row[] {
   let auto: AutoRequest[] = []
@@ -95,6 +106,10 @@ function normalize(data: ApiResponse): Row[] {
     status: r.status,
     date: r.requested_at,
     isAuto: true,
+    hasFile: false,
+    signedUrl: null,
+    contactEmail: null,
+    lastTest: null,
   }))
 
   const manualRows: Row[] = manual.map((r) => ({
@@ -105,9 +120,13 @@ function normalize(data: ApiResponse): Row[] {
     bank_display: r.bank_name ?? r.original_filename ?? '—',
     deal_display: r.deal_name || r.deal_id || '—',
     error_message: r.error_message ?? null,
-    status: null,
+    status: r.status,
     date: r.created_at,
     isAuto: false,
+    hasFile: Boolean(r.storage_path),
+    signedUrl: r.signed_url ?? null,
+    contactEmail: r.contact_email ?? null,
+    lastTest: r.last_test ?? null,
   }))
 
   return [...autoRows, ...manualRows].sort((a, b) => {
@@ -118,7 +137,26 @@ function normalize(data: ApiResponse): Row[] {
 }
 
 const PARTNER_FILTERS = ['All', 'Musa', 'GBFund', 'Manual'] as const
-const STATUS_FILTERS = ['All', 'Pending', 'In Progress', 'Done'] as const
+// Status filters apply to client (pds_parser_requests) rows — the only rows
+// with an actionable lifecycle. Musa rows stay visible under "All".
+const STATUS_FILTERS = ['All', ...PARSER_REQUEST_STATUSES] as const
+
+function actionStyle(color: string, disabled = false): React.CSSProperties {
+  return {
+    fontFamily: "'IBM Plex Mono', monospace",
+    fontSize: 11,
+    padding: '2px 8px',
+    borderRadius: 4,
+    border: `1px solid ${color}`,
+    background: 'transparent',
+    color,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    opacity: disabled ? 0.5 : 1,
+    whiteSpace: 'nowrap',
+  }
+}
+
+type Notice = { tone: 'ok' | 'warn' | 'alert'; title: string; lines: string[] }
 
 function chipStyle(active: boolean): React.CSSProperties {
   return {
@@ -146,6 +184,7 @@ export default function ParserRequestsPage() {
   const [updating, setUpdating] = useState<string | null>(null)
   const [partnerFilter, setPartnerFilter] = useState<typeof PARTNER_FILTERS[number]>('All')
   const [statusFilter, setStatusFilter] = useState<typeof STATUS_FILTERS[number]>('All')
+  const [notice, setNotice] = useState<Notice | null>(null)
   const [lastFetched, setLastFetched] = useState<string>(() => new Date().toISOString())
   const [env, setEnv] = useState<string | null>(null)
   const [, setTick] = useState(0)
@@ -171,17 +210,67 @@ export default function ParserRequestsPage() {
     }
   }, [load])
 
-  async function cycleStatus(row: Row) {
-    if (!row.isAuto || !row.status) return
-    const next = nextStatus(row.status)
+  async function act(row: Row, label: string, run: () => Promise<Response>, describe: (body: Record<string, unknown>) => Notice) {
     setUpdating(row.id)
-    await fetch('/api/data/parser-requests', {
+    try {
+      const res = await run()
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setNotice({ tone: 'alert', title: `${label} — ${row.bank_display}`, lines: [String(body.error ?? `HTTP ${res.status}`)] })
+      } else {
+        setNotice(describe(body))
+      }
+    } catch (err) {
+      setNotice({ tone: 'alert', title: `${label} — ${row.bank_display}`, lines: [err instanceof Error ? err.message : String(err)] })
+    } finally {
+      setUpdating(null)
+      load()
+    }
+  }
+
+  function moveStatus(row: Row, to: ParserRequestStatus) {
+    return act(row, `Move to ${STATUS_LABELS[to]}`, () => fetch('/api/data/parser-requests', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: row.id, status: next }),
-    })
-    setRows((prev) => prev.map((r) => r.id === row.id ? { ...r, status: next } : r))
-    setUpdating(null)
+      body: JSON.stringify({ id: row.id, status: to }),
+    }), () => ({ tone: 'ok', title: `${row.bank_display}: ${STATUS_LABELS[row.status as ParserRequestStatus]} → ${STATUS_LABELS[to]}`, lines: [] }))
+  }
+
+  function runTest(row: Row) {
+    setNotice({ tone: 'warn', title: `Testing ${row.bank_display} against the submitted file…`, lines: ['Runs detection + run_parser_harness(); a long statement can take a few minutes.'] })
+    return act(row, 'Test against submitted file', () => fetch(`/api/data/parser-requests/${row.id}/test`, { method: 'POST' }), (body) => ({
+      tone: body.passed ? 'ok' : 'alert',
+      title: `${row.bank_display}: test ${body.passed ? 'PASSED' : 'FAILED'}`,
+      lines: [String(body.reason ?? ''), body.passed ? 'Ready to mark resolved.' : 'Moved back to In progress.'],
+    }))
+  }
+
+  function describeResolve(row: Row) {
+    return (body: Record<string, unknown>): Notice => {
+      const effects = (body.effects ?? {}) as Record<string, { ok: boolean; detail: string }>
+      const lines = Object.entries(effects).map(([k, v]) => `${v.ok ? '✓' : '✗'} ${k}: ${v.detail}`)
+      const allOk = Object.values(effects).every((v) => v.ok)
+      return { tone: allOk ? 'ok' : 'warn', title: `${row.bank_display}: resolved`, lines }
+    }
+  }
+
+  function resolveAfterPass(row: Row) {
+    if (!window.confirm(`Mark ${row.bank_display} resolved? This emails the client and posts to Slack.`)) return
+    return act(row, 'Mark resolved', () => fetch(`/api/data/parser-requests/${row.id}/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ basis: 'test_pass' }),
+    }), describeResolve(row))
+  }
+
+  function overrideResolve(row: Row) {
+    const reason = window.prompt(`Override: resolve ${row.bank_display} WITHOUT a passing test.\nThis emails the client. Reason (required, logged):`)
+    if (!reason?.trim()) return
+    return act(row, 'Override resolve', () => fetch(`/api/data/parser-requests/${row.id}/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ basis: 'override', reason }),
+    }), describeResolve(row))
   }
 
   const filteredRows = useMemo(() => {
@@ -194,20 +283,16 @@ export default function ParserRequestsPage() {
         }
       }
       if (statusFilter !== 'All') {
-        if (!r.isAuto || !r.status) return false
-        const want = statusFilter === 'In Progress' ? 'in_progress' : statusFilter.toLowerCase()
-        if (r.status !== want) return false
+        if (r.isAuto || r.status !== statusFilter) return false
       }
       return true
     })
   }, [rows, partnerFilter, statusFilter])
 
   const summary = useMemo(() => {
-    const autoRows = rows.filter((r) => r.isAuto)
-    const pending = autoRows.filter((r) => r.status === 'pending').length
-    const inProgress = autoRows.filter((r) => r.status === 'in_progress').length
-    const done = autoRows.filter((r) => r.status === 'done').length
-    return `${pending} pending · ${inProgress} in progress · ${done} done · across both environments`
+    const client = rows.filter((r) => !r.isAuto)
+    const counts = PARSER_REQUEST_STATUSES.map((s) => `${client.filter((r) => r.status === s).length} ${STATUS_LABELS[s].toLowerCase()}`)
+    return `Client requests: ${counts.join(' · ')}`
   }, [rows])
 
   function handleDownloadCSV() {
@@ -256,20 +341,69 @@ export default function ParserRequestsPage() {
       key: 'status',
       label: 'Status',
       render: (_, row) => {
-        if (!row.isAuto || !row.status) {
-          return <span style={{ color: 'var(--t3)' }}>—</span>
+        if (row.isAuto) {
+          return <span title="Musa pipeline state — managed by its own 24h SLA sweep"><StatusBadge status={row.status} /></span>
         }
+        const st = row.status as ParserRequestStatus
+        const busy = updating === row.id
         return (
-          <button
-            onClick={(e) => { e.stopPropagation(); cycleStatus(row) }}
-            disabled={updating === row.id}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, opacity: updating === row.id ? 0.5 : 1 }}
-            title="Click to cycle status"
-          >
-            <StatusBadge status={row.status} />
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+            <StatusBadge status={STATUS_LABELS[st] ?? st} />
+            {st !== 'resolved' && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {st === 'new' && (
+                  <button disabled={busy} onClick={() => moveStatus(row, 'in_progress')} style={actionStyle('var(--teal)', busy)}>Start</button>
+                )}
+                {TESTABLE_STATUSES.includes(st) && (
+                  <button
+                    disabled={busy || !row.hasFile}
+                    onClick={() => runTest(row)}
+                    title={row.hasFile ? 'Run the stored file through detection + run_parser_harness()' : NO_FILE_MESSAGE}
+                    style={actionStyle('var(--teal)', busy || !row.hasFile)}
+                  >
+                    Test against submitted file
+                  </button>
+                )}
+                {st === 'testing' && row.lastTest?.passed && (
+                  <button disabled={busy} onClick={() => resolveAfterPass(row)} style={actionStyle('var(--green)', busy)}>Mark resolved</button>
+                )}
+                {st === 'testing' && (
+                  <button disabled={busy} onClick={() => moveStatus(row, 'in_progress')} style={actionStyle('var(--t2)', busy)}>Back to in progress</button>
+                )}
+                <button disabled={busy} onClick={() => overrideResolve(row)} style={actionStyle('var(--amber)', busy)} title="Resolve without a passing test — reason required">Override…</button>
+              </div>
+            )}
+            {!row.hasFile && st !== 'resolved' && (
+              <span style={{ fontSize: 11, color: 'var(--amber)' }}>{NO_FILE_MESSAGE}</span>
+            )}
+          </div>
         )
       },
+    },
+    {
+      key: 'last_test',
+      label: 'Last Test',
+      render: (_, row) => {
+        if (row.isAuto) return <span style={{ color: 'var(--t3)' }}>—</span>
+        if (!row.lastTest) return <span style={{ color: 'var(--t3)', fontSize: 12 }}>{row.hasFile ? 'not run' : 'no file'}</span>
+        return (
+          <span style={{ fontSize: 12, color: row.lastTest.passed ? 'var(--green)' : 'var(--red)' }} title={toEAT(row.lastTest.created_at)}>
+            {row.lastTest.passed ? '✓ pass' : '✗ fail'} — {row.lastTest.reason}
+          </span>
+        )
+      },
+    },
+    {
+      key: 'file',
+      label: 'File / Contact',
+      render: (_, row) => row.isAuto ? <span style={{ color: 'var(--t3)' }}>—</span> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12 }}>
+          {row.signedUrl
+            ? <a href={row.signedUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ color: 'var(--teal)' }}>download</a>
+            : <span style={{ color: 'var(--t3)' }}>no file</span>}
+          <span style={{ color: row.contactEmail ? 'var(--t1)' : 'var(--t3)' }}>{row.contactEmail ?? 'no contact email'}</span>
+        </div>
+      ),
     },
     {
       key: 'time_pending',
@@ -340,6 +474,22 @@ export default function ParserRequestsPage() {
         </div>
       </div>
 
+      {notice && (
+        <div style={{
+          marginBottom: 16, padding: '10px 14px', borderRadius: 6, border: '1px solid var(--border)',
+          borderLeft: `3px solid ${severityColor(notice.tone)}`, background: 'var(--paper)', fontSize: 13,
+          display: 'flex', justifyContent: 'space-between', gap: 12,
+        }}>
+          <div>
+            <div style={{ fontWeight: 600, color: 'var(--t0)' }}>{notice.title}</div>
+            {notice.lines.filter(Boolean).map((l, i) => (
+              <div key={i} style={{ color: 'var(--t1)', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, marginTop: 4 }}>{l}</div>
+            ))}
+          </div>
+          <button onClick={() => setNotice(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--t2)' }}>×</button>
+        </div>
+      )}
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
         <div style={{ display: 'flex', gap: 8 }}>
           {PARTNER_FILTERS.map((f) => (
@@ -351,7 +501,7 @@ export default function ParserRequestsPage() {
         <div style={{ display: 'flex', gap: 8 }}>
           {STATUS_FILTERS.map((f) => (
             <button key={f} onClick={() => setStatusFilter(f)} style={chipStyle(statusFilter === f)}>
-              {f}
+              {f === 'All' ? 'All' : STATUS_LABELS[f]}
             </button>
           ))}
         </div>

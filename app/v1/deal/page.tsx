@@ -941,6 +941,8 @@ function V1DealPageInner() {
             error_type: 'InvalidSchemaError',
             error_message: unknownParserDoc.errorMessage,
             created_by: sbUser?.id ?? null,
+            submitted_at: new Date().toISOString(),
+            contact_email: sbUser?.email ?? null,
           });
         }
 

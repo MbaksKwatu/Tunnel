@@ -8,13 +8,15 @@ import { getDeal, listDocuments, listAccountParserRequests, type AnalysisRun } f
 import { useDealsListQuery, dealDetailKey, dealDocumentsKey } from '@/lib/queries/deals'
 import { ThemeToggle } from '@/components/ThemeToggle'
 
-// pds_parser_requests.status values (see backend/migrations 20260915000001):
-// new = auto-created/unsubmitted, pending = user submitted the form,
-// resolved = parser built and live.
+// pds_parser_requests.status values (backend/migrations/046 — enforced by a
+// CHECK constraint, same vocabulary as the admin queue):
+// new = received, nobody has picked it up yet; in_progress = being built;
+// testing = being checked against the file you sent; resolved = live, re-upload.
 const PARSER_REQUEST_STATUS_DISPLAY: Record<string, { label: string; dot: string }> = {
-  new: { label: 'Processing', dot: 'var(--amber)' },
-  pending: { label: 'Submitted', dot: '#818CF8' },
-  resolved: { label: 'Completed', dot: 'var(--green)' },
+  new: { label: 'Received', dot: 'var(--t1)' },
+  in_progress: { label: 'In progress', dot: 'var(--amber)' },
+  testing: { label: 'Testing your file', dot: '#818CF8' },
+  resolved: { label: 'Ready — re-upload', dot: 'var(--green)' },
 }
 
 interface PipelineStatus {
@@ -57,10 +59,18 @@ export default function DashboardPage() {
 
   // Account-level "Bank Formats" — every parser request this signed-in
   // account has ever made, across all its deals. Full history, no expiry.
+  // The app-wide default is staleTime: Infinity + localStorage persistence,
+  // which would pin a request at "In progress" forever after an admin
+  // resolves it. Status is the whole point of this list, so always refetch
+  // on mount/focus and poll while the page is open.
   const parserRequestsQuery = useQuery({
     queryKey: ['account-parser-requests', userId],
     queryFn: listAccountParserRequests,
     enabled: !!userId,
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always',
+    refetchInterval: 60_000,
   })
   const parserRequests = parserRequestsQuery.data?.parser_requests ?? []
 
