@@ -280,7 +280,7 @@ export interface AccountParserRequestItem {
 
 // Every parser request the signed-in account has ever made, across all its
 // deals — account is derived server-side from the verified JWT, not passed
-// by the client. Powers the dashboard-level "Bank Formats" section.
+// by the client. Powers the dashboard "Bank Parsers" section and the /parsers page.
 export async function listAccountParserRequests(): Promise<{ parser_requests: AccountParserRequestItem[] }> {
   const res = await fetchApi(`${BASE}/parser-requests`)
   if (!res.ok) throw new Error(await res.text())

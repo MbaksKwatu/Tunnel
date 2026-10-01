@@ -62,21 +62,6 @@ export default function DealSidebar({
             )}
           </button>
         ))}
-        <div style={{ margin: '12px 0 4px', padding: '0 16px', fontSize: 9, color: 'var(--t2)', letterSpacing: '0.1em' }}>DEAL TOOLS</div>
-        {['Benchmark', 'Monitor', 'Registry'].map((label) => (
-          <div key={label} style={{ padding: '9px 16px', color: 'var(--t2)', fontSize: 13, borderLeft: '2px solid transparent', display: 'flex', alignItems: 'center', gap: 8 }}>
-            {label}
-            <span style={{ fontSize: 9, background: 'var(--s1)', color: 'var(--t2)', padding: '1px 4px', borderRadius: 2 }}>SOON</span>
-          </div>
-        ))}
-        <div style={{ margin: '12px 0 4px', padding: '0 16px', fontSize: 9, color: 'var(--t2)', letterSpacing: '0.1em' }}>FORMAT DESK</div>
-        <button
-          onClick={() => router.push('/parsers/request')}
-          style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '9px 16px', background: 'transparent', borderLeft: '2px solid transparent', border: 'none', color: 'var(--t1)', fontSize: 13, fontFamily: "'IBM Plex Sans', sans-serif", cursor: 'pointer', textAlign: 'left', gap: 6 }}
-        >
-          <span style={{ fontSize: 11, lineHeight: 1, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--t2)' }}>//</span>
-          New Bank Format
-        </button>
       </nav>
       <div style={{ padding: '12px 16px', borderTop: '1px solid var(--s3)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
