@@ -278,6 +278,40 @@ class MemoryAnalysisRunsRepo(AnalysisRunsRepository):
         return copy.deepcopy(latest)
 
 
+class MemorySnapshotReverificationsRepo:
+    """In-memory twin of SnapshotReverificationsRepo (PAR-86)."""
+
+    def __init__(self):
+        self._store: List[Dict[str, Any]] = []
+
+    def record(
+        self,
+        *,
+        deal_id: str,
+        snapshot_id: str,
+        analysis_run_id: str,
+        computation_fingerprint: str,
+        verified_at: str,
+    ) -> Dict[str, Any]:
+        row = {
+            "id": str(uuid.uuid4()),
+            "deal_id": deal_id,
+            "snapshot_id": snapshot_id,
+            "analysis_run_id": analysis_run_id,
+            "computation_fingerprint": computation_fingerprint,
+            "verified_at": verified_at,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        self._store.append(row)
+        return copy.deepcopy(row)
+
+    def get_latest(self, snapshot_id: str) -> Optional[Dict[str, Any]]:
+        rows = [r for r in self._store if r["snapshot_id"] == snapshot_id]
+        if not rows:
+            return None
+        return copy.deepcopy(max(rows, key=lambda r: r["verified_at"]))
+
+
 class MemorySnapshotsRepo(SnapshotsRepository):
     def __init__(self):
         self._store: List[Dict[str, Any]] = []
@@ -452,6 +486,7 @@ def build_memory_repos() -> Dict[str, Any]:
         "override_log": MemoryOverrideLogRepo(),
         "runs": runs,
         "snapshots": MemorySnapshotsRepo(),
+        "snapshot_reverifications": MemorySnapshotReverificationsRepo(),
         "export_persistence": MemoryExportPersistenceRepo(runs, links, entities, txn_map),
         "parser_requests": MemoryParserRequestsRepo(),
         "pds_parser_requests": MemoryPdsParserRequestsRepo(),

@@ -186,6 +186,21 @@ export async function exportSnapshot(
   return res.json()
 }
 
+/**
+ * Read-only: the deal's existing export, only when it is still current
+ * (same definition POST /export uses to decide it can skip recomputing).
+ * Never recomputes, writes, or appends a run. `{ fresh: false }` means there is
+ * no snapshot yet or it is stale — the caller decides whether to exportSnapshot.
+ * Lets the UI show existing results without going through a write path.
+ */
+export async function getCurrentExport(
+  dealId: string
+): Promise<({ fresh: true } & ExportResponse) | { fresh: false }> {
+  const res = await fetchApi(`${BASE}/deals/${dealId}/export/current`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
 /** Read-only check for whether a deal already has an analysis run, without triggering export. */
 export async function getLatestAnalysis(
   dealId: string

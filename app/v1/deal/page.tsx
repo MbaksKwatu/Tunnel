@@ -28,6 +28,7 @@ import {
   getReconciliation,
   downloadReport,
   getLatestAnalysis,
+  getCurrentExport,
   listPendingParserRequests,
   enrichParserRequest,
   enrichPdsParserRequest,
@@ -88,11 +89,34 @@ type RehydrationResult =
   | { ok: false; message: string };
 const rehydrationKey = (dealId: string) => ['rehydration', dealId] as const;
 
+// PAR-86: viewing existing results must not go through the write path.
+// POST /export recomputes (~55s) and appends a pds_analysis_runs row whenever
+// its freshness check says the snapshot is stale — and, before the backend
+// fix, a hash-identical recompute left it stale forever, so every deal open
+// recomputed. GET /export/current returns the existing export only when it is
+// current (same definition POST /export uses) and never writes. Only when it
+// reports not-fresh (no snapshot yet, or the deal's data genuinely changed)
+// do we fall back to the original check-then-export path. Also the fallback
+// if the endpoint is unavailable (frontend deployed ahead of the backend).
+async function loadExportForRehydration(dealId: string): Promise<{ analysis_run: AnalysisRun | null; data?: ExportResponse }> {
+  try {
+    const current = await getCurrentExport(dealId);
+    if (current.fresh) {
+      const { fresh: _fresh, ...data } = current;
+      return { analysis_run: data.analysis_run, data };
+    }
+  } catch (e) {
+    console.warn('getCurrentExport unavailable, falling back to export path:', e);
+  }
+  const { analysis_run } = await getLatestAnalysis(dealId);
+  if (!analysis_run) return { analysis_run: null };
+  return { analysis_run, data: await exportSnapshot(dealId) };
+}
+
 async function fetchRehydration(dealId: string): Promise<RehydrationResult> {
   try {
-    const { analysis_run } = await getLatestAnalysis(dealId);
-    if (!analysis_run) return { ok: true, analysis_run: null };
-    const data = await exportSnapshot(dealId);
+    const { analysis_run, data } = await loadExportForRehydration(dealId);
+    if (!analysis_run || !data) return { ok: true, analysis_run: null };
     const txRes = await listDealTransactions(dealId);
     let creditScoringInputs: Record<string, unknown> | null = null;
     try {
