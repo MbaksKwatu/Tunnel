@@ -603,6 +603,48 @@ class OverridesRepo(OverridesRepository, BaseRepo):
         return max((r.get("created_at") or "") for r in rows)
 
 
+class SnapshotReverificationsRepo(BaseRepo):
+    """PAR-86: append-only record that an immutable pds_snapshots row was
+    re-verified (a recompute reproduced its exact hash). pds_snapshots itself
+    cannot carry this -- pds_snapshots_mutation_guard rejects every UPDATE --
+    so export()'s freshness check reads it from here. Insert-only by
+    convention; never read by anything that feeds a hash."""
+
+    def __init__(self):
+        super().__init__("pds_snapshot_reverifications")
+
+    def record(
+        self,
+        *,
+        deal_id: str,
+        snapshot_id: str,
+        analysis_run_id: str,
+        computation_fingerprint: str,
+        verified_at: str,
+    ) -> Dict[str, Any]:
+        return self.insert(
+            {
+                "deal_id": deal_id,
+                "snapshot_id": snapshot_id,
+                "analysis_run_id": analysis_run_id,
+                "computation_fingerprint": computation_fingerprint,
+                "verified_at": verified_at,
+            }
+        )
+
+    def get_latest(self, snapshot_id: str) -> Optional[Dict[str, Any]]:
+        rows = (
+            self.client.table(self.table)
+            .select("*")
+            .eq("snapshot_id", snapshot_id)
+            .order("verified_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        data = rows.data or []
+        return data[0] if data else None
+
+
 class AnalysisRunsRepo(AnalysisRunsRepository, BaseRepo):
     def __init__(self):
         super().__init__("pds_analysis_runs")
