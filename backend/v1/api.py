@@ -863,39 +863,16 @@ def enrich_pds_parser_request(request: Request, deal_id: str, request_id: str, b
     deal = repos["deals"].get_deal(deal_id)
     if not deal:
         _error("NOT_FOUND", f"Deal {deal_id} not found")
-    existing = repos["pds_parser_requests"].get_for_document(request_id) or \
-               repos["pds_parser_requests"].select_eq("id", request_id)
-    # Try by id directly
-    from .db.supabase_repositories import PdsParserRequestsRepo
     pds_repo = repos["pds_parser_requests"]
-    rows = pds_repo.client.table("pds_parser_requests").select("*").eq("id", request_id).eq("deal_id", deal_id).execute()
-    existing = rows.data[0] if rows.data else None
+    existing = pds_repo.get_for_deal(request_id, deal_id)
     if not existing:
         _error("NOT_FOUND", f"Parser request {request_id} not found for deal {deal_id}")
 
-    fields: Dict[str, Any] = {}
-    bank_name = body.get("bank_name")
-    if isinstance(bank_name, str) and bank_name.strip():
-        fields["bank_name"] = bank_name.strip()
-    country = body.get("country")
-    if isinstance(country, str) and country.strip():
-        fields["country"] = country.strip()
-    account_type = body.get("account_type")
-    if isinstance(account_type, str) and account_type.strip():
-        fields["account_type"] = account_type.strip()
-    notes = body.get("notes")
-    if isinstance(notes, str) and notes.strip():
-        fields["notes"] = notes.strip()
-    if existing.get("status") == "new":
-        fields["status"] = "pending"
-
-    # Backfill attribution on enrich for rows auto-created without a verified
-    # caller in scope (e.g. background ingestion). Never overwrites an
-    # already-attributed row, and never trusts a client-supplied id.
-    if not existing.get("created_by"):
-        verified_user_id = _extract_user_id_from_request(request)
-        if verified_user_id:
-            fields["created_by"] = verified_user_id
+    # Migration 046: no more status='pending' -- submission is recorded in
+    # submitted_at, and contact_email is captured for the resolve notification.
+    from .parser_request_fields import build_enrich_fields
+    verified_user_id = None if existing.get("created_by") else _extract_user_id_from_request(request)
+    fields = build_enrich_fields(existing, body, verified_user_id, pds_repo.account_contact_email)
 
     updated = pds_repo.enrich(request_id, deal_id, fields)
     return {"parser_request": updated or {**existing, **fields}}
@@ -3049,25 +3026,20 @@ def remove_audited_financials(
 
 @router.post("/api/request-parser")
 def request_parser(request: Request, body: dict = Body(...)):
-    """Request parsing for a document (typically when audited financials extraction fails)."""
-    from .db.supabase_client import get_supabase
+    """Request parsing for a document (typically when audited financials extraction fails).
+
+    Writes `pds_parser_requests` -- the single admin-actionable parser-request
+    table (migration 046). This used to write `parser_requests`, where the
+    admin queue had no working status control and no stored file; that table
+    is now Musa's automated pipeline only."""
+    from .parser_request_fields import build_partner_api_row
 
     user_id = _extract_user_id_from_request(request)
+    pds_repo = _repos(request)["pds_parser_requests"]
 
     try:
-        sb = get_supabase()
-        row = {
-            "partner": body.get("partner", "gbfund"),
-            "market": body.get("market"),
-            "bank_name": body.get("bank_name"),
-            "document_url": body.get("document_url"),
-            "deal_id": body.get("deal_id"),
-            "error_message": body.get("error_message", "Audited financials parse failed"),
-            "status": "pending",
-        }
-        sb.table("parser_requests").insert(
-            {k: v for k, v in row.items() if v is not None}
-        ).execute()
+        row = build_partner_api_row(body, user_id, pds_repo.account_contact_email)
+        pds_repo.insert(row)
     except Exception as exc:
         logger.error("[API] Failed to log parser request: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to log parser request") from exc

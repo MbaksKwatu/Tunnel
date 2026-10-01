@@ -969,13 +969,51 @@ class PdsParserRequestsRepo(BaseRepo):
             data["storage_path"] = storage_path
         if created_by:
             data["created_by"] = created_by
+            contact_email = self.account_contact_email(created_by)
+            if contact_email:
+                data["contact_email"] = contact_email
         self.client.table(self.table).insert(data).execute()
         return request_id
+
+    def account_contact_email(self, user_id: str) -> Optional[str]:
+        """Where to reach this account about its parser requests: the contact
+        address it chose on the request form (user_profiles.contact_email),
+        else its login email. Best-effort -- None on any lookup failure, so a
+        missing address never blocks creating the request itself."""
+        try:
+            res = (
+                self.client.table("user_profiles")
+                .select("contact_email")
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            if res.data and (res.data[0].get("contact_email") or "").strip():
+                return res.data[0]["contact_email"].strip()
+        except Exception:
+            logger.warning("[PARSER-REQUEST] user_profiles lookup failed user_id=%s", user_id, exc_info=True)
+        try:
+            user = self.client.auth.admin.get_user_by_id(user_id)
+            email = getattr(getattr(user, "user", None), "email", None)
+            return email or None
+        except Exception:
+            logger.warning("[PARSER-REQUEST] auth user lookup failed user_id=%s", user_id, exc_info=True)
+            return None
 
     def get_for_document(self, document_id: str) -> Optional[Dict[str, Any]]:
         """Return the first pds_parser_requests row for this document (for enrich-in-place)."""
         rows = self.select_eq("document_id", document_id)
         return rows[0] if rows else None
+
+    def get_for_deal(self, request_id: str, deal_id: str) -> Optional[Dict[str, Any]]:
+        res = (
+            self.client.table(self.table)
+            .select("*")
+            .eq("id", request_id)
+            .eq("deal_id", deal_id)
+            .execute()
+        )
+        return res.data[0] if res.data else None
 
     def list_for_account(self, user_id: str) -> List[Dict[str, Any]]:
         """Every parser request this verified account has ever made, across all
