@@ -23,6 +23,7 @@ import {
   exportTransactionsCsv,
   getNeedsReview,
   getMonthlyCashflow,
+  type MonthlyCashflowResponse,
   getCreditScoringInputs,
   getReconciliation,
   downloadReport,
@@ -32,6 +33,7 @@ import {
   enrichPdsParserRequest,
   retryDocument,
 } from '@/lib/v1-api';
+import { toExcludedCredits, type ExcludedCredits } from '@/lib/excluded-credits';
 import type { DealListItem } from '@/lib/v1-api';
 import { useDealsListQuery, useDealDetailQuery, useDealDocumentsQuery, dealDocumentsKey, dealDetailKey, dealsListKey } from '@/lib/queries/deals';
 import { BatchUpload } from '@/components/BatchUpload';
@@ -181,6 +183,15 @@ function V1DealPageInner() {
   const [lastExportedAt, setLastExportedAt] = useState<Date | null>(null);
   const [rawTransactions, setRawTransactions] = useState<Array<Record<string, unknown>>>([]);
   const [monthlyCashflow, setMonthlyCashflow] = useState<Array<Record<string, unknown>>>([]);
+  // Credits the backend did NOT count as inflow (needs_review, transfer, ...). null = the
+  // response did not carry the field, which the tab must show as "unavailable", not "none".
+  // Bound to the deal it was fetched for: this page does not reset per-deal state on deal
+  // change, and another deal's exclusion figures must never be shown on this one.
+  const [excludedCreditsState, setExcludedCreditsState] = useState<{ dealId: string; data: ExcludedCredits | null } | null>(null);
+  const applyMonthlyCashflow = (dealId: string, res: MonthlyCashflowResponse) => {
+    setMonthlyCashflow(res.monthly_cashflow as unknown as Array<Record<string, unknown>>);
+    setExcludedCreditsState({ dealId, data: toExcludedCredits(res) });
+  };
   const [creditScoringInputs, setCreditScoringInputs] = useState<Record<string, unknown> | null>(null);
   const [monthlyEntityBreakdown, setMonthlyEntityBreakdown] = useState<Array<Record<string, unknown>>>([]);
   const [reconciliationDetail, setReconciliationDetail] = useState<ReconciliationSection | null>(null);
@@ -702,8 +713,7 @@ function V1DealPageInner() {
       const rawTx = txRes.transactions as unknown as Array<Record<string, unknown>>;
       setRawTransactions(rawTx);
       try {
-        const mcRes = await getMonthlyCashflow(activeDeal.id);
-        setMonthlyCashflow(mcRes.monthly_cashflow as unknown as Array<Record<string, unknown>>);
+        applyMonthlyCashflow(activeDeal.id, await getMonthlyCashflow(activeDeal.id));
       } catch (e) {
         console.error('getMonthlyCashflow failed after export:', e);
       }
@@ -804,8 +814,7 @@ function V1DealPageInner() {
       const data = await exportSnapshot(deal.id);
       setExportData(data);
       try {
-        const mcRes = await getMonthlyCashflow(deal.id);
-        setMonthlyCashflow(mcRes.monthly_cashflow as unknown as Array<Record<string, unknown>>);
+        applyMonthlyCashflow(deal.id, await getMonthlyCashflow(deal.id));
       } catch (e) {
         console.error('getMonthlyCashflow failed after re-export:', e);
       }
@@ -850,9 +859,9 @@ function V1DealPageInner() {
         .fetchQuery({ queryKey: ['needsReview', dealId], queryFn: () => getNeedsReview(dealId) })
         .then((res) => setNeedsReviewItems(res.transactions as unknown as Array<Record<string, unknown>>))
         .catch(() => {});
-      if (monthlyCashflow.length === 0) {
+      if (monthlyCashflow.length === 0 || excludedCreditsState?.dealId !== dealId) {
         getMonthlyCashflow(dealId)
-          .then((r) => setMonthlyCashflow(r.monthly_cashflow as unknown as Array<Record<string, unknown>>))
+          .then((r) => applyMonthlyCashflow(dealId, r))
           .catch((e) => console.error('useEffect getMonthlyCashflow failed:', e));
       }
     }
@@ -1174,6 +1183,7 @@ function V1DealPageInner() {
               rawTransactions={rawTransactions}
               pipelineStages={pipelineStages}
               monthlyCashflow={monthlyCashflow}
+              excludedCredits={excludedCreditsState && excludedCreditsState.dealId === deal?.id ? excludedCreditsState.data : null}
               creditScoringInputs={creditScoringInputs}
               currency={currency}
               dealCurrency={deal?.currency}
