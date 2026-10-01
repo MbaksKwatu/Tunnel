@@ -2,11 +2,12 @@ import { NextResponse } from 'next/server'
 import { requireAdminSession } from '@/lib/require-admin-session'
 
 // Backend gates POST /api/musa/admin/sessions/{id}/resend-webhook behind
-// its own admin-only dependency (PAR-174): an "admin"-scoped x-api-key or
-// a Supabase user JWT — deliberately narrower than the snapshot-pdf proxy's
-// gate, since a Musa partner key must NOT be able to trigger this. This
-// admin app has no per-deal user session to forward, so it proxies with
-// the admin-scoped key instead, same pattern as snapshot-pdf/route.ts.
+// its own admin-only dependency (PAR-174): an "admin"-scoped x-api-key ONLY
+// — deliberately narrower than the snapshot-pdf proxy's gate. Neither a Musa
+// partner key nor a Supabase user JWT is accepted (any client account has a
+// JWT). The admin allow-list is enforced here by requireAdminSession(), and
+// this route then proxies with the admin-scoped key, same pattern as
+// snapshot-pdf/route.ts.
 const BACKEND_API_URL = process.env.BACKEND_API_URL || 'https://parity-backend-prod-121148713552.us-central1.run.app'
 
 export async function POST(_req: Request, { params }: { params: Promise<{ sessionId: string }> }) {
