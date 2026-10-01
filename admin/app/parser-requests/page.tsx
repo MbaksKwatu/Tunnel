@@ -14,6 +14,16 @@ import {
   TESTABLE_STATUSES,
   type ParserRequestStatus,
 } from '@/lib/parser-requests/lifecycle'
+import {
+  PARTNER_FILTERS,
+  type PartnerFilter,
+  accountLabel,
+  clientAccount,
+  matchesPartnerFilter,
+  mechanismFor,
+  partnerDisplay,
+  type Mechanism,
+} from '@/lib/parser-requests/account'
 
 type LastTest = { passed: boolean; reason: string; created_at: string } | null
 
@@ -53,6 +63,8 @@ interface ManualRequest {
   storage_path?: string | null
   signed_url?: string | null
   contact_email?: string | null
+  account_name?: string | null
+  is_test?: boolean | null
   last_test?: LastTest
   [key: string]: unknown
 }
@@ -60,8 +72,13 @@ interface ManualRequest {
 // Normalized row shape used for rendering, filtering, and CSV export
 interface Row {
   id: string
+  // `source` / `partner` keep their original values — the CSV export writes
+  // them, so they are not renamed. The queue's tags use mechanism / account.
   source: 'Auto · Musa' | 'Manual'
   partner: string
+  mechanism: Mechanism
+  account: string | null
+  isTest: boolean
   market: string
   bank_display: string
   deal_display: string
@@ -99,6 +116,9 @@ function normalize(data: ApiResponse): Row[] {
     id: r.id,
     source: 'Auto · Musa',
     partner: r.partner ?? '—',
+    mechanism: mechanismFor(true),
+    account: partnerDisplay(r.partner),
+    isTest: false,
     market: r.market ?? '—',
     bank_display: r.bank_name ?? '—',
     deal_display: r.deal_name || r.deal_id || '—',
@@ -116,6 +136,9 @@ function normalize(data: ApiResponse): Row[] {
     id: r.id,
     source: 'Manual',
     partner: 'Manual',
+    mechanism: mechanismFor(false),
+    account: clientAccount(r.account_name),
+    isTest: r.is_test === true,
     market: r.country ?? '—',
     bank_display: r.bank_name ?? r.original_filename ?? '—',
     deal_display: r.deal_name || r.deal_id || '—',
@@ -136,7 +159,6 @@ function normalize(data: ApiResponse): Row[] {
   })
 }
 
-const PARTNER_FILTERS = ['All', 'Musa', 'GBFund', 'Manual'] as const
 // Status filters apply to client (pds_parser_requests) rows — the only rows
 // with an actionable lifecycle. Musa rows stay visible under "All".
 const STATUS_FILTERS = ['All', ...PARSER_REQUEST_STATUSES] as const
@@ -182,7 +204,7 @@ export default function ParserRequestsPage() {
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState<string | null>(null)
-  const [partnerFilter, setPartnerFilter] = useState<typeof PARTNER_FILTERS[number]>('All')
+  const [partnerFilter, setPartnerFilter] = useState<PartnerFilter>('All')
   const [statusFilter, setStatusFilter] = useState<typeof STATUS_FILTERS[number]>('All')
   const [notice, setNotice] = useState<Notice | null>(null)
   const [lastFetched, setLastFetched] = useState<string>(() => new Date().toISOString())
@@ -275,13 +297,7 @@ export default function ParserRequestsPage() {
 
   const filteredRows = useMemo(() => {
     return rows.filter((r) => {
-      if (partnerFilter !== 'All') {
-        if (partnerFilter === 'Manual') {
-          if (r.isAuto) return false
-        } else {
-          if (!r.isAuto || r.partner?.toLowerCase() !== partnerFilter.toLowerCase()) return false
-        }
-      }
+      if (!matchesPartnerFilter(r, partnerFilter)) return false
       if (statusFilter !== 'All') {
         if (r.isAuto || r.status !== statusFilter) return false
       }
@@ -307,6 +323,10 @@ export default function ParserRequestsPage() {
       status: r.status ?? '',
       date: r.date,
       time_pending_label: timeSince(r.date).label,
+      // Added after the original columns — existing columns are unchanged.
+      mechanism: r.mechanism,
+      account_name: r.account ?? '',
+      is_test: r.isTest ? 'true' : 'false',
     }))
     downloadCSV(csvRows, `parser-requests-${new Date().toISOString().slice(0, 10)}.csv`)
   }
@@ -330,7 +350,22 @@ export default function ParserRequestsPage() {
           color: row.isAuto ? 'var(--teal)' : 'var(--t1)',
           borderColor: row.isAuto ? 'rgba(13,148,136,0.20)' : 'var(--border)',
         }}>
-          {row.source}
+          {row.mechanism}
+        </span>
+      ),
+    },
+    {
+      key: 'account',
+      label: 'Account',
+      render: (_, row) => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ color: row.account ? 'var(--t1)' : 'var(--t3)' }}>{accountLabel(row.account)}</span>
+          {row.isTest && (
+            <span title="Internal test submission" style={{
+              fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: '0.04em',
+              padding: '1px 6px', borderRadius: 4, border: '1px solid var(--amber)', color: 'var(--amber)',
+            }}>TEST</span>
+          )}
         </span>
       ),
     },

@@ -61,6 +61,21 @@ def build_enrich_fields(
     return fields
 
 
+# Partner id (as sent by a partner integration) -> the account name shown in
+# the admin queue. The partner route knows who is calling, so this is a direct
+# mapping, not a guess. An unlisted partner keeps the id the caller sent.
+_PARTNER_ACCOUNT_NAMES = {"gbfund": "GBFund", "musa": "Musa"}
+
+
+def account_name_for_partner(partner: Optional[str]) -> Optional[str]:
+    """Display account name for a partner id; None when there is no partner.
+    Never derived from an email domain (free-mail domains make that unsafe)."""
+    key = _clean(partner)
+    if not key:
+        return None
+    return _PARTNER_ACCOUNT_NAMES.get(key.lower(), key)
+
+
 def build_partner_api_row(
     body: Dict[str, Any],
     verified_user_id: Optional[str],
@@ -89,6 +104,7 @@ def build_partner_api_row(
         "error_type": "AuditedFinancialsParseFailed",
         "error_message": _clean(body.get("error_message")) or "Audited financials parse failed",
         "notes": "\n".join(note_lines),
+        "account_name": account_name_for_partner(partner),
         "status": "new",
         "submitted_at": _now_iso(),
     }

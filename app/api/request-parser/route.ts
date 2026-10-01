@@ -7,7 +7,7 @@ const NOTIFY_EMAIL = 'mbakayaweever@gmail.com';
 /**
  * POST /api/request-parser
  *
- * Accepts JSON (from the in-app modal) or multipart FormData (from /parsers/request page).
+ * Accepts JSON (from the in-app modal) or multipart FormData (from the /parsers Bank Parsers page).
  *
  * JSON body:
  *   { bank_name, country, account_type, notes?, deal_id?, document_id?, original_filename?, contact_email?, partner? }
@@ -16,7 +16,7 @@ const NOTIFY_EMAIL = 'mbakayaweever@gmail.com';
  *   bank_name, contact_email, notes?, sample_file? (File), access_token?
  *
  * access_token: the submitting user's Supabase access token (FormData path
- * only — the standalone /parsers/request page). Verified server-side via
+ * only — the standalone /parsers page). Verified server-side via
  * Supabase's own auth server (never trusted as-is) to get a real user id,
  * used to (a) attribute the pds_parser_requests row via created_by and (b)
  * upsert user_profiles.contact_email when the typed email differs from the
@@ -154,9 +154,9 @@ export async function POST(request: NextRequest) {
       await resend.emails.send({
         from: 'Parity <onboarding@resend.dev>',
         to: [contactEmail],
-        subject: 'Bank Format Received — Parity',
+        subject: 'Bank Parser Request Received — Parity',
         html: `
-          <h2 style="font-family:monospace;color:#14B8A6">Bank Format Received</h2>
+          <h2 style="font-family:monospace;color:#14B8A6">Bank Parser Request Received</h2>
           <p style="font-family:sans-serif;font-size:14px">
             Thanks! We're onboarding the <strong>${bankName}</strong> format now.
           </p>
@@ -237,6 +237,10 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // account_name is deliberately not set here: this form has no reliable
+      // signal for which client the submitter belongs to (no org on the account,
+      // and email domains are unsafe — most users are on free-mail providers).
+      // NULL shows as "Unattributed" in the admin queue; an admin can set it.
       const { error: insertError } = await supabase.from('pds_parser_requests').insert({
         id: requestId,
         bank_name: bankName,

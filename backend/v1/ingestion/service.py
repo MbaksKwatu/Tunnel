@@ -53,6 +53,7 @@ def _auto_create_pds_parser_request(
     file_bytes: bytes,
     error_message: str,
     created_by: Optional[str] = None,
+    account_name: Optional[str] = None,
 ) -> Optional[str]:
     """
     Server-side auto-insert for Category B (unsupported bank, valid document).
@@ -102,6 +103,7 @@ def _auto_create_pds_parser_request(
             error_message=error_message,
             storage_path=storage_path,
             created_by=created_by,
+            account_name=account_name,
         )
         logger.info(
             "[INGEST] auto-created pds_parser_requests id=%s deal_id=%s document_id=%s file=%s",
