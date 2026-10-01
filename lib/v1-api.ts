@@ -1,6 +1,7 @@
 import { fetchApi, API_URL } from './api'
 import { createBrowserClient } from './supabase'
 import { getApiToken, setApiToken } from './auth-bridge'
+import type { ExcludedCreditsResponseFields } from './excluded-credits'
 
 const BASE = '/v1'
 
@@ -989,7 +990,12 @@ export interface MonthlyCashflowRow {
   net_cents: number
 }
 
-export async function getMonthlyCashflow(dealId: string): Promise<{ monthly_cashflow: MonthlyCashflowRow[]; count: number }> {
+export type MonthlyCashflowResponse = {
+  monthly_cashflow: MonthlyCashflowRow[]
+  count: number
+} & ExcludedCreditsResponseFields
+
+export async function getMonthlyCashflow(dealId: string): Promise<MonthlyCashflowResponse> {
   const res = await fetchApi(`${BASE}/deals/${dealId}/analytics/monthly-cashflow`)
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Failed to load cashflow' }))
