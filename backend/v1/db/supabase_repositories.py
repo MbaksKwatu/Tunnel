@@ -950,9 +950,11 @@ class PdsParserRequestsRepo(BaseRepo):
         error_message: str,
         storage_path: Optional[str] = None,
         created_by: Optional[str] = None,
+        account_name: Optional[str] = None,
     ) -> str:
         """Insert a new Category B row (unsupported bank, valid document).
-        Returns the new row id."""
+        Returns the new row id. account_name stays NULL unless the caller has
+        a reliable signal for it (the web-upload path has none today)."""
         import uuid as _uuid
         request_id = str(_uuid.uuid4())
         data: Dict[str, Any] = {
@@ -967,6 +969,8 @@ class PdsParserRequestsRepo(BaseRepo):
         }
         if storage_path:
             data["storage_path"] = storage_path
+        if account_name:
+            data["account_name"] = account_name
         if created_by:
             data["created_by"] = created_by
             contact_email = self.account_contact_email(created_by)
