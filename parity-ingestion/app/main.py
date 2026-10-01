@@ -265,6 +265,80 @@ async def ingest_audited_financials_tabular(file: UploadFile = File(...)):
     return data
 
 
+def _harness_file(path: str, ext: str) -> dict:
+    """Detection + run_parser_harness() for one stored file. Never raises for
+    a file-level problem -- every outcome is a structured, reportable result,
+    because the caller (the admin "Test against submitted file" button) has
+    to show *why* a file didn't pass, not just that it didn't."""
+    from app.extractors.router import route_extract
+    from app.harness import run_parser_harness
+
+    if ext == ".pdf":
+        try:
+            if is_scanned_pdf(path):
+                return {
+                    "detected": False,
+                    "status": "SCANNED_PDF",
+                    "message": "Scanned (image-only) PDF: routed to Document AI OCR, not a "
+                               "bank-format extractor, so the parser harness does not apply.",
+                }
+        except PDFLockedError:
+            return {
+                "detected": False,
+                "status": "PASSWORD_REQUIRED",
+                "message": "This PDF is password-protected; parser requests do not store passwords.",
+            }
+
+    result = route_extract(path)
+    if isinstance(result, dict):
+        return {
+            "detected": False,
+            "status": result.get("status", "UNKNOWN"),
+            "message": result.get("message"),
+        }
+
+    return {
+        "detected": True,
+        "status": "DETECTED",
+        "message": None,
+        "extractor_type": result.extractor_type,
+        "row_count": result.row_count,
+        "extraction_status": result.extraction_status,
+        "warning_count": len(result.warnings),
+        "harness": run_parser_harness(path),
+    }
+
+
+@app.post("/v1/harness")
+async def harness(file: UploadFile = File(...)):
+    """Run one file through the live detection chain (route_extract, the same
+    router /v1/ingest/upload uses) and, when a format is detected, through
+    run_parser_harness(). Used by the admin parser-request queue to verify a
+    candidate extractor against the exact file the client submitted.
+
+    Read-only: nothing is persisted, the temp file is always removed."""
+    from fastapi.concurrency import run_in_threadpool
+
+    filename = file.filename or "upload"
+    ext = Path(filename).suffix.lower()
+    if ext not in (".pdf", ".xlsx"):
+        return {
+            "detected": False,
+            "status": "UNSUPPORTED_FILE_TYPE",
+            "message": f"'{ext or filename}' cannot be checked by the parser harness (PDF or XLSX only).",
+        }
+
+    dest = _UPLOAD_DIR / f"harness-{uuid.uuid4()}{ext}"
+    dest.write_bytes(await file.read())
+    try:
+        return await run_in_threadpool(_harness_file, str(dest), ext)
+    except Exception as exc:
+        logger.exception("[HARNESS] unexpected failure for %s", filename)
+        return {"detected": False, "status": "HARNESS_ERROR", "message": str(exc)}
+    finally:
+        dest.unlink(missing_ok=True)
+
+
 @app.get("/v1/ingest/result/{result_id}", response_model=ExtractionResult)
 def get_result(result_id: str) -> ExtractionResult:
     result = _results.get(result_id)
