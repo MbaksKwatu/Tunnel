@@ -116,6 +116,7 @@ All errors return a JSON body with this structure:
 | GET | `/v1/deals/{deal_id}/overrides` | List overrides |
 | GET | `/v1/deals/{deal_id}/analysis/latest` | Latest LIVE_DRAFT analysis |
 | POST | `/v1/deals/{deal_id}/export` | Run pipeline + create snapshot |
+| GET | `/v1/deals/{deal_id}/export/current` | Read-only: the existing export (same shape as `POST /export` plus `fresh: true`) when the latest snapshot is still current, else `{"fresh": false}`. Never recomputes or writes. Requires an owner JWT or admin key. |
 | GET | `/v1/deals/{deal_id}/snapshots` | List snapshots |
 | GET | `/v1/snapshots/{snapshot_id}` | Get single snapshot |
 

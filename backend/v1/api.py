@@ -14,7 +14,7 @@ import queue as _queue_module
 import threading
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Form, Request, BackgroundTasks, Body, Header
@@ -26,7 +26,7 @@ from pypdf import PdfWriter
 from .utils.pdf_merge import validate_pdf_count
 
 logger = logging.getLogger(__name__)
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from .config import SCHEMA_VERSION, CONFIG_VERSION, COMPUTATION_FINGERPRINT, GIT_COMMIT, BUILD_TIMESTAMP, DETERMINISTIC_MODE, MAX_PDF_FILES, MAX_BATCH_UPLOADS
 from .ingestion.service import IngestionService
@@ -266,6 +266,7 @@ def _repos(request: Optional[Request] = None) -> Dict[str, Any]:
         EnrichmentsRepo, ClassificationOverridesRepo, CustomFlagsRepo,
         AccountCoverageRepo, OverrideLogRepo, IntelligenceLogRepo,
         ExportPersistenceRepo, ParserRequestsRepo, PdsParserRequestsRepo,
+        SnapshotReverificationsRepo,
     )
     return {
         "deals": DealsRepo(),
@@ -279,6 +280,7 @@ def _repos(request: Optional[Request] = None) -> Dict[str, Any]:
         "intelligence_log": IntelligenceLogRepo(),
         "runs": AnalysisRunsRepo(),
         "snapshots": SnapshotsRepo(),
+        "snapshot_reverifications": SnapshotReverificationsRepo(),
         "export_persistence": ExportPersistenceRepo(),
         "enrichments": EnrichmentsRepo(),
         "cls_overrides": ClassificationOverridesRepo(),
@@ -1314,9 +1316,153 @@ def _snapshot_for_public_response(snapshot: Optional[Dict[str, Any]]) -> Optiona
     return out
 
 
+# ---------------------------------------------------------------------------
+# Export freshness (PAR-86)
+#
+# export() may return the latest sealed snapshot without recomputing, but only
+# while that snapshot is still current. "Current" used to be read straight off
+# the snapshot row (created_at, analysis_run_id, computation_fingerprint). That
+# breaks the moment a recompute reproduces an existing snapshot's exact hash:
+# export_snapshot() then reuses the OLD row, and pds_snapshots is immutable by
+# trigger (pds_snapshots_mutation_guard), so those three columns can never be
+# refreshed. Every gate that reads them failed forever and each deal open
+# re-ran the whole ~55s pipeline and appended another pds_analysis_runs row.
+#
+# Instead of mutating the seal, a hash-identical recompute appends a row to
+# pds_snapshot_reverifications (run, fingerprint, verified_at). The gates below
+# read the latest such row and fall back to the snapshot's own columns when
+# there is none, so a deal that has never been reverified behaves exactly as
+# before. Nothing here feeds any hash.
+# ---------------------------------------------------------------------------
+
+# verified_at is stamped from this process's clock but compared against DB
+# created_at values. Backing it off by a few seconds means clock skew can only
+# ever cost one extra recompute, never hide a document or override that
+# arrived while the verifying recompute was reading its inputs.
+_REVERIFIED_AT_SAFETY_MARGIN = timedelta(seconds=5)
+_MIN_TS = datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _parse_ts(value: Any) -> datetime:
+    """Parse a DB/ISO timestamp to an aware UTC datetime for comparison.
+
+    Empty / missing / unparseable -> the minimum datetime, i.e. "no timestamp",
+    matching the old string comparison where "" sorted before everything.
+    Comparing parsed values (rather than raw strings) keeps naive memory-repo
+    timestamps and "+00:00" DB timestamps comparable.
+    """
+    if not value:
+        return _MIN_TS
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return _MIN_TS
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _latest_reverification(repos: Dict[str, Any], snapshot_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    repo = repos.get("snapshot_reverifications")
+    if repo is None or not snapshot_id:
+        return None
+    try:
+        return repo.get_latest(snapshot_id)
+    except Exception:
+        # Table not migrated yet (code deployed before migration 048) or a
+        # transient DB error: behave as "never reverified" rather than failing
+        # the export. Worst case is the pre-fix behaviour, not an outage.
+        logger.warning("[EXPORT] reverification lookup failed snapshot=%s", snapshot_id, exc_info=True)
+        return None
+
+
+def _resolve_fresh_export(
+    repos: Dict[str, Any], deal_id: str, *, force: bool = False
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Return (response, latest_snapshot). response is the export payload built
+    from the existing sealed snapshot when it is still current, else None.
+
+    Shared by POST /export (which recomputes on None) and the read-only
+    GET /export/current (which never recomputes), so both apply one definition
+    of "current". A snapshot is current when ALL of:
+      1. nothing was added to the deal's documents since it was sealed/verified,
+      2. no override or Review Queue resolution since,
+      3. config_version matches,
+      4. computation_fingerprint matches (PAR-219: a computation deploy
+         invalidates it),
+      5. the deal's latest run is the one that sealed/verified the snapshot
+         (a run with no snapshot behind it means a previous export failed
+         between persisting state and sealing).
+    "Sealed/verified" is the later of the snapshot's created_at and its latest
+    reverification's verified_at.
+    """
+    latest_snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
+    if force or not latest_snapshot:
+        return None, latest_snapshot
+
+    snap_created_at = latest_snapshot.get("created_at") or ""
+    if not snap_created_at:
+        return None, latest_snapshot
+
+    verification = _latest_reverification(repos, latest_snapshot.get("id"))
+    basis = verification or latest_snapshot  # source of fingerprint / run id
+    current_at = _parse_ts(snap_created_at)
+    if verification:
+        current_at = max(current_at, _parse_ts(verification.get("verified_at")))
+
+    latest_doc_at = repos["documents"].get_latest_update_at(deal_id)
+    # PAR-111: pds_overrides (entity-level overrides, fed into run_pipeline())
+    # and pds_override_log (per-transaction Review Queue resolutions, overlaid
+    # onto run_pipeline()'s output per PAR-77) both change what export()
+    # produces. Take the max of both.
+    latest_override_at = max(
+        repos["overrides"].get_latest_update_at(deal_id) or "",
+        (repos["override_log"].get_latest_update_at(deal_id) if repos.get("override_log") else "") or "",
+        key=_parse_ts,
+    )
+    snap_config_version = latest_snapshot.get("config_version")
+    # PAR-219: NULL fingerprint (pre-migration-040 rows) deliberately never
+    # matches, so those recompute once and then carry a real fingerprint --
+    # via a reverification row if the recompute reproduces the same hash.
+    fingerprint = basis.get("computation_fingerprint")
+
+    if (
+        (not latest_doc_at or current_at >= _parse_ts(latest_doc_at))
+        and current_at > _parse_ts(latest_override_at)
+        and snap_config_version == CONFIG_VERSION
+        and fingerprint == COMPUTATION_FINGERPRINT
+    ):
+        latest_run = repos["runs"].get_latest_run(deal_id)
+        if latest_run and latest_run.get("id") == basis.get("analysis_run_id"):
+            run = dict(latest_run)
+            run.setdefault("bank_operational_inflow_cents", 0)
+            return (
+                {
+                    "analysis_run": run,
+                    "snapshot": _snapshot_for_public_response(latest_snapshot),
+                    "entities": list(repos["entities"].list_by_deal(deal_id)),
+                    "txn_entity_map": list(repos["txn_map"].list_by_deal(deal_id)),
+                },
+                latest_snapshot,
+            )
+
+    if snap_config_version != CONFIG_VERSION:
+        logger.info("[EXPORT] deal=%s config_version mismatch snap=%s current=%s — bypassing cache", deal_id, snap_config_version, CONFIG_VERSION)
+    elif fingerprint != COMPUTATION_FINGERPRINT:
+        # PAR-219: distinct log line from the config_version case so a deploy-
+        # driven recompute is attributable in logs rather than looking like a
+        # mystery cache miss.
+        logger.info(
+            "[EXPORT] deal=%s computation_fingerprint mismatch snap=%s current=%s — bypassing cache",
+            deal_id,
+            fingerprint,
+            COMPUTATION_FINGERPRINT,
+        )
+    return None, latest_snapshot
+
+
 @router.post("/deals/{deal_id}/export")
 def export(request: Request, deal_id: str, force: bool = False):
     started = time.perf_counter()
+    started_at = datetime.now(timezone.utc)  # PAR-86: reverification timestamp (inputs are read after this)
     stage = "EXPORT_START"
     logger.info("[EXPORT] stage=%s deal_id=%s force=%s", stage, deal_id, force)
     repos = _repos(request)
@@ -1335,70 +1481,17 @@ def export(request: Request, deal_id: str, force: bool = False):
     if not raw:
         _error("BAD_REQUEST", "No transactions to export. Upload documents first.", next_action="upload_new_file")
 
-    # Short-circuit: return existing snapshot if no new docs/overrides since last export.
-    # Skipped when force=True to rebuild the snapshot unconditionally.
-    latest_snapshot = repos["snapshots"].get_latest_snapshot(deal_id)
-    latest_doc_at = repos["documents"].get_latest_update_at(deal_id)
-    # PAR-111: pds_overrides (entity-level overrides, fed into run_pipeline()) and
-    # pds_override_log (per-transaction Review Queue resolutions, overlaid onto
-    # run_pipeline()'s output per PAR-77) are both real, both still-live tables
-    # that can change what export() produces — this check was only ever reading
-    # the former, so a fresh resolve_transaction() call never invalidated the
-    # short-circuit and export() could silently keep serving a pre-resolution
-    # snapshot. Take the max of both.
-    latest_override_at = max(
-        repos["overrides"].get_latest_update_at(deal_id) or "",
-        (repos["override_log"].get_latest_update_at(deal_id) if repos.get("override_log") else "") or "",
-    )
-    snap_created_at = (latest_snapshot or {}).get("created_at") or ""
-    snap_config_version = (latest_snapshot or {}).get("config_version")
-    # PAR-219: a backend code deploy was not previously an invalidation signal,
-    # so a shipped computation-logic fix never reached already-sealed deals —
-    # PAR-217's corrected reconciliation figure was live at 100% traffic while
-    # every sealed deal kept serving the pre-fix number. Comparing the snapshot's
-    # recorded computation fingerprint against the running one closes that gap
-    # automatically, with no version constant for anyone to remember to bump.
-    # NULL (pre-migration-040 rows, i.e. every snapshot sealed before this
-    # mechanism existed) deliberately never matches, so those re-compute once and
-    # then carry a real fingerprint.
-    snap_fingerprint = (latest_snapshot or {}).get("computation_fingerprint")
-    if not force and (
-        latest_snapshot
-        and snap_created_at
-        and (not latest_doc_at or snap_created_at >= latest_doc_at)
-        and snap_created_at > latest_override_at
-        and snap_config_version == CONFIG_VERSION
-        and snap_fingerprint == COMPUTATION_FINGERPRINT
-    ):
-        latest_run = repos["runs"].get_latest_run(deal_id)
-        if latest_run and latest_run.get("id") == latest_snapshot.get("analysis_run_id"):
-            entities = list(repos["entities"].list_by_deal(deal_id))
-            txn_map = list(repos["txn_map"].list_by_deal(deal_id))
-            run = dict(latest_run)
-            run.setdefault("bank_operational_inflow_cents", 0)
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            if request:
-                request.app.state.last_export_ms = duration_ms
-                request.app.state.last_export_at = datetime.now(timezone.utc).isoformat()
-            logger.info("[EXPORT] deal=%s ms=%d short_circuit=1 config_version=%s", deal_id, duration_ms, snap_config_version)
-            return {
-                "analysis_run": run,
-                "snapshot": _snapshot_for_public_response(latest_snapshot),
-                "entities": entities,
-                "txn_entity_map": txn_map,
-            }
-    if latest_snapshot and snap_config_version != CONFIG_VERSION:
-        logger.info("[EXPORT] deal=%s config_version mismatch snap=%s current=%s — bypassing cache", deal_id, snap_config_version, CONFIG_VERSION)
-    elif latest_snapshot and snap_fingerprint != COMPUTATION_FINGERPRINT:
-        # PAR-219: distinct log line from the config_version case so a deploy-
-        # driven recompute is attributable in logs rather than looking like a
-        # mystery cache miss.
-        logger.info(
-            "[EXPORT] deal=%s computation_fingerprint mismatch snap=%s current=%s — bypassing cache",
-            deal_id,
-            snap_fingerprint,
-            COMPUTATION_FINGERPRINT,
-        )
+    # Short-circuit: return the existing snapshot while it is still current
+    # (see _resolve_fresh_export). Skipped when force=True to rebuild the
+    # snapshot unconditionally.
+    cached, latest_snapshot = _resolve_fresh_export(repos, deal_id, force=force)
+    if cached is not None:
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        if request:
+            request.app.state.last_export_ms = duration_ms
+            request.app.state.last_export_at = datetime.now(timezone.utc).isoformat()
+        logger.info("[EXPORT] deal=%s ms=%d short_circuit=1 config_version=%s", deal_id, duration_ms, latest_snapshot.get("config_version"))
+        return cached
 
     # PAR-238: read the accrual figures reconciliation compares against from
     # the confirmed pds_audited_financials record, not deal.accrual_*. Those
@@ -1539,6 +1632,28 @@ def export(request: Request, deal_id: str, force: bool = False):
     stage = "SNAPSHOT_INSERT_DONE"
     logger.info("[EXPORT] stage=%s", stage)
 
+    # PAR-86: a byte-identical recompute reuses the existing (immutable)
+    # snapshot row, which still points at the OLD run. Append a reverification
+    # so the next export can see this snapshot is current, instead of
+    # recomputing on every call. Non-fatal but loud: if it fails the deal just
+    # recomputes again next time (the pre-fix behaviour), never worse.
+    if snapshot.get("analysis_run_id") != run["id"]:
+        try:
+            repos["snapshot_reverifications"].record(
+                deal_id=deal_id,
+                snapshot_id=snapshot["id"],
+                analysis_run_id=run["id"],
+                computation_fingerprint=COMPUTATION_FINGERPRINT,
+                verified_at=(started_at - _REVERIFIED_AT_SAFETY_MARGIN).isoformat(),
+            )
+            logger.info("[EXPORT] deal=%s hash-identical recompute — snapshot %s reverified by run %s", deal_id, snapshot["id"], run["id"])
+        except Exception:
+            logger.warning(
+                "[EXPORT] deal=%s could not record reverification for snapshot %s — "
+                "this deal will recompute again on the next export",
+                deal_id, snapshot.get("id"), exc_info=True,
+            )
+
     # Persist account coverage advisory (non-fatal — advisory only)
     try:
         from .analysis.reconciliation_engine import calculate_account_coverage
@@ -1620,6 +1735,25 @@ def export(request: Request, deal_id: str, force: bool = False):
         "entities": entities,
         "txn_entity_map": txn_map,
     }
+
+
+@router.get("/deals/{deal_id}/export/current")
+def get_current_export(request: Request, deal_id: str, _auth: None = Depends(_require_deal_owner)):
+    """Read-only view of the deal's export when it is still current (PAR-86).
+
+    Returns the same payload shape as POST /export, plus ``fresh: true``, using
+    exactly the same freshness definition as POST /export's short-circuit --
+    but never recomputes, writes, or appends a run. ``{"fresh": false}`` means
+    there is no snapshot yet or it is stale; the caller decides whether to
+    POST /export. Lets the UI show existing results without a write path.
+    """
+    repos = _repos(request)
+    if not repos["deals"].get_deal(deal_id):
+        _error("NOT_FOUND", f"Deal {deal_id} not found")
+    cached, _ = _resolve_fresh_export(repos, deal_id)
+    if cached is None:
+        return {"fresh": False}
+    return {"fresh": True, **cached}
 
 
 @router.get("/deals/{deal_id}/snapshots")
