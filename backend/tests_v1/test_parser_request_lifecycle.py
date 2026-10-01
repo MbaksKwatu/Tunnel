@@ -23,7 +23,11 @@ for p in (_BACKEND, _ROOT):
 
 from backend.v1.api import router as v1_router
 from backend.v1.db.memory_repositories import build_memory_repos
-from backend.v1.parser_request_fields import build_enrich_fields, build_partner_api_row
+from backend.v1.parser_request_fields import (
+    account_name_for_partner,
+    build_enrich_fields,
+    build_partner_api_row,
+)
 
 ALLOWED_STATUSES = {"new", "in_progress", "testing", "resolved"}
 USER = "11111111-1111-1111-1111-111111111111"
@@ -75,6 +79,24 @@ class TestGbfundRouteWritesPdsTable(unittest.TestCase):
         row = self.repos["pds_parser_requests"].all()[0]
         self.assertEqual(row["created_by"], USER)
         self.assertEqual(row["contact_email"], "owner@client.test")
+
+    def test_partner_route_writes_structured_account_name(self):
+        res = self.client.post(
+            "/v1/api/request-parser", json={"bank_name": "Stanbic", "partner": "gbfund"}
+        )
+        self.assertEqual(res.status_code, 200)
+        row = self.repos["pds_parser_requests"].all()[0]
+        self.assertEqual(row["account_name"], "GBFund")
+        # Defaults to the route's own partner when the body omits it.
+        self.client.post("/v1/api/request-parser", json={"bank_name": "KCB"})
+        self.assertEqual(self.repos["pds_parser_requests"].all()[1]["account_name"], "GBFund")
+
+    def test_account_name_for_partner_is_not_guessed(self):
+        self.assertEqual(account_name_for_partner("GBFUND"), "GBFund")
+        self.assertEqual(account_name_for_partner("musa"), "Musa")
+        self.assertEqual(account_name_for_partner("acme"), "acme")  # caller's id kept
+        self.assertIsNone(account_name_for_partner(None))
+        self.assertIsNone(account_name_for_partner("  "))
 
     def test_never_writes_a_status_outside_the_vocabulary(self):
         row = build_partner_api_row({"partner": "gbfund", "status": "pending"}, None, _no_lookup)

@@ -237,6 +237,10 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // account_name is deliberately not set here: this form has no reliable
+      // signal for which client the submitter belongs to (no org on the account,
+      // and email domains are unsafe — most users are on free-mail providers).
+      // NULL shows as "Unattributed" in the admin queue; an admin can set it.
       const { error: insertError } = await supabase.from('pds_parser_requests').insert({
         id: requestId,
         bank_name: bankName,
