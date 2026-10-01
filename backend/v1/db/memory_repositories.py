@@ -398,6 +398,44 @@ class MemoryParserRequestsRepo:
         return copy.deepcopy(row)
 
 
+class MemoryPdsParserRequestsRepo:
+    """In-memory fake for `pds_parser_requests` -- mirrors the surface of
+    PdsParserRequestsRepo the API routes use."""
+
+    def __init__(self):
+        self._store: List[Dict[str, Any]] = []
+        # Test hook: user_id -> email returned by account_contact_email().
+        self.account_emails: Dict[str, str] = {}
+
+    def insert(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        row = {"id": str(uuid.uuid4()), "status": "new", **data}
+        self._store.append(row)
+        return copy.deepcopy(row)
+
+    def get_for_deal(self, request_id: str, deal_id: str) -> Optional[Dict[str, Any]]:
+        for r in self._store:
+            if r["id"] == request_id and r.get("deal_id") == deal_id:
+                return copy.deepcopy(r)
+        return None
+
+    def list_for_account(self, user_id: str) -> List[Dict[str, Any]]:
+        rows = [r for r in self._store if r.get("created_by") == user_id]
+        return [copy.deepcopy(r) for r in sorted(rows, key=lambda r: r.get("created_at") or "", reverse=True)]
+
+    def enrich(self, request_id: str, deal_id: str, fields: Dict[str, Any]) -> Dict[str, Any]:
+        for r in self._store:
+            if r["id"] == request_id and r.get("deal_id") == deal_id:
+                r.update(fields)
+                return copy.deepcopy(r)
+        return {}
+
+    def account_contact_email(self, user_id: str) -> Optional[str]:
+        return self.account_emails.get(user_id)
+
+    def all(self) -> List[Dict[str, Any]]:
+        return [copy.deepcopy(r) for r in self._store]
+
+
 def build_memory_repos() -> Dict[str, Any]:
     runs = MemoryAnalysisRunsRepo()
     links = MemoryTransferLinksRepo()
@@ -416,4 +454,5 @@ def build_memory_repos() -> Dict[str, Any]:
         "snapshots": MemorySnapshotsRepo(),
         "export_persistence": MemoryExportPersistenceRepo(runs, links, entities, txn_map),
         "parser_requests": MemoryParserRequestsRepo(),
+        "pds_parser_requests": MemoryPdsParserRequestsRepo(),
     }

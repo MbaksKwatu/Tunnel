@@ -9,7 +9,17 @@ const manualRows = [
   { id: 'm1', bank_name: 'Stanbic', original_filename: 'stanbic.pdf', created_at: '2026-07-02T00:00:00Z', storage_path: 'm1/stanbic.pdf' },
 ]
 
-function makeQuery(table: 'parser_requests' | 'pds_parser_requests') {
+function makeEventsQuery(rows: unknown[] = []) {
+  const q: Record<string, unknown> = {}
+  q.select = vi.fn(() => q)
+  q.eq = vi.fn(() => q)
+  q.in = vi.fn(() => q)
+  q.order = vi.fn().mockResolvedValue({ data: rows, error: null })
+  return q
+}
+
+function makeQuery(table: string) {
+  if (table === 'pds_parser_request_events') return makeEventsQuery()
   const rows = table === 'parser_requests' ? autoRows : manualRows
   return {
     select: vi.fn().mockReturnThis(),
@@ -19,7 +29,7 @@ function makeQuery(table: 'parser_requests' | 'pds_parser_requests') {
   }
 }
 
-const fromMock = vi.fn((table: string) => makeQuery(table as 'parser_requests' | 'pds_parser_requests'))
+const fromMock = vi.fn((table: string) => makeQuery(table) as unknown)
 const requireAdminSessionMock = vi.fn<() => Promise<AdminSession | NextResponse>>(async () => ({ email: 'kwatukham@gmail.com' }))
 const createSignedUrlMock = vi.fn(async (path: string) => ({
   data: { signedUrl: `https://staging.supabase.co/storage/v1/object/sign/parser-requests/${path}?token=fresh` },
@@ -74,6 +84,7 @@ describe('GET /api/data/parser-requests', () => {
       ...manualRows[0],
       signed_url: 'https://staging.supabase.co/storage/v1/object/sign/parser-requests/m1/stanbic.pdf?token=fresh',
       deal_name: null,
+      last_test: null,
     }])
   })
 
@@ -145,26 +156,80 @@ describe('GET /api/data/parser-requests', () => {
 })
 
 describe('PATCH /api/data/parser-requests', () => {
+  const pdsRow = { id: 'm1', status: 'new', bank_name: 'Stanbic', storage_path: 'm1/stanbic.pdf' }
+
+  function pdsTable(current: Record<string, unknown> | null) {
+    const update = vi.fn(() => ({
+      eq: vi.fn(() => ({ eq: vi.fn(() => ({ select: vi.fn().mockResolvedValue({ data: [{ ...current, status: 'in_progress' }], error: null }) })) })),
+    }))
+    return {
+      select: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle: vi.fn().mockResolvedValue({ data: current, error: null }) })) })),
+      update,
+      insert: vi.fn().mockResolvedValue({ error: null }),
+    }
+  }
+
   beforeEach(() => {
-    fromMock.mockClear()
+    fromMock.mockReset()
     requireAdminSessionMock.mockClear()
     requireAdminSessionMock.mockImplementation(async () => ({ email: 'kwatukham@gmail.com' }))
   })
+
+  function patch(body: unknown) {
+    return new Request('http://x', { method: 'PATCH', body: JSON.stringify(body) }) as never
+  }
 
   it('returns 401 and never queries supabase when there is no session', async () => {
     requireAdminSessionMock.mockImplementation(async () =>
       NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     )
     const { PATCH } = await import('./route')
-    const res = await PATCH(new Request('http://x', { method: 'PATCH', body: JSON.stringify({ id: 'a1', status: 'done' }) }) as never)
+    const res = await PATCH(patch({ id: 'm1', status: 'in_progress' }))
     expect(res.status).toBe(401)
     expect(fromMock).not.toHaveBeenCalled()
   })
 
-  it('updates parser_requests when authenticated', async () => {
+  it('moves a pds_parser_requests row new -> in_progress and logs the event; never touches parser_requests', async () => {
+    const table = pdsTable(pdsRow)
+    const events = { insert: vi.fn().mockResolvedValue({ error: null }) }
+    fromMock.mockImplementation(((name: string) => (name === 'pds_parser_request_events' ? events : table)) as never)
     const { PATCH } = await import('./route')
-    const res = await PATCH(new Request('http://x', { method: 'PATCH', body: JSON.stringify({ id: 'a1', status: 'done' }) }) as never)
-    expect(fromMock).toHaveBeenCalledWith('parser_requests')
-    expect(await res.json()).toEqual({ ok: true })
+    const res = await PATCH(patch({ id: 'm1', status: 'in_progress' }))
+    expect(res.status).toBe(200)
+    expect(fromMock).toHaveBeenCalledWith('pds_parser_requests')
+    expect(fromMock).not.toHaveBeenCalledWith('parser_requests')
+    expect(table.update).toHaveBeenCalledWith({ status: 'in_progress' })
+    expect(events.insert).toHaveBeenCalledWith(expect.objectContaining({
+      request_id: 'm1', kind: 'status_change', from_status: 'new', to_status: 'in_progress', actor: 'kwatukham@gmail.com',
+    }))
+  })
+
+  it.each([
+    ['resolved', 'new'],
+    ['testing', 'new'],
+    ['in_progress', 'resolved'],
+  ])('refuses a direct %s move from %s (409, no write)', async (to, from) => {
+    const table = pdsTable({ ...pdsRow, status: from })
+    fromMock.mockImplementation((() => table) as never)
+    const { PATCH } = await import('./route')
+    const res = await PATCH(patch({ id: 'm1', status: to }))
+    expect(res.status).toBe(409)
+    expect(table.update).not.toHaveBeenCalled()
+  })
+
+  it('rejects the old admin vocabulary (done / pending) with 400', async () => {
+    const { PATCH } = await import('./route')
+    for (const status of ['done', 'pending']) {
+      const res = await PATCH(patch({ id: 'm1', status }))
+      expect(res.status).toBe(400)
+    }
+    expect(fromMock).not.toHaveBeenCalled()
+  })
+
+  it('404s for an id that is not a pds_parser_requests row', async () => {
+    fromMock.mockImplementation((() => pdsTable(null)) as never)
+    const { PATCH } = await import('./route')
+    const res = await PATCH(patch({ id: 'a1', status: 'in_progress' }))
+    expect(res.status).toBe(404)
   })
 })

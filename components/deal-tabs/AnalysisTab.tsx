@@ -17,6 +17,14 @@ const StatusDot = ({ status }: { status: StageStatus }) => {
   );
 };
 
+import {
+  formatSharePct,
+  monthExclusion,
+  roleLabel,
+  summarizeExclusion,
+  type ExcludedCredits,
+} from '@/lib/excluded-credits';
+
 export interface AnalysisTabProps {
   analysisState: AnalysisState;
   run: AnalysisRun | undefined;
@@ -25,6 +33,8 @@ export interface AnalysisTabProps {
   rawTransactions: Array<Record<string, unknown>>;
   pipelineStages: PipelineStage[];
   monthlyCashflow: Array<Record<string, unknown>>;
+  /** Credits not counted as inflow. null = the API response did not carry the field (say so; never imply "none"). */
+  excludedCredits: ExcludedCredits | null;
   creditScoringInputs: Record<string, unknown> | null;
   currency: string | null;
   dealCurrency?: string;
@@ -49,6 +59,7 @@ export default function AnalysisTab({
   rawTransactions,
   pipelineStages,
   monthlyCashflow,
+  excludedCredits,
   creditScoringInputs,
   currency,
   dealCurrency,
@@ -65,6 +76,12 @@ export default function AnalysisTab({
   onRetry,
 }: AnalysisTabProps) {
   const csi = creditScoringInputs as Record<string, unknown> | null;
+  // Credits excluded from inflow, over exactly the months shown in the cashflow table.
+  // Display only: nothing here changes a figure the backend computed.
+  const exclusion = summarizeExclusion(
+    (monthlyCashflow as Array<Record<string, unknown>>).map((m) => ({ month: String(m.month), inflow_cents: Number(m.inflow_cents ?? 0) })),
+    excludedCredits,
+  );
   const confPct = run ? (run.final_confidence_bp / 100).toFixed(1) : null;
   const tier = run?.tier ?? null;
   const roleBadgeColor: Record<string, string> = {
@@ -162,6 +179,11 @@ export default function AnalysisTab({
                   {(() => {
                     const fmt = (cents: unknown) => cents != null ? new Intl.NumberFormat('en-KE', { style: 'currency', currency: currency ?? dealCurrency ?? 'KES', minimumFractionDigits: 2 }).format(Number(cents) / 100) : '—';
                     const fmtBps = (bps: unknown) => bps != null ? `${(Number(bps) / 100).toFixed(1)}%` : '—';
+                    // Rows derived from inflow: every one of them is computed WITHOUT the excluded credits.
+                    const INFLOW_DERIVED = new Set(['Average Monthly Inflow', 'Median Monthly Inflow', 'Average Net Monthly Position', 'Peak Net Position', 'Trough Net Position', 'Revenue Growth']);
+                    const exclusionCaveat = exclusion && exclusion.excludedCents > 0
+                      ? `Excludes ${formatCents(exclusion.excludedCents)} (${formatSharePct(exclusion.excludedCents, exclusion.pct)} of all credits) not counted as inflow — see 02 below`
+                      : null;
                     const rows = [
                       { label: 'Average Monthly Inflow', value: csi ? fmt(csi.average_monthly_inflow_cents) : (monthlyCashflow.length > 0 ? fmt(monthlyCashflow.reduce((s: number, m: any) => s + (m.inflow_cents || 0), 0) / monthlyCashflow.length) : '—'), basis: '12-month arithmetic mean', positive: true },
                       { label: 'Median Monthly Inflow', value: csi ? fmt(csi.median_monthly_inflow_cents) : '—', basis: '12-month median', positive: true },
@@ -174,13 +196,26 @@ export default function AnalysisTab({
                       { label: 'Payroll Stability', value: csi ? (csi.payroll_stability as string) || 'NOT DETECTED' : 'NOT DETECTED', basis: csi?.payroll_stability === 'CONSISTENT' ? 'Consistent monthly pattern' : 'No payroll pattern in statement', positive: csi?.payroll_stability === 'CONSISTENT' ? true : csi?.payroll_stability ? null : null },
                       { label: 'KRA Compliance', value: csi ? (csi.kra_compliance as string) || 'NOT DETECTED' : 'NOT DETECTED', basis: (csi?.kra_note as string) || 'No KRA/VAT/PAYE transactions found', positive: csi?.kra_compliance === 'PASS' ? true : csi?.kra_compliance === 'GAPS_DETECTED' ? false : null },
                     ];
-                    return rows.map((row) => (
-                      <div key={row.label} style={{ display: 'grid', gridTemplateColumns: '1fr 200px 1fr', gap: 12, padding: '11px 0', borderBottom: '1px solid var(--s3)', alignItems: 'center' }}>
-                        <span style={{ fontSize: 13, color: 'var(--t0)' }}>{row.label}</span>
-                        <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, color: row.positive === true ? 'var(--green)' : row.positive === false ? 'var(--red)' : 'var(--t0)' }}>{row.value}</span>
-                        <span style={{ fontSize: 12, color: 'var(--t1)' }}>{row.basis}</span>
-                      </div>
-                    ));
+                    return rows.map((row) => {
+                      const incomplete = INFLOW_DERIVED.has(row.label) && exclusionCaveat !== null;
+                      const unavailable = INFLOW_DERIVED.has(row.label) && excludedCredits === null && monthlyCashflow.length > 0;
+                      return (
+                        <div key={row.label} style={{ display: 'grid', gridTemplateColumns: '1fr 200px 1fr', gap: 12, padding: '11px 0', borderBottom: '1px solid var(--s3)', alignItems: 'center' }}>
+                          <span style={{ fontSize: 13, color: 'var(--t0)' }}>
+                            {row.label}
+                            {incomplete && (
+                              <span title={exclusionCaveat ?? ''} style={{ marginLeft: 8, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--amber)', border: '1px solid var(--amber)', borderRadius: 3, padding: '1px 5px', verticalAlign: 'middle' }}>INCOMPLETE</span>
+                            )}
+                          </span>
+                          <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, color: row.positive === true ? 'var(--green)' : row.positive === false ? 'var(--red)' : 'var(--t0)' }}>{row.value}</span>
+                          <span style={{ fontSize: 12, color: 'var(--t1)' }}>
+                            {row.basis}
+                            {incomplete && <span style={{ display: 'block', marginTop: 3, color: 'var(--amber)' }}>{exclusionCaveat}</span>}
+                            {unavailable && <span style={{ display: 'block', marginTop: 3, color: 'var(--t2)' }}>Excluded-credit disclosure unavailable for this view</span>}
+                          </span>
+                        </div>
+                      );
+                    });
                   })()}
                 </div>
               </div>
@@ -191,9 +226,25 @@ export default function AnalysisTab({
                   <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--s3)', borderLeft: '3px solid #818CF8' }}>
                     <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--t0)' }}>02 · MONTH-ON-MONTH CASHFLOW</span>
                   </div>
+                  {exclusion && exclusion.excludedCents > 0 && (
+                    <div role="note" style={{ margin: '12px 20px 0', padding: '10px 12px', border: '1px solid var(--amber)', borderRadius: 6, background: 'rgba(245,158,11,0.07)', fontSize: 12, color: 'var(--t0)', lineHeight: 1.5 }}>
+                      <strong style={{ color: 'var(--amber)', letterSpacing: '0.06em' }}>CREDITS NOT COUNTED AS INFLOW</strong>
+                      <div>
+                        {formatCents(exclusion.excludedCents)} ({formatSharePct(exclusion.excludedCents, exclusion.pct)} of all {formatCents(exclusion.totalCreditsCents)} credited in this period) is excluded from the Inflow column, the net figures and the averages on this page:{' '}
+                        {formatCents(exclusion.pendingCents)} pending classification (needs review or unclassified)
+                        {exclusion.otherCents > 0 ? `, ${formatCents(exclusion.otherCents)} classified as non-inflow (transfers, reversals)` : ''}.
+                        {' '}These are shown, not hidden: they are uncertain, not zero. Resolve items in the Review Queue to move them into inflow.
+                      </div>
+                    </div>
+                  )}
+                  {excludedCredits === null && (
+                    <div role="note" style={{ margin: '12px 20px 0', fontSize: 11, color: 'var(--t2)' }}>
+                      Excluded-credit disclosure is unavailable for this view; Inflow shown may not include every credit.
+                    </div>
+                  )}
                   <div style={{ padding: '0 20px' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr 1fr 1fr', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--s3)' }}>
-                      {['MONTH', 'INFLOW', 'OUTFLOW', 'NET'].map((h) => <span key={h} style={{ fontSize: 10, fontWeight: 700, color: 'var(--t2)', letterSpacing: '0.1em' }}>{h}</span>)}
+                    <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr 1fr 1fr 1.3fr', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--s3)' }}>
+                      {['MONTH', 'INFLOW', 'OUTFLOW', 'NET', 'EXCLUDED (PENDING)'].map((h) => <span key={h} style={{ fontSize: 10, fontWeight: 700, color: 'var(--t2)', letterSpacing: '0.1em' }}>{h}</span>)}
                     </div>
                     {/* No count cap here — monthlyCashflow already IS the real observed
                         period from GET /analytics/monthly-cashflow (backend/v1/analytics.py's
@@ -204,12 +255,20 @@ export default function AnalysisTab({
                         here since this tab reads the live endpoint directly, not the PDF. */}
                     {(monthlyCashflow as Array<Record<string, unknown>>).map((m) => {
                       const net = Number(m.net_cents ?? 0);
+                      const ex = monthExclusion(String(m.month), Number(m.inflow_cents ?? 0), excludedCredits);
                       return (
-                        <div key={m.month as string} style={{ display: 'grid', gridTemplateColumns: '100px 1fr 1fr 1fr', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--s3)', alignItems: 'center' }}>
+                        <div key={m.month as string} style={{ display: 'grid', gridTemplateColumns: '100px 1fr 1fr 1fr 1.3fr', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--s3)', alignItems: 'center' }}>
                           <span style={{ fontSize: 12, color: 'var(--t1)', fontFamily: "'IBM Plex Mono', monospace" }}>{m.month as string}</span>
                           <span style={{ fontSize: 13, color: 'var(--green)', fontFamily: "'IBM Plex Mono', monospace" }}>{formatCents(Number(m.inflow_cents ?? 0))}</span>
                           <span style={{ fontSize: 13, color: 'var(--red)', fontFamily: "'IBM Plex Mono', monospace" }}>{formatCents(Number(m.outflow_cents ?? 0))}</span>
                           <span style={{ fontSize: 13, fontWeight: 600, color: net >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: "'IBM Plex Mono', monospace" }}>{formatCents(net)}</span>
+                          {ex ? (
+                            <span title={ex.roles.map(([r, c]) => `${roleLabel(r)}: ${formatCents(c)}`).join('\n')} style={{ fontSize: 12, color: 'var(--amber)', fontFamily: "'IBM Plex Mono', monospace" }}>
+                              {formatCents(ex.excludedCents)} · {formatSharePct(ex.excludedCents, ex.pct)}
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: 12, color: 'var(--t2)', fontFamily: "'IBM Plex Mono', monospace" }}>{excludedCredits === null ? 'n/a' : '—'}</span>
+                          )}
                         </div>
                       );
                     })}
