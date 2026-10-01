@@ -27,7 +27,12 @@ steps:
       - --timeout=1200
       - --concurrency=80
       - --min-instances=0
-      - --max-instances=3
+      # Cap of 2 (not 3): 4 CPU/12Gi x 3 instances per backend overran the
+      # regional CPU/memory quotas (CpuAllocPerProjectRegion 20 vCPU,
+      # MemAllocPerProjectRegion 40 GiB) when deploys overlapped. A manual
+      # `gcloud run services update` cap is reset by this flag on every
+      # deploy, so the cap must live here.
+      - --max-instances=2
       - --quiet
 
 options:
