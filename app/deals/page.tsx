@@ -2,22 +2,14 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { useQueries, useQuery } from '@tanstack/react-query'
+import { useQueries } from '@tanstack/react-query'
 import { createBrowserClient } from '@/lib/supabase'
-import { getDeal, listDocuments, listAccountParserRequests, type AnalysisRun } from '@/lib/v1-api'
+import { getDeal, listDocuments, type AnalysisRun } from '@/lib/v1-api'
 import { useDealsListQuery, dealDetailKey, dealDocumentsKey } from '@/lib/queries/deals'
-import { ThemeToggle } from '@/components/ThemeToggle'
-
-// pds_parser_requests.status values (backend/migrations/046 — enforced by a
-// CHECK constraint, same vocabulary as the admin queue):
-// new = received, nobody has picked it up yet; in_progress = being built;
-// testing = being checked against the file you sent; resolved = live, re-upload.
-const PARSER_REQUEST_STATUS_DISPLAY: Record<string, { label: string; dot: string }> = {
-  new: { label: 'Received', dot: 'var(--t1)' },
-  in_progress: { label: 'In progress', dot: 'var(--amber)' },
-  testing: { label: 'Testing your file', dot: '#818CF8' },
-  resolved: { label: 'Ready — re-upload', dot: 'var(--green)' },
-}
+import { AccountSidebar } from '@/components/AccountSidebar'
+import { ParserBanners } from '@/components/parsers/ParserBanners'
+import { useAccountParserRequests } from '@/lib/queries/parser-requests'
+import { toClientParserStatus, parserRequestLabel } from '@/lib/parser-request-status'
 
 interface PipelineStatus {
   label: string
@@ -57,21 +49,9 @@ export default function DashboardPage() {
   const dealsQuery = useDealsListQuery(userId)
   const deals = dealsQuery.data?.deals ?? []
 
-  // Account-level "Bank Formats" — every parser request this signed-in
-  // account has ever made, across all its deals. Full history, no expiry.
-  // The app-wide default is staleTime: Infinity + localStorage persistence,
-  // which would pin a request at "In progress" forever after an admin
-  // resolves it. Status is the whole point of this list, so always refetch
-  // on mount/focus and poll while the page is open.
-  const parserRequestsQuery = useQuery({
-    queryKey: ['account-parser-requests', userId],
-    queryFn: listAccountParserRequests,
-    enabled: !!userId,
-    staleTime: 0,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: 'always',
-    refetchInterval: 60_000,
-  })
+  // Account-level Bank Parsers — every parser request this signed-in account
+  // has ever made, across all its deals (status mapped to client language).
+  const parserRequestsQuery = useAccountParserRequests(userId)
   const parserRequests = parserRequestsQuery.data?.parser_requests ?? []
 
   // Per-deal status, also cache-shared with /v1/deal (['deal', id] / ['documents', id]) —
@@ -160,46 +140,7 @@ export default function DashboardPage() {
     <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', fontFamily: "'IBM Plex Sans', sans-serif", color: 'var(--t0)' }}>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
 
-      {/* Sidebar */}
-      <aside style={{ width: 200, background: 'var(--s1)', borderRight: '1px solid var(--s3)', display: 'flex', flexDirection: 'column', padding: '20px 0', position: 'fixed', top: 0, left: 0, bottom: 0, zIndex: 50 }}>
-        <div style={{ padding: '0 16px 16px', borderBottom: '1px solid var(--s3)' }}>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, fontWeight: 700, letterSpacing: '0.08em' }}>
-            <span style={{ color: 'var(--accent)' }}>P/</span> <span style={{ color: '#fff' }}>PARITY</span><span style={{ fontSize: 9, verticalAlign: 'super', color: 'var(--t1)' }}>v2.0</span>
-          </div>
-          <div style={{ fontSize: 9, color: 'var(--t2)', marginTop: 4, letterSpacing: '0.12em' }}>DETERMINISTIC</div>
-        </div>
-        {email && (
-          <div style={{ margin: '10px 16px', background: 'var(--s1)', border: '1px solid var(--b1)', borderRadius: 4, padding: '4px 8px', fontSize: 10, color: 'var(--t1)', display: 'flex', gap: 6, alignItems: 'center' }}>
-            <span style={{ fontWeight: 700, color: 'var(--t1)' }}>{initials}</span>
-            <span>PARITY DEMO</span>
-          </div>
-        )}
-        <nav style={{ flex: 1, padding: '8px 0' }}>
-          <div style={{ padding: '6px 16px', fontSize: 9, color: 'var(--t2)', letterSpacing: '0.12em', fontWeight: 600 }}>OPERATIONS</div>
-          <button onClick={() => router.push('/deals')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '9px 16px', background: 'rgba(20,184,166,0.1)', borderLeft: '2px solid var(--accent)', border: 'none', color: 'var(--accent)', fontSize: 13, cursor: 'pointer', textAlign: 'left', fontFamily: "'IBM Plex Sans', sans-serif" }}>
-            Dashboard <span style={{ fontSize: 10, color: 'var(--t2)', fontFamily: "'IBM Plex Mono', monospace" }}>SYS</span>
-          </button>
-          <button onClick={() => router.push('/deals')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '9px 16px', background: 'transparent', borderLeft: '2px solid transparent', border: 'none', color: 'var(--t1)', fontSize: 13, cursor: 'pointer', textAlign: 'left', fontFamily: "'IBM Plex Sans', sans-serif" }}>
-            Deals <span style={{ fontSize: 10, color: 'var(--t2)', fontFamily: "'IBM Plex Mono', monospace" }}>{String(activeDeals).padStart(2, '0')}</span>
-          </button>
-          <div style={{ padding: '12px 16px 6px', fontSize: 9, color: 'var(--t2)', letterSpacing: '0.12em', fontWeight: 600, marginTop: 4 }}>INTELLIGENCE</div>
-          <div style={{ padding: '9px 16px', color: 'var(--t2)', fontSize: 13 }}>Parity Review</div>
-          <div style={{ padding: '9px 16px', color: 'var(--t2)', fontSize: 13 }}>Benchmarks</div>
-          {/* "SWITCH MODE — Credit officer view" removed: inert, no onClick/state
-              anywhere. Earmarked for a future credit/insurance/audit
-              analysis-scope switch — that's separate future work. */}
-        </nav>
-        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--s3)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <div style={{ fontSize: 10, color: 'var(--t2)', fontFamily: "'IBM Plex Mono', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</div>
-            <ThemeToggle />
-          </div>
-          <button
-            onClick={async () => { const sb = createBrowserClient(); if (sb) await sb.auth.signOut(); router.push('/login'); }}
-            style={{ width: '100%', padding: '6px 0', background: 'transparent', border: '1px solid var(--s3)', borderRadius: 4, color: 'var(--t2)', fontSize: 12, cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
-          >Sign out</button>
-        </div>
-      </aside>
+      <AccountSidebar active="dashboard" email={email} dealCount={activeDeals} />
 
       {/* Main */}
       <div style={{ marginLeft: 200, flex: 1 }}>
@@ -220,6 +161,8 @@ export default function DashboardPage() {
         </div>
 
         <div style={{ padding: '28px 40px' }}>
+          <ParserBanners userId={userId} requests={parserRequests} />
+
           {/* Stat cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', background: 'var(--s3)', border: '1px solid var(--s3)', borderRadius: 8, overflow: 'hidden', marginBottom: 28, gap: 1 }}>
             {[
@@ -375,27 +318,31 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          {/* Bank Formats — every parser request this account has ever made,
-              across all its deals. Permanent history, no expiry/archival. */}
+          {/* Bank Parsers — every parser request this account has ever made,
+              across all its deals. Permanent history, no expiry/archival.
+              Full page: /parsers */}
           <div style={{ marginTop: 32 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <h2 style={{ fontSize: 13, fontWeight: 700, color: 'var(--t0)', margin: 0 }}>Bank Formats</h2>
+              <h2 style={{ fontSize: 13, fontWeight: 700, color: 'var(--t0)', margin: 0 }}>Bank Parsers</h2>
               <span style={{ fontSize: 10, color: 'var(--t2)', fontFamily: "'IBM Plex Mono', monospace" }}>
                 {parserRequests.length ? String(parserRequests.length).padStart(2, '0') : ''}
               </span>
+              <span style={{ flex: 1 }} />
+              <span style={{ fontSize: 11, color: 'var(--accent)', cursor: 'pointer' }} onClick={() => router.push('/parsers')}>View all →</span>
             </div>
             <div style={{ background: 'var(--s1)', border: '1px solid var(--s3)', borderRadius: 6 }}>
-              {parserRequestsQuery.isLoading && (
+              {(!userId || parserRequestsQuery.isLoading) && (
                 <div style={{ padding: '20px', textAlign: 'center', color: 'var(--t2)', fontSize: 12 }}>Loading…</div>
               )}
-              {!parserRequestsQuery.isLoading && parserRequests.length === 0 && (
+              {!!userId && !parserRequestsQuery.isLoading && parserRequests.length === 0 && (
                 <div style={{ padding: '20px', textAlign: 'center', color: 'var(--t2)', fontSize: 12 }}>
-                  No bank format requests yet.{' '}
-                  <span style={{ color: 'var(--accent)', cursor: 'pointer' }} onClick={() => router.push('/parsers/request')}>Request one →</span>
+                  No bank parser requests yet.{' '}
+                  <span style={{ color: 'var(--accent)', cursor: 'pointer' }} onClick={() => router.push('/parsers')}>Request one →</span>
                 </div>
               )}
               {parserRequests.map((r, i) => {
-                const display = (r.status && PARSER_REQUEST_STATUS_DISPLAY[r.status]) || { label: r.status || '—', dot: 'var(--t2)' }
+                const st = toClientParserStatus(r.status)
+                const display = { label: st.label, dot: st.key === 'ready' ? 'var(--green)' : 'var(--amber)' }
                 const requestedAt = r.created_at
                   ? new Date(r.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
                   : '—'
@@ -410,7 +357,7 @@ export default function DashboardPage() {
                       fontSize: 12,
                     }}
                   >
-                    <div style={{ color: 'var(--t0)', fontWeight: 600 }}>{r.bank_name || 'Unnamed bank'}</div>
+                    <div style={{ color: 'var(--t0)', fontWeight: 600 }}>{parserRequestLabel(r)}</div>
                     <div style={{ color: 'var(--t2)' }}>{r.deal_name || (r.deal_id ? r.deal_id.slice(0, 8) + '…' : '—')}</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--t1)' }}>
                       <span style={{ width: 7, height: 7, borderRadius: '50%', background: display.dot, display: 'inline-block', flexShrink: 0 }} />
