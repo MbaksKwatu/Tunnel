@@ -3,6 +3,7 @@ import { requireAdminSession } from '@/lib/require-admin-session'
 import { isOntologyQaAllowed } from '@/lib/ontology-qa-access'
 import { NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { ONTOLOGY_QA_DEAL_COLUMNS } from '@/lib/ontology-qa-needs-review'
 
 const CHUNK_SIZE = 100
 const PAGE_SIZE = 1000
@@ -66,7 +67,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
 
   const { data: deal, error: dealError } = await supabase
     .from('pds_deals')
-    .select('id, currency, created_at, accrual_period_start, accrual_period_end')
+    .select(ONTOLOGY_QA_DEAL_COLUMNS)
     .eq('id', id)
     .single()
   if (dealError) return NextResponse.json({ error: dealError.message }, { status: 500 })
@@ -75,7 +76,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   const txnIds = transactions.map((t) => t.id as string)
 
   const [entityMapRes, overrideLogRes, entityOverridesRes] = await Promise.all([
-    supabase.from('pds_txn_entity_map').select('txn_id, entity_id, role').eq('deal_id', id),
+    supabase.from('pds_txn_entity_map').select('txn_id, entity_id, role, role_reason').eq('deal_id', id),
     supabase.from('pds_override_log').select('txn_uuid, override_role, created_at').eq('deal_id', id),
     supabase.from('pds_overrides').select('entity_id, new_value, created_at').eq('deal_id', id).eq('field', 'role'),
   ])
@@ -86,9 +87,11 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   const classificationOverrides = await fetchClassificationOverrides(supabase, txnIds)
 
   const roleByTxn = new Map<string, string>()
+  const reasonByTxn = new Map<string, string | null>()
   const entityByTxn = new Map<string, string>()
   for (const row of entityMapRes.data ?? []) {
     roleByTxn.set(row.txn_id, row.role)
+    reasonByTxn.set(row.txn_id, row.role_reason ?? null)
     entityByTxn.set(row.txn_id, row.entity_id)
   }
 
@@ -126,6 +129,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     return {
       ...txn,
       role: roleByTxn.get(txnId) ?? null,
+      role_reason: reasonByTxn.get(txnId) ?? null,
       analyst_resolution: analystResolution,
     }
   })
