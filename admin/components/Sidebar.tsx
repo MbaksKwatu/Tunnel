@@ -1,10 +1,5 @@
-'use client'
-
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
 import { SignOutButton } from '@/components/SignOutButton'
-import { getSupabaseBrowser } from '@/lib/supabase-browser'
-import { isOntologyQaAllowed } from '@/lib/ontology-qa-access'
 
 const navItems = [
   { href: '/parser-requests', label: 'Parser Requests' },
@@ -14,15 +9,7 @@ const navItems = [
   { href: '/sandbox-keys', label: 'Sandbox Keys' },
 ]
 
-export function Sidebar() {
-  const [showOntologyQa, setShowOntologyQa] = useState(false)
-
-  useEffect(() => {
-    getSupabaseBrowser().auth.getUser().then(({ data: { user } }) => {
-      setShowOntologyQa(isOntologyQaAllowed(user?.email))
-    })
-  }, [])
-
+export function Sidebar({ showOntologyQa }: { showOntologyQa: boolean }) {
   return (
     <aside style={{
       width: 220,

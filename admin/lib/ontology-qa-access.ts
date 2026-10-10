@@ -9,5 +9,6 @@ export const ONTOLOGY_QA_EMAILS = [
 
 export function isOntologyQaAllowed(email: string | null | undefined): boolean {
   if (!email) return false
-  return ONTOLOGY_QA_EMAILS.includes(email.toLowerCase())
+  const normalized = ONTOLOGY_QA_EMAILS.map((e) => e.toLowerCase())
+  return normalized.includes(email.toLowerCase())
 }
