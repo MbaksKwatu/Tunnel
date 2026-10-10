@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { DataTable, Column } from '@/components/DataTable'
 import { PageHeader } from '@/components/PageHeader'
 import { EnvBadge } from '@/components/EnvBadge'
+import { OntologyQaDealPicker } from '@/components/OntologyQaDealPicker'
 import { formatCents, downloadCSV } from '../utils'
 
 interface Deal {
@@ -23,6 +24,7 @@ interface Transaction {
   abs_amount_cents: number | null
   is_transfer: boolean
   role: string | null
+  role_reason: string | null
   analyst_resolution: string | null
   [key: string]: unknown
 }
@@ -63,6 +65,7 @@ export default function OntologyQaDetailPage() {
       amount: formatCents(t.signed_amount_cents),
       is_transfer: t.is_transfer,
       role: t.role ?? '',
+      role_reason: t.role_reason ?? '',
       analyst_resolution: t.analyst_resolution ?? '',
     }))
     downloadCSV(csvRows, `ontology-qa-${id}-${new Date().toISOString().slice(0, 10)}.csv`)
@@ -87,6 +90,11 @@ export default function OntologyQaDetailPage() {
       ),
     },
     {
+      key: 'role_reason',
+      label: 'Reason',
+      render: (val) => <span style={{ color: 'var(--t1)', fontSize: 12 }}>{(val as string) || '—'}</span>,
+    },
+    {
       key: 'analyst_resolution',
       label: 'Analyst Resolution',
       render: (val) => (
@@ -109,6 +117,7 @@ export default function OntologyQaDetailPage() {
       >
         ← Back to deals
       </button>
+      <OntologyQaDealPicker currentDealId={id} />
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
         <PageHeader title="Ontology QA" subtitle={`${transactions.length} transactions — anonymized, staging only`} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>

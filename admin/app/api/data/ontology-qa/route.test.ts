@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextResponse } from 'next/server'
 import type { AdminSession } from '@/lib/require-admin-session'
+import { createFakeSupabase } from '@/lib/fake-supabase.test-util'
 
 const rows = [{ id: 'd1', currency: 'KES', created_at: '2026-07-01T00:00:00Z' }]
 
@@ -12,8 +13,10 @@ const queryMock = {
 const fromMock = vi.fn(() => queryMock)
 const requireAdminSessionMock = vi.fn<() => Promise<AdminSession | NextResponse>>(async () => ({ email: 'weevermbakaya@gmail.com' }))
 
+let activeClient: { from: (t: string) => unknown } = { from: fromMock }
+
 vi.mock('@/lib/supabase-staging', () => ({
-  getSupabaseStaging: () => ({ from: fromMock }),
+  getSupabaseStaging: () => activeClient,
 }))
 
 vi.mock('@/lib/require-admin-session', () => ({
@@ -23,6 +26,7 @@ vi.mock('@/lib/require-admin-session', () => ({
 describe('GET /api/data/ontology-qa', () => {
   beforeEach(() => {
     fromMock.mockClear()
+    activeClient = { from: fromMock }
     requireAdminSessionMock.mockClear()
     requireAdminSessionMock.mockImplementation(async () => ({ email: 'weevermbakaya@gmail.com' }))
   })
@@ -51,5 +55,50 @@ describe('GET /api/data/ontology-qa', () => {
     const body = await res.json()
     expect(fromMock).toHaveBeenCalledWith('pds_deals')
     expect(body.deals).toEqual(rows)
+  })
+
+  describe('?needs_review=1 (deal picker source)', () => {
+    const req = () => new Request('http://x/api/data/ontology-qa?needs_review=1')
+    const setup = () => {
+      const fake = createFakeSupabase({
+        pds_deals: [
+          { id: 'd1', currency: 'KES', created_at: '2026-07-01T00:00:00Z', accrual_period_start: null, accrual_period_end: null, company_name: 'Secret Co', name: 'Secret', analyst_notes: 'Secret' },
+          { id: 'd2', currency: 'KES', created_at: '2026-08-01T00:00:00Z', accrual_period_start: null, accrual_period_end: null, company_name: 'Secret Co', name: 'Secret', analyst_notes: 'Secret' },
+        ],
+        pds_txn_entity_map: [
+          { deal_id: 'd1', txn_id: 't1', role: 'needs_review' },
+          { deal_id: 'd2', txn_id: 't2', role: 'revenue' },
+        ],
+      })
+      activeClient = fake.client
+      return fake
+    }
+
+    it('returns only deals with needs_review items, with counts', async () => {
+      setup()
+      const { GET } = await import('./route')
+      const body = await (await GET(req())).json()
+      expect(body.deals.map((d: { id: string; needs_review_count: number }) => [d.id, d.needs_review_count])).toEqual([['d1', 1]])
+    })
+
+    it('does not leak company-identifying fields', async () => {
+      setup()
+      const { GET } = await import('./route')
+      const text = JSON.stringify(await (await GET(req())).json())
+      expect(text).not.toMatch(/Secret|company_name|analyst_notes/)
+    })
+
+    it('still enforces the ontology-qa allowlist', async () => {
+      requireAdminSessionMock.mockImplementation(async () => ({ email: 'kwatukham@gmail.com' }))
+      setup()
+      const { GET } = await import('./route')
+      expect((await GET(req())).status).toBe(403)
+    })
+
+    it('leaves the default (no query param) response unchanged', async () => {
+      const { GET } = await import('./route')
+      const body = await (await GET(new Request('http://x/api/data/ontology-qa'))).json()
+      expect(body.deals).toEqual(rows)
+    })
   })
 })

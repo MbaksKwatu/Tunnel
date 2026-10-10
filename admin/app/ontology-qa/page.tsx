@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { DataTable, Column } from '@/components/DataTable'
 import { PageHeader } from '@/components/PageHeader'
 import { EnvBadge } from '@/components/EnvBadge'
+import { OntologyQaDealPicker } from '@/components/OntologyQaDealPicker'
 import { toEAT, refreshedLabel } from './utils'
 
 interface Deal {
@@ -111,6 +112,7 @@ export default function OntologyQaPage() {
           </button>
         </div>
       </div>
+      <OntologyQaDealPicker />
       {error && (
         <div style={{ marginBottom: 16, padding: '10px 16px', borderRadius: 6, background: 'var(--red-d)', color: 'var(--red)', fontSize: 13 }}>
           {error}
