@@ -5,9 +5,116 @@ from typing import Dict, List, Tuple
 from ..parsing.common import normalize_descriptor, canonical_hash
 
 
+# ---------------------------------------------------------------------------
+# Equity CLMS narrative noise
+# ---------------------------------------------------------------------------
+# CLMS PDFs carry per-transaction tokens inside the narrative, so without
+# stripping them nearly every row becomes its own entity:
+#   MPS 2547****1616 TIF9Z4OE57 CHARLES S5712345 KOECH ATIENO
+#   PESALINK OUTWARD JC5X4YKY1E TO RIFTLINE S4198968 MOTORS LTD INV 1234567
+# - S1234567: the "Transaction Reference" column, bled into the narrative
+#   where it wraps (often mid-name). Its presence is what marks a CLMS row;
+#   other banks' narratives never carry it, so their names are unchanged.
+# - a 10-char transaction ref, phone numbers (plain or masked), account /
+#   invoice numbers, and truncated account fragments ("0570283", "05").
+# Only the entity display name is affected. raw/parsed/normalized_descriptor
+# on the transaction are not modified, so canonical_hash and sort_rows input
+# stay identical.
+_CLMS_CUST_REF = re.compile(r"^S\d{5,9}$")
+_CLMS_PHONE = re.compile(r"^(?:254|0)7\d{8}$|^2547\*+\d{4}$")
+_CLMS_MIXED_REF = re.compile(r"^(?=.*\d)(?=.*[A-Za-z])[A-Za-z0-9]{8,}$")
+_CLMS_ALPHA_REF = re.compile(r"^[A-Z]{10}$")
+_CLMS_DIGITS = re.compile(r"^\d+$")
+_CLMS_SLASH_DIGITS = re.compile(r"/\d+$")
+_CLMS_TRAILING_WORDS = {"INV", "ACC"}
+_CLMS_PARTY_MARKERS = {"TO", "FROM", "FRM"}
+_MONTHS = {"JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"}
+
+
+def _is_clms_narrative(raw: str) -> bool:
+    tokens = raw.split()
+    if any(_CLMS_CUST_REF.match(t) for t in tokens):
+        return True
+    # CLMS spreadsheet exports carry the S-ref in its own column; the M-Pesa
+    # phone + ref layout is still recognisable.
+    return len(tokens) >= 3 and tokens[0].upper() == "MPS" and bool(_CLMS_PHONE.match(tokens[1]))
+
+
+def _strip_clms_noise(raw: str) -> List[str]:
+    """Return the narrative tokens with CLMS per-transaction tokens removed."""
+    kept: List[str] = []
+    dropped_ref = False
+    for i, tok in enumerate(raw.split()):
+        tok = _CLMS_SLASH_DIGITS.sub("", tok)
+        if not tok:
+            continue
+        if _CLMS_CUST_REF.match(tok) or _CLMS_PHONE.match(tok) or _CLMS_DIGITS.match(tok):
+            continue
+        if _CLMS_MIXED_REF.match(tok):
+            dropped_ref = True
+            continue
+        # Some transaction refs are all letters; they sit right after the
+        # transaction-type prefix, ahead of the counterparty.
+        if not dropped_ref and i <= 4 and _CLMS_ALPHA_REF.match(tok):
+            dropped_ref = True
+            continue
+        kept.append(tok)
+    while kept and kept[-1].upper() in _CLMS_TRAILING_WORDS:
+        kept.pop()
+    return kept
+
+
+def _clms_counterparty(tokens: List[str]) -> str:
+    """Counterparty name from a cleaned CLMS narrative, or "" if none is explicit."""
+    upper = [t.upper() for t in tokens]
+    if not upper:
+        return ""
+    # M-Pesa: everything left after the prefix is the sender / recipient name.
+    if upper[0] == "MPS":
+        return " ".join(tokens[1:]).title() or "M-Pesa"
+    # Transfers: the counterparty follows TO / FROM / FRM.
+    for i, t in enumerate(upper[:6]):
+        if t in _CLMS_PARTY_MARKERS and i + 1 < len(tokens):
+            return " ".join(tokens[i + 1:]).title()
+    # Cheque deposits: CHQ DEP CHEQUE DEPOSIT <drawer>
+    if upper[:2] == ["CHQ", "DEP"] and "DEPOSIT" in upper:
+        rest = tokens[upper.index("DEPOSIT") + 1:]
+        if rest:
+            return " ".join(rest).title()
+    # Salaries: EFT OUTWARD SALARIES SALARY PAYMENT <MON> <employee>
+    if "SALARIES" in upper[:3] and "PAYMENT" in upper:
+        rest = tokens[upper.index("PAYMENT") + 1:]
+        if rest and rest[0].upper() in _MONTHS:
+            rest = rest[1:]
+        if rest:
+            return " ".join(rest).title()
+    # Bank fees: CHG <fee description>. Excise lines fall through to the
+    # shared Excise Duty rule.
+    if upper[0] == "CHG" and len(tokens) > 1 and "EXCISE" not in upper:
+        return " ".join(tokens[1:]).title()
+    return ""
+
+
 def _clean_display_name(raw_descriptor: str, parsed_descriptor: str) -> str:
     """
     Extract a clean, human-readable entity name from a raw transaction descriptor.
+    Equity CLMS narratives are first stripped of per-transaction noise; the
+    shared rules then run on the cleaned text.
+    """
+    raw = (raw_descriptor or parsed_descriptor or "").strip()
+    if _is_clms_narrative(raw):
+        tokens = _strip_clms_noise(raw)
+        name = _clms_counterparty(tokens)
+        if name:
+            return name
+        cleaned = " ".join(tokens)
+        if cleaned:
+            return _apply_display_rules(cleaned, cleaned)
+    return _apply_display_rules(raw_descriptor, parsed_descriptor)
+
+
+def _apply_display_rules(raw_descriptor: str, parsed_descriptor: str) -> str:
+    """
     Rules are applied in order — first match wins.
     Falls back to truncated parsed_descriptor if no rule matches.
     """
