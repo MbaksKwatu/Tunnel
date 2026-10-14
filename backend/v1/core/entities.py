@@ -61,6 +61,10 @@ def _strip_clms_noise(raw: str) -> List[str]:
         kept.append(tok)
     while kept and kept[-1].upper() in _CLMS_TRAILING_WORDS:
         kept.pop()
+    # Statutory remittances name the payroll month (the year is already gone
+    # as digits): PAYBILL NSSF CONTRIBUTION FEB -> PAYBILL NSSF CONTRIBUTION
+    if len(kept) >= 2 and kept[-1].upper() in _MONTHS and kept[-2].upper() == "CONTRIBUTION":
+        kept.pop()
     return kept
 
 
@@ -95,11 +99,95 @@ def _clms_counterparty(tokens: List[str]) -> str:
     return ""
 
 
+# ---------------------------------------------------------------------------
+# Equity channel narratives without the S-ref
+# ---------------------------------------------------------------------------
+# Equity rows from the app / USSD / web / EazzyBiz channels carry no CLMS
+# S-ref but still embed per-row codes:
+#   APP/KIPKIRUI GIDEON A91893E8BEC7 54351035 KOSKEI/ 2
+#   EAZZYBIZ TRSF HODGE C75602052508 54677792 VENTURES L 3535
+#   CHARGES ACCOUNT TO C72601042508 54975977 ACCOUNT TH 3023
+#   PAYED 139497252415 BY:NGIMATEK/139497252415 54508916 /28-11-2025 19:09:57
+#   Transfer Charge 54214109
+# Each rule fires only on its exact Equity layout (channel prefix plus the
+# channel's ref token); anything else falls through unchanged.
+_EQ_CHANNEL = re.compile(r"^(?:APP|USSD|WEB|EVA)/(.+)$")
+_EQ_CHANNEL_REF = re.compile(r"^[AUWCX](?=[0-9A-F]*\d)[0-9A-F]{9,11}$")
+# Wrapped tail of the row's hex code, printed right after the row number:
+#   CHOICE HARDWARE 5417412 E LIMITED/
+_EQ_ROW_TAIL = re.compile(r"^[0-9A-F]{1,2}$")
+_EQ_EAZZYBIZ = re.compile(r"^(?:0\d{9} )?EAZZYBIZ TRSF (.+)$")
+_EQ_EAZZYBIZ_REF = re.compile(r"^(?:C7|TB)\d*$")
+_EQ_ACCOUNT_CHARGES = re.compile(r"^CHARGES ACCOUNT TO (?:C7|TB)\d{10} \d{6,9} ACCOUNT\b")
+_EQ_PAYED = re.compile(r"^PAYED (?:\d{12} )?BY:([^/]*)/")
+_EQ_TRANSFER_CHARGE = re.compile(r"^Transfer Charge \d{6,9}$")
+
+
+def _equity_channel_name(raw: str) -> str:
+    """Counterparty for an Equity channel narrative, or "" if the layout doesn't match."""
+    m = _EQ_CHANNEL.match(raw)
+    if m:
+        # Name is the first slash segment, split around the channel ref and row number.
+        tokens = m.group(1).split("/")[0].split()
+        if not any(_EQ_CHANNEL_REF.match(t) for t in tokens):
+            return ""
+        name: List[str] = []
+        after_row_no = False
+        for t in tokens:
+            if _EQ_CHANNEL_REF.match(t) or _CLMS_DIGITS.match(t):
+                after_row_no = bool(_CLMS_DIGITS.match(t))
+                continue
+            if after_row_no and _EQ_ROW_TAIL.match(t):
+                after_row_no = False
+                continue
+            after_row_no = False
+            name.append(t)
+        return " ".join(name).title()
+    m = _EQ_EAZZYBIZ.match(raw)
+    if m:
+        tokens = m.group(1).split()
+        if not any(_EQ_EAZZYBIZ_REF.match(t) for t in tokens):
+            return ""
+        name = [t for t in tokens if not (_EQ_EAZZYBIZ_REF.match(t) or _CLMS_DIGITS.match(t))]
+        if name and name[0].upper() == "TO":
+            name = name[1:]
+        return " ".join(name).title() or "EazzyBiz Transfer"
+    if _EQ_ACCOUNT_CHARGES.match(raw):
+        return "Account Transfer Charges"
+    m = _EQ_PAYED.match(raw)
+    if m:
+        name = [t for t in m.group(1).split() if not _CLMS_DIGITS.match(t)]
+        return " ".join(name).title()
+    if _EQ_TRANSFER_CHARGE.match(raw):
+        return "Transfer Charge"
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# KCB M-Pesa paybill narratives
+# ---------------------------------------------------------------------------
+#   Mobi 522522 MPESA TEU2SZ7YQM 254721577540 SERA /
+# The M-Pesa ref is per row and the sender name is cut to 4 characters, so
+# the phone number is what identifies the sender.
+_KCB_MOBI = re.compile(r"^Mobi 522522 MPESA [A-Z0-9]{10} (?:(254\d{9}) ?)?(.*?)\s*/$")
+
+
+def _kcb_mobi_name(raw: str) -> str:
+    m = _KCB_MOBI.match(raw)
+    if not m:
+        return ""
+    phone, name = m.group(1), m.group(2).strip().title()
+    if phone:
+        return f"{name} ({phone})" if name else f"M-Pesa {phone}"
+    return name or "M-Pesa"
+
+
 def _clean_display_name(raw_descriptor: str, parsed_descriptor: str) -> str:
     """
     Extract a clean, human-readable entity name from a raw transaction descriptor.
     Equity CLMS narratives are first stripped of per-transaction noise; the
-    shared rules then run on the cleaned text.
+    shared rules then run on the cleaned text. Equity channel and KCB M-Pesa
+    layouts with per-row codes are matched exactly before the shared rules.
     """
     raw = (raw_descriptor or parsed_descriptor or "").strip()
     if _is_clms_narrative(raw):
@@ -110,6 +198,9 @@ def _clean_display_name(raw_descriptor: str, parsed_descriptor: str) -> str:
         cleaned = " ".join(tokens)
         if cleaned:
             return _apply_display_rules(cleaned, cleaned)
+    name = _equity_channel_name(raw) or _kcb_mobi_name(raw)
+    if name:
+        return name
     return _apply_display_rules(raw_descriptor, parsed_descriptor)
 
 
