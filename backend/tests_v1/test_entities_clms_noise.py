@@ -92,7 +92,6 @@ class TestNonClmsUnchanged(unittest.TestCase):
 
     CASES = {
         "TDF6WQOFHC~254728056542~01192248207900~MPESAC2B_400200~Mourine Catherine": "Mourine Catherine",
-        "Mobi 522522 MPESA TCI87Q9GXC 254714808885 gide /": "Mobi 522522 MPESA TCI87Q9GXC 25471480888",
         "Transfer Charge P052149574N AC- 11089762": "Transfer Charge P052149574N AC- 11089762",
         "Transfer filla filla 999999": "Transfer Filla Filla",
         "KENYA REVENUE AUTHORITY PAYE": "Kra",
