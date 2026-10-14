@@ -490,4 +490,21 @@ def build_memory_repos() -> Dict[str, Any]:
         "export_persistence": MemoryExportPersistenceRepo(runs, links, entities, txn_map),
         "parser_requests": MemoryParserRequestsRepo(),
         "pds_parser_requests": MemoryPdsParserRequestsRepo(),
+        "uploads": MemoryUploadsStorageRepo(),
     }
+
+
+class MemoryUploadsStorageRepo:
+    """In-memory fake for the `uploads` Storage bucket (UploadsStorageRepo)."""
+
+    def __init__(self):
+        self.objects: Dict[str, Dict[str, Any]] = {}
+
+    def upload(self, path: str, content: bytes, content_type: str) -> str:
+        if path in self.objects:
+            raise ValueError(f"Object already exists: {path}")
+        self.objects[path] = {"content": bytes(content), "content_type": content_type}
+        return path
+
+    def download(self, path: str) -> bytes:
+        return self.objects[path]["content"]

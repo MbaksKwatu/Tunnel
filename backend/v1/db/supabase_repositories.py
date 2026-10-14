@@ -1080,3 +1080,26 @@ class PdsParserRequestsRepo(BaseRepo):
             .execute()
         )
         return res.data[0] if res.data else {}
+
+
+class UploadsStorageRepo:
+    """Original uploaded files (bank statements, audited financials) in the
+    private `uploads` Storage bucket. Objects are keyed by deal-scoped paths
+    built in api.py (`<deal_id>/<document_id>/<filename>`); the path is what
+    pds_documents / pds_audited_financials.original_storage_path records."""
+
+    BUCKET = "uploads"
+
+    def __init__(self):
+        self.client = get_supabase()
+
+    def upload(self, path: str, content: bytes, content_type: str) -> str:
+        self.client.storage.from_(self.BUCKET).upload(
+            path,
+            content,
+            {"content-type": content_type, "upsert": "false"},
+        )
+        return path
+
+    def download(self, path: str) -> bytes:
+        return self.client.storage.from_(self.BUCKET).download(path)

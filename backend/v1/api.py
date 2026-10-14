@@ -8,9 +8,11 @@ import csv
 import io
 import json
 import logging
+import mimetypes
 import multiprocessing
 import os
 import queue as _queue_module
+import re
 import threading
 import time
 import uuid
@@ -266,7 +268,7 @@ def _repos(request: Optional[Request] = None) -> Dict[str, Any]:
         EnrichmentsRepo, ClassificationOverridesRepo, CustomFlagsRepo,
         AccountCoverageRepo, OverrideLogRepo, IntelligenceLogRepo,
         ExportPersistenceRepo, ParserRequestsRepo, PdsParserRequestsRepo,
-        SnapshotReverificationsRepo,
+        SnapshotReverificationsRepo, UploadsStorageRepo,
     )
     return {
         "deals": DealsRepo(),
@@ -288,7 +290,40 @@ def _repos(request: Optional[Request] = None) -> Dict[str, Any]:
         "account_coverage": AccountCoverageRepo(),
         "parser_requests": ParserRequestsRepo(),
         "pds_parser_requests": PdsParserRequestsRepo(),
+        "uploads": UploadsStorageRepo(),
     }
+
+
+def _original_upload_path(deal_id: str, object_id: str, file_name: str) -> str:
+    """Deal-scoped key for an original upload in the `uploads` bucket."""
+    safe_name = re.sub(r"[^a-zA-Z0-9._-]", "_", file_name) or "upload"
+    return f"{deal_id}/{object_id}/{safe_name}"
+
+
+def _persist_original_upload(
+    repos: Dict[str, Any],
+    path: str,
+    content: bytes,
+    file_name: str,
+    content_type: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Save an uploaded file's original bytes to the private `uploads` bucket so
+    it can be retrieved later (until now uploads were parsed in memory and
+    discarded). Returns the stored path, or None if the write failed.
+
+    Best-effort: a Storage outage must not block ingestion or extraction, so
+    a failure is logged loudly and the caller records a NULL path.
+    """
+    storage = repos.get("uploads")
+    if storage is None:
+        return None
+    ctype = content_type or mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+    try:
+        return storage.upload(path, content, ctype)
+    except Exception:
+        logger.exception("[UPLOAD] Failed to persist original file to storage path=%s", path)
+        return None
 
 
 # ===================================================================
@@ -560,10 +595,22 @@ async def upload_document(
     # does not change document/deal created_by attribution above.
     verified_user_id = _extract_user_id_from_request(request)
 
+    # storage_url keeps its inline://<filename> form: reconciliation dedups
+    # re-uploads and labels banks by it. The retrievable file's path goes in
+    # original_storage_path instead.
+    original_storage_path = _persist_original_upload(
+        repos,
+        _original_upload_path(deal_id, document_id, fname),
+        content,
+        fname,
+        file.content_type,
+    )
+
     document = {
         "id": document_id,
         "deal_id": deal_id,
         "storage_url": f"inline://{fname}",
+        "original_storage_path": original_storage_path,
         "file_type": file_type.lower(),
         "status": "processing",
         "currency_detected": None,
@@ -680,10 +727,30 @@ async def upload_documents_batch(
     document_id = str(uuid.uuid4())
     merged_label = f"batch_{next_batch_number}_merged.pdf"
 
+    # Keep each part as uploaded (under originals/, numbered in upload order)
+    # plus the merged PDF that is actually ingested; the document row points
+    # at the merged file.
+    for i, (part, part_name) in enumerate(zip(pdf_parts, source_names), start=1):
+        _persist_original_upload(
+            repos,
+            _original_upload_path(deal_id, f"{document_id}/originals", f"{i:02d}_{part_name}"),
+            part,
+            part_name,
+            "application/pdf",
+        )
+    original_storage_path = _persist_original_upload(
+        repos,
+        _original_upload_path(deal_id, document_id, merged_label),
+        merged_bytes,
+        merged_label,
+        "application/pdf",
+    )
+
     document: Dict[str, Any] = {
         "id": document_id,
         "deal_id": deal_id,
         "storage_url": f"inline://{merged_label}",
+        "original_storage_path": original_storage_path,
         "file_type": "pdf",
         "status": "processing",
         "currency_detected": None,
@@ -2892,6 +2959,18 @@ async def upload_audited_financials(
     )
     sha256_hash = hashlib.sha256(_hash_key.encode()).hexdigest()
 
+    # Keep the source document. Saved only once extraction succeeded and the
+    # confirmed-record guard passed, so rejected uploads leave nothing behind.
+    # Each upload gets its own folder: a re-upload of the same FY points the
+    # row at the new file and leaves the previous one in storage.
+    original_storage_path = _persist_original_upload(
+        repos,
+        _original_upload_path(deal_id, f"audited-financials/{uuid.uuid4()}", filename),
+        file_bytes,
+        filename,
+        file.content_type,
+    )
+
     # Attach deal FK and declaration_type; exclude non-column keys.
     # currency has a NOT NULL DEFAULT 'KES' (migration 014) — if Claude found
     # no currency marker anywhere (returns null, by design — never guesses),
@@ -2908,6 +2987,7 @@ async def upload_audited_financials(
         },
         "extraction_confidence": extraction_confidence,
         "sha256_hash": sha256_hash,
+        "original_storage_path": original_storage_path,
         # pds_audited_financials.extraction_method DEFAULTs to
         # 'pdfplumber_coordinate' (migration era when that was the only path).
         # Write the real method so Claude-extracted rows aren't mislabeled as
